@@ -211,7 +211,7 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
     process::run_checked(
         &toolchain.gdhealth,
-        &["--version".to_string()],
+        &["--help".to_string()],
         &context.root,
     )?;
     Ok(())
@@ -287,10 +287,12 @@ fn cargo_install(context: &ProjectContext, source: &Path, name: &str) -> Result<
     }
 
     let root = context.gdsuite_dir.join("tools").join(name);
+    let package_root = resolve_package_root(&source_root, name)?;
+
     let args = vec![
         "install".to_string(),
         "--path".to_string(),
-        source_root.display().to_string(),
+        package_root.display().to_string(),
         "--root".to_string(),
         root.display().to_string(),
     ];
@@ -303,6 +305,52 @@ fn cargo_install(context: &ProjectContext, source: &Path, name: &str) -> Result<
     }
 
     Err(anyhow!("cargo install did not produce {}", name))
+}
+
+fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
+    let manifest_path = source_root.join("Cargo.toml");
+    if !manifest_path.exists() {
+        return Ok(source_root.to_path_buf());
+    }
+
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest: toml::Value = toml::from_str(&text)
+        .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+
+    if manifest.get("package").is_some() {
+        return Ok(source_root.to_path_buf());
+    }
+
+    let members = manifest
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+        .ok_or_else(|| anyhow!("workspace at {} has no members", source_root.display()))?;
+
+    for member in members {
+        let member_path = member.as_str().ok_or_else(|| anyhow!("invalid workspace member"))?;
+        let candidate = source_root.join(member_path);
+        let member_manifest = candidate.join("Cargo.toml");
+        if !member_manifest.exists() {
+            continue;
+        }
+        let member_text = fs::read_to_string(&member_manifest)?;
+        let member_toml: toml::Value = toml::from_str(&member_text)?;
+        let package_name = member_toml
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str());
+        if package_name == Some(name) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(anyhow!(
+        "could not find package '{}' in workspace at {}",
+        name,
+        source_root.display()
+    ))
 }
 
 fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {

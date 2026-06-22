@@ -98,7 +98,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     print_version("godot", &godot, &["--version"])?;
     print_version("python", &toolchain.python, &["--version"])?;
     print_version("gdtest", &toolchain.gdtest, &["--version"])?;
-    print_version("gdhealth", &toolchain.gdhealth, &["--version"])?;
+    print_version("gdhealth", &toolchain.gdhealth, &["--help"])?;
 
     println!("status=ok");
     Ok(())
@@ -112,8 +112,6 @@ fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
     let mut cmd_args = Vec::new();
     if args.check {
         cmd_args.push("--check".to_string());
-    } else {
-        cmd_args.push("-w".to_string());
     }
     cmd_args.extend(files.iter().map(|path| path.display().to_string()));
     process::run_checked(&toolchain.gdformat, &cmd_args, &context.root)
@@ -321,14 +319,9 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
 fn lint_args(
     context: &ProjectContext,
     config: &GdsuiteConfig,
-    report: &str,
+    _report: &str,
 ) -> Result<Vec<String>> {
-    let mut args = vec![
-        "--max-line-length".to_string(),
-        config.lint.line_length.to_string(),
-        "--reporter".to_string(),
-        report.to_string(),
-    ];
+    let mut args = Vec::new();
     for file in fixers::discover_script_files(context, config)? {
         args.push(file.display().to_string());
     }
