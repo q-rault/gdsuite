@@ -1,0 +1,338 @@
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+use anyhow::{Context, Result, anyhow};
+
+use crate::{
+    config::{GdsuiteConfig, Manifest, Versions},
+    process,
+};
+
+pub const GD_DIR: &str = ".gdsuite";
+
+#[derive(Debug, Clone)]
+pub struct ProjectContext {
+    pub root: PathBuf,
+    pub gdsuite_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub config_path: PathBuf,
+    pub gdtest_config_path: PathBuf,
+    pub gdhealth_config_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub versions_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct Toolchain {
+    pub godot_exe: PathBuf,
+    pub python: PathBuf,
+    pub gdformat: PathBuf,
+    pub gdlint: PathBuf,
+    pub gdtest: PathBuf,
+    pub gdhealth: PathBuf,
+}
+
+impl ProjectContext {
+    pub fn new(root: PathBuf) -> Self {
+        let gdsuite_dir = root.join(GD_DIR);
+        let state_dir = gdsuite_dir.join("state");
+
+        Self {
+            config_path: root.join("gdsuite.toml"),
+            gdtest_config_path: root.join("gdtest.toml"),
+            gdhealth_config_path: root.join("gdhealth.toml"),
+            manifest_path: state_dir.join("manifest.json"),
+            versions_path: state_dir.join("versions.json"),
+            root,
+            gdsuite_dir,
+            state_dir,
+        }
+    }
+
+    pub fn ensure_dirs(&self) -> Result<()> {
+        fs::create_dir_all(self.gdsuite_dir.join("bin"))?;
+        fs::create_dir_all(self.gdsuite_dir.join("python"))?;
+        fs::create_dir_all(self.gdsuite_dir.join("tools"))?;
+        fs::create_dir_all(&self.state_dir)?;
+        Ok(())
+    }
+}
+
+pub fn load_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
+    GdsuiteConfig::load(&context.config_path)
+}
+
+pub fn load_manifest(context: &ProjectContext) -> Result<Manifest> {
+    Manifest::load(&context.manifest_path)
+}
+
+pub fn save_manifest(context: &ProjectContext, manifest: &Manifest) -> Result<()> {
+    manifest.write(&context.manifest_path)
+}
+
+pub fn save_versions(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
+    Versions {
+        gdtoolkit: config.tools.gdtoolkit.clone(),
+        gdtest_source: config.tools.gdtest_source.clone(),
+        gdhealth_source: config.tools.gdhealth_source.clone(),
+    }
+    .write(&context.versions_path)
+}
+
+pub fn resolve_godot(
+    context: &ProjectContext,
+    cli_override: Option<&Path>,
+    config: Option<&GdsuiteConfig>,
+) -> Result<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = cli_override {
+        candidates.push(path.to_path_buf());
+    }
+    if let Some(path) = env::var_os("GODOT_EXE") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Some(config) = config
+        && let Some(path) = &config.project.godot_exe
+    {
+        candidates.push(path.clone());
+    }
+    if let Ok(path) = which::which("godot") {
+        candidates.push(path);
+    }
+    if let Ok(path) = which::which("godot4") {
+        candidates.push(path);
+    }
+    candidates.push(PathBuf::from(r"C:\Users\me\tools\Godot.exe"));
+    candidates.push(PathBuf::from(r"C:\Program Files\Godot\Godot.exe"));
+    candidates.push(PathBuf::from(r"C:\Program Files\Godot_v4\Godot.exe"));
+
+    for candidate in candidates {
+        for path in process::candidate_paths(candidate) {
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "could not resolve Godot executable for {}",
+        context.root.display()
+    ))
+}
+
+pub fn resolve_toolchain(
+    context: &ProjectContext,
+    manifest: Option<&Manifest>,
+) -> Result<Toolchain> {
+    let manifest = manifest.cloned().unwrap_or_default();
+
+    Ok(Toolchain {
+        godot_exe: manifest
+            .godot_exe
+            .ok_or_else(|| anyhow!("missing Godot path in manifest"))?,
+        python: manifest
+            .python
+            .or_else(|| find_python_in_venv(context))
+            .ok_or_else(|| anyhow!("missing project Python in manifest"))?,
+        gdformat: manifest
+            .gdformat
+            .or_else(|| find_binary(context, &["gdformat"]))
+            .ok_or_else(|| anyhow!("missing gdformat in manifest"))?,
+        gdlint: manifest
+            .gdlint
+            .or_else(|| find_binary(context, &["gdlint"]))
+            .ok_or_else(|| anyhow!("missing gdlint in manifest"))?,
+        gdtest: manifest
+            .gdtest
+            .or_else(|| find_binary(context, &["gdtest"]))
+            .ok_or_else(|| anyhow!("missing gdtest in manifest"))?,
+        gdhealth: manifest
+            .gdhealth
+            .or_else(|| find_binary(context, &["gdhealth"]))
+            .ok_or_else(|| anyhow!("missing gdhealth in manifest"))?,
+    })
+}
+
+pub fn install_toolchain(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    godot_exe: &Path,
+) -> Result<Manifest> {
+    let python = ensure_venv(context)?;
+    install_gdtoolkit(&python, &config.tools.gdtoolkit, context)?;
+    let gdtest = cargo_install(context, &config.tools.gdtest_source, "gdtest")?;
+    let gdhealth = cargo_install(context, &config.tools.gdhealth_source, "gdhealth")?;
+    let gdformat =
+        find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
+    let gdlint =
+        find_binary(context, &["gdlint"]).ok_or_else(|| anyhow!("gdlint install missing"))?;
+
+    Ok(Manifest {
+        godot_exe: Some(godot_exe.to_path_buf()),
+        python: Some(python),
+        gdformat: Some(gdformat),
+        gdlint: Some(gdlint),
+        gdtest: Some(gdtest),
+        gdhealth: Some(gdhealth),
+    })
+}
+
+pub fn generate_external_configs(context: &ProjectContext) -> Result<()> {
+    write_if_missing(
+        &context.gdtest_config_path,
+        r#"project_path = "."
+test_dir = "test/"
+headless = true
+"#,
+    )?;
+    write_if_missing(
+        &context.gdhealth_config_path,
+        r#"[groups]
+gameplay = ["client/**/*.gd"]
+server = ["server/**/*.gd"]
+tests = ["test/**/*.gd"]
+"#,
+    )?;
+    Ok(())
+}
+
+pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Result<()> {
+    process::run_checked(
+        &toolchain.godot_exe,
+        &["--version".to_string()],
+        &context.root,
+    )?;
+    process::run_checked(&toolchain.python, &["--version".to_string()], &context.root)?;
+    process::run_checked(&toolchain.gdformat, &["--help".to_string()], &context.root)?;
+    process::run_checked(&toolchain.gdlint, &["--help".to_string()], &context.root)?;
+    process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
+    process::run_checked(
+        &toolchain.gdhealth,
+        &["--version".to_string()],
+        &context.root,
+    )?;
+    Ok(())
+}
+
+pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> {
+    let roots = [
+        context.gdsuite_dir.join("python").join("Scripts"),
+        context.gdsuite_dir.join("python").join("bin"),
+        context.gdsuite_dir.join("tools").join("gdtest").join("bin"),
+        context
+            .gdsuite_dir
+            .join("tools")
+            .join("gdhealth")
+            .join("bin"),
+        context.gdsuite_dir.join("bin"),
+    ];
+
+    for root in roots {
+        for name in names {
+            for candidate in process::candidate_paths(root.join(name)) {
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn ensure_venv(context: &ProjectContext) -> Result<PathBuf> {
+    if let Some(path) = find_python_in_venv(context) {
+        return Ok(path);
+    }
+
+    let python = which::which("python")
+        .or_else(|_| which::which("py"))
+        .context("python is required for setup")?;
+    process::run_checked(
+        &python,
+        &[
+            "-m".to_string(),
+            "venv".to_string(),
+            context.gdsuite_dir.join("python").display().to_string(),
+        ],
+        &context.root,
+    )?;
+
+    find_python_in_venv(context).ok_or_else(|| anyhow!("venv bootstrap did not produce python"))
+}
+
+fn install_gdtoolkit(python: &Path, version: &str, context: &ProjectContext) -> Result<()> {
+    let package = format!("gdtoolkit=={version}");
+    let args = vec![
+        "-m".to_string(),
+        "pip".to_string(),
+        "install".to_string(),
+        package,
+    ];
+    process::run_checked(python, &args, &context.root)?;
+    Ok(())
+}
+
+fn cargo_install(context: &ProjectContext, source: &Path, name: &str) -> Result<PathBuf> {
+    let cargo = which::which("cargo").context("cargo is required for setup")?;
+    let source_root = context.root.join(source);
+    if !source_root.exists() {
+        return Err(anyhow!(
+            "tool source does not exist: {}",
+            source_root.display()
+        ));
+    }
+
+    let root = context.gdsuite_dir.join("tools").join(name);
+    let args = vec![
+        "install".to_string(),
+        "--path".to_string(),
+        source_root.display().to_string(),
+        "--root".to_string(),
+        root.display().to_string(),
+    ];
+    process::run_checked(&cargo, &args, &context.root)?;
+
+    for candidate in process::candidate_paths(root.join("bin").join(name)) {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(anyhow!("cargo install did not produce {}", name))
+}
+
+fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
+    let bases = [
+        context
+            .gdsuite_dir
+            .join("python")
+            .join("Scripts")
+            .join("python"),
+        context
+            .gdsuite_dir
+            .join("python")
+            .join("bin")
+            .join("python"),
+    ];
+
+    for base in bases {
+        for path in process::candidate_paths(base) {
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
+}
+
+fn write_if_missing(path: &Path, contents: &str) -> Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
