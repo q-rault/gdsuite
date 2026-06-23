@@ -19,9 +19,12 @@ The baseline CI steps are:
 
 ```bash
 ./target/release/gdsuite check --report json
-./target/release/gdsuite test
+./target/release/gdsuite test --report json
 ./target/release/gdsuite health --report json
+./target/release/gdsuite report ci
 ```
+
+`gdsuite report ci` reads `reports/gdsuite/check.json`, `test.json`, and `health.json` and produces a final aggregated `reports/gdsuite/ci.json` artifact.
 
 ## Artifacts
 

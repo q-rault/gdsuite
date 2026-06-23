@@ -30,10 +30,10 @@ The suite-first workflow boundary is deliberate:
 - `gdsuite fmt [--check]` runs `gdformat` on discovered `.gd` files.
 - `gdsuite lint [--fix] [--unsafe-fixes] [--report text|json]` runs lint and suite-owned fixers.
 - `gdsuite typecheck` runs a Godot headless `load()` pass over discovered scripts.
-- `gdsuite test -- ...` forwards arguments to project-local `gdtest`.
+- `gdsuite test [--report text|json] -- ...` forwards arguments to project-local `gdtest` and can emit a suite report.
 - `gdsuite health [--report text|json] -- ...` forwards arguments to project-local `gdhealth` and can emit a suite report.
 - `gdsuite check [--profile <name>] [--report text|json]` runs the fast local gate by default and can use any configured suite profile, including the built-in `ci` profile.
-- `gdsuite report [latest|check|health]` prints the last saved JSON suite report artifact.
+- `gdsuite report [latest|check|test|health|ci]` prints a saved suite JSON report artifact, or aggregates the explicit CI artifacts into one final suite report.
 
 ## Workflow
 
@@ -49,8 +49,9 @@ CI should use explicit suite steps. A typical flow is:
 
 ```bash
 gdsuite check --report json
-gdsuite test
+gdsuite test --report json
 gdsuite health --report json
+gdsuite report ci
 ```
 
 Delegated commands are intentionally narrow:
@@ -64,7 +65,9 @@ Delegated commands are intentionally narrow:
 
 `gdlint` does not provide native JSON output. `gdsuite lint --report json` therefore emits a suite-owned JSON report derived from `gdlint` diagnostics, while `--report text` preserves the original text stream.
 
-`gdsuite check --report json` and `gdsuite health --report json` emit a suite-level report envelope and save artifacts under `reports/gdsuite/`.
+`gdsuite check --report json`, `gdsuite test --report json`, and `gdsuite health --report json` emit a suite-level report envelope and save artifacts under `reports/gdsuite/`.
+
+When CI runs those commands as separate steps, `gdsuite report ci` aggregates `check.json`, `test.json`, and `health.json` into a final `ci.json` suite report and refreshes `latest.json`.
 
 `gdsuite.toml` can set the default suite report mode:
 
@@ -74,7 +77,7 @@ default = "json"
 artifacts_dir = "reports/gdsuite"
 ```
 
-When this is set, `check`, `health`, and `lint` use the configured mode unless `--report` overrides it on the command line.
+When this is set, `check`, `test`, `health`, and `lint` use the configured mode unless `--report` overrides it on the command line.
 
 `gdsuite init` now writes these suite sections explicitly into `gdsuite.toml` by default instead of relying on hidden internal defaults.
 
@@ -99,7 +102,7 @@ A starter GitHub Actions workflow is available at [`.github/workflows/ci.yml`](.
 
 ```bash
 gdsuite check --report json
-gdsuite test
+gdsuite test --report json
 gdsuite health --report json
 ```
 

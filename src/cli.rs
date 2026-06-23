@@ -35,7 +35,7 @@ pub enum Commands {
         about = "Forward arguments to project-local gdtest",
         long_about = "Forward arguments to project-local gdtest.\n\nUse `gdsuite test` for normal suite-owned test execution. Use `gdsuite test -- ...` when you need direct gdtest flags or subcommands."
     )]
-    Test(ForwardArgs),
+    Test(ForwardReportArgs),
     #[command(
         about = "Forward arguments to project-local gdhealth",
         long_about = "Forward arguments to project-local gdhealth.\n\nUse `gdsuite health` for the standard suite-owned health entrypoint. Use `gdsuite health -- ...` when you need direct gdhealth subcommands or flags."
@@ -64,12 +64,6 @@ pub struct LintArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct ForwardArgs {
-    #[arg(last = true, action = ArgAction::Append)]
-    pub args: Vec<String>,
-}
-
-#[derive(Debug, Args)]
 pub struct ForwardReportArgs {
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
@@ -88,5 +82,6 @@ pub struct RunArgs {
 #[derive(Debug, Args)]
 pub struct ReportArgs {
     #[arg(default_value = "latest")]
+    #[arg(help = "Saved report name or `ci` to aggregate check/test/health artifacts")]
     pub name: String,
 }

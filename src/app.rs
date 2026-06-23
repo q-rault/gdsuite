@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs},
@@ -43,7 +43,7 @@ pub fn run() -> Result<()> {
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
         Commands::Typecheck => typecheck(&context),
-        Commands::Test(args) => test(&context, args.args),
+        Commands::Test(args) => test(&context, args),
         Commands::Health(args) => health(&context, args),
         Commands::Check(args) => check(&context, args),
         Commands::Report(args) => report(&context, args),
@@ -159,13 +159,27 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     Ok(())
 }
 
-fn test(context: &ProjectContext, forwarded: Vec<String>) -> Result<()> {
+fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
+    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
+    if report_mode == "json" {
+        let step = run_test_step_with_args(context, args.args)?;
+        let report = SuiteReport::from_steps("test", context, vec![step]);
+        print_and_store_report(context, &config, "test", &report)?;
+        if report.status == "failed" {
+            return Err(command_error(
+                EXIT_VALIDATION_ERROR,
+                "test failed".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+
     let toolchain = load_toolchain_or_error(context)?;
-    let mut args = if forwarded.is_empty() {
+    let mut args = if args.args.is_empty() {
         vec![config.commands.default_test_target]
     } else {
-        forwarded
+        args.args
     };
     if args.first().map(|value| value == "--").unwrap_or(false) {
         args.remove(0);
@@ -258,12 +272,18 @@ fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
 
 fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
+    if args.name == "ci" {
+        let report = aggregate_ci_report(context, &config)?;
+        print_and_store_report(context, &config, "ci", &report)?;
+        return Ok(());
+    }
+
     let path = report_path(context, &config, &args.name);
     if !path.exists() {
         return Err(command_error(
             EXIT_USAGE_ERROR,
             format!(
-                "report artifact not found at {}; run `gdsuite check --report json`, `gdsuite check --profile ci --report json`, or `gdsuite health --report json` first",
+                "report artifact not found at {}; run `gdsuite check --report json`, `gdsuite test --report json`, `gdsuite health --report json`, or `gdsuite report ci` first",
                 path.display()
             ),
         ));
@@ -273,6 +293,60 @@ fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
         .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))?;
     println!("{body}");
     Ok(())
+}
+
+fn aggregate_ci_report(context: &ProjectContext, config: &GdsuiteConfig) -> Result<SuiteReport> {
+    let mut reports = Vec::new();
+    for name in ["check", "test", "health"] {
+        reports.push(load_saved_suite_report(context, config, name)?);
+    }
+
+    let expected_root = context.root.display().to_string();
+    for report in &reports {
+        if report.project_root != expected_root {
+            return Err(command_error(
+                EXIT_USAGE_ERROR,
+                format!(
+                    "report `{}` was generated for {}; expected {}",
+                    report.command, report.project_root, expected_root
+                ),
+            ));
+        }
+    }
+
+    let steps = reports
+        .into_iter()
+        .flat_map(|report| report.steps)
+        .collect::<Vec<_>>();
+    Ok(SuiteReport::from_steps("ci", context, steps))
+}
+
+fn load_saved_suite_report(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    name: &str,
+) -> Result<SuiteReport> {
+    let path = report_path(context, config, name);
+    if !path.exists() {
+        return Err(command_error(
+            EXIT_USAGE_ERROR,
+            format!(
+                "missing {} report artifact at {}; run `gdsuite check --report json`, `gdsuite test --report json`, and `gdsuite health --report json` before `gdsuite report ci`",
+                name,
+                path.display()
+            ),
+        ));
+    }
+
+    let body = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read report {}", path.display()))
+        .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))?;
+    serde_json::from_str(&body).map_err(|error| {
+        command_error(
+            EXIT_USAGE_ERROR,
+            format!("failed to parse report {}: {}", path.display(), error),
+        )
+    })
 }
 
 fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
@@ -619,8 +693,18 @@ fn run_typecheck_step(context: &ProjectContext) -> Result<StepReport> {
 }
 
 fn run_test_step(context: &ProjectContext) -> Result<StepReport> {
+    run_test_step_with_args(context, Vec::new())
+}
+
+fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
     let started = Instant::now();
-    match test(context, Vec::new()) {
+    match test(
+        context,
+        ForwardReportArgs {
+            report: Some("text".to_string()),
+            args: forwarded,
+        },
+    ) {
         Ok(()) => Ok(StepReport::ok(
             "test",
             started.elapsed().as_millis(),
@@ -768,7 +852,7 @@ fn report_path(context: &ProjectContext, config: &GdsuiteConfig, name: &str) -> 
     dir.join(format!("{name}.json"))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SuiteReport {
     status: String,
     command: String,
@@ -796,7 +880,7 @@ impl SuiteReport {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StepReport {
     name: String,
     status: String,
@@ -841,7 +925,7 @@ impl StepReport {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactRef {
     name: String,
     path: String,

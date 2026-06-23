@@ -201,6 +201,25 @@ fn delegated_test_uses_default_target_without_forwarded_args() {
 }
 
 #[test]
+fn test_report_json_emits_suite_envelope_and_writes_artifact() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["test", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"test\""))
+        .stdout(predicate::str::contains("\"name\": \"test\""))
+        .stdout(predicate::str::contains("\"status\": \"ok\""));
+
+    assert!(fixture.root.join("reports/gdsuite/test.json").exists());
+    assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
 fn delegated_health_uses_default_subcommand_without_forwarded_args() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -468,6 +487,65 @@ fn report_reads_latest_saved_report() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"check\""));
+}
+
+#[test]
+fn report_ci_aggregates_explicit_suite_step_artifacts() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["test", "--report", "json"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["health", "--report", "json"])
+        .assert()
+        .success();
+
+    fixture
+        .cmd()
+        .args(["report", "ci"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"ci\""))
+        .stdout(predicate::str::contains("\"name\": \"fmt\""))
+        .stdout(predicate::str::contains("\"name\": \"test\""))
+        .stdout(predicate::str::contains("\"name\": \"health\""));
+
+    assert!(fixture.root.join("reports/gdsuite/ci.json").exists());
+    assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
+fn report_ci_fails_with_actionable_guidance_when_artifacts_are_missing() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success();
+
+    fixture
+        .cmd()
+        .args(["report", "ci"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "run `gdsuite check --report json`",
+        ))
+        .stderr(predicate::str::contains("before `gdsuite report ci`"));
 }
 
 #[test]

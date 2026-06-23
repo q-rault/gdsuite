@@ -48,12 +48,16 @@ jobs:
       - name: Run tests
         env:
           GODOT_EXE: godot
-        run: ./target/release/gdsuite test
+        run: ./target/release/gdsuite test --report json
 
       - name: Run health checks
         env:
           GODOT_EXE: godot
         run: ./target/release/gdsuite health --report json
+
+      - name: Aggregate CI suite report
+        if: always()
+        run: ./target/release/gdsuite report ci
 
       - name: Upload suite reports
         if: always()
