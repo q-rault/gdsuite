@@ -1,0 +1,29 @@
+---
+title: gdtest Overview
+description: Learn when to stay in gdsuite test and when to go deeper into direct gdtest concepts and references.
+---
+
+`gdtest` is the test engine inside the suite story. For most workflows, start with `gdsuite test`. That gives you the suite-owned entrypoint, reporting, and workflow framing.
+
+## Stay in `gdsuite test` when
+
+- you want the normal suite path for behavior validation
+- you want a suite report with `--report json`
+- you do not need product-specific flags yet
+
+## Go deeper into direct gdtest docs when
+
+- you need harness details
+- you need filtering, mocking, scene runner, or snapshot semantics
+- you are working directly on the test system rather than the suite workflow
+
+## Start here
+
+- [Why gdtest](/gdtest/why-gdtest)
+- [Installation](/gdtest/installation)
+- [Quickstart](/gdtest/quickstart)
+- [Writing Your First Test](/gdtest/guide-first-test)
+- [Mocking](/gdtest/mocking)
+- [Scene Runner](/gdtest/scene-runner)
+- [CLI Reference](/gdtest/cli-reference)
+- [Configuration](/gdtest/configuration)

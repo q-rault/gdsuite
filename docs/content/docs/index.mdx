@@ -1,0 +1,56 @@
+---
+title: What is GDSuite?
+description: Start here if you want one workflow surface for formatting, linting, tests, and architecture health in Godot.
+---
+
+GDSuite is the suite-owned entrypoint for a Godot project. It gives you one place to bootstrap local tooling, run the fast local gate, delegate into `gdtest` and `gdhealth` when needed, and collect reports in a consistent way.
+
+## Why this portal exists
+
+The suite now owns the main documentation home for three products:
+
+- `gdsuite` for workflow orchestration and config ownership
+- `gdtest` for test execution
+- `gdhealth` for architecture health checks
+
+That means you can start with the suite narrative, then go deeper into product-specific docs without leaving the same portal shell.
+
+## The normal path
+
+If you are new to the stack, the shortest useful path is:
+
+```bash
+gdsuite init
+gdsuite check
+gdsuite test
+gdsuite health
+```
+
+`gdsuite check` is the default local validation command. `gdsuite test` and `gdsuite health` are the delegated depth commands you add when the change justifies them.
+
+## What each product does
+
+### `gdsuite`
+
+Owns the project-local toolchain, the top-level `gdsuite.toml` contract, suite reports, and the main workflow framing.
+
+### `gdtest`
+
+Owns direct test execution. Use it through `gdsuite test` for normal suite workflows, then drop to deeper `gdtest` docs when you need harness, filtering, mocking, or scene-runner details.
+
+### `gdhealth`
+
+Owns codebase architecture health. Use it through `gdsuite health` for suite workflows, then go deeper when you need policy, reports, or architecture review recipes.
+
+## Read by outcome
+
+- Want the first successful run: [Quickstart](/quickstart)
+- Adopting an existing project: [Migrate an Existing Project](/migrate)
+- Understanding the local gate: [`gdsuite check`](/workflow-check)
+- Wiring CI correctly: [CI](/ci)
+- Understanding ownership split: [Config Overview](/config)
+- Going product-specific: [gdtest](/gdtest) and [gdhealth](/gdhealth)
+
+## Next step
+
+Next step: go to [Install](/install) if this is a new machine, or [Quickstart](/quickstart) if the toolchain is already available.

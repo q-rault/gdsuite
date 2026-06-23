@@ -1,0 +1,22 @@
+---
+title: Product Config Generation
+description: How gdsuite writes missing product configs, synchronizes suite invariants, and keeps direct product use viable.
+---
+
+The suite does not replace product configs. It generates missing files and synchronizes only the parts it must own for correctness.
+
+## What `init` does
+
+- writes missing `gdtest.toml`
+- writes missing `gdhealth.toml`
+- writes the top-level `gdsuite.toml`
+
+## What `migrate` adds
+
+- rewrites older suite config into the current contract
+- merges suite-owned invariants into existing product configs
+- rewrites obvious project docs and CI entrypoints toward suite commands
+
+## Next step
+
+Next step: compare the compatibility notes for [gdtest](/config/gdtest-compatibility) and [gdhealth](/config/gdhealth-compatibility).

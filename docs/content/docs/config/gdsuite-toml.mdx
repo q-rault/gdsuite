@@ -1,0 +1,31 @@
+---
+title: gdsuite.toml
+description: The suite-owned top-level config file for workflow, profiles, reports, and tool resolution.
+---
+
+`gdsuite.toml` is the canonical workflow file. It is where the suite decides which pipeline runs, where reports are written, and which tool paths or defaults should be used before delegated products take over.
+
+## Typical concerns in this file
+
+- tool source locations
+- command defaults
+- profile pipelines
+- report defaults and artifact directory
+- health enablement and suite-level fail threshold defaults
+
+## Minimal examples
+
+```toml
+[reports]
+default = "json"
+artifacts_dir = "reports/gdsuite"
+```
+
+```toml
+[profiles.local]
+pipeline = ["fmt", "lint", "typecheck"]
+```
+
+## Next step
+
+Next step: read [Profiles](/config/profiles) for the part of `gdsuite.toml` most teams customize first.

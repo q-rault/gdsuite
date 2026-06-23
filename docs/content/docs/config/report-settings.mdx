@@ -1,0 +1,20 @@
+---
+title: Reports
+description: Configure default report mode and artifact location without changing the command surface.
+---
+
+The suite can default to text or JSON output for report-capable commands.
+
+## Example
+
+```toml
+[reports]
+default = "json"
+artifacts_dir = "reports/gdsuite"
+```
+
+When this is set, `check`, `test`, `health`, and `lint` use the configured default unless `--report` overrides it on the command line.
+
+## Next step
+
+Next step: read [Reports](/reports) for the workflow meaning of these artifacts.

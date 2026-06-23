@@ -1,0 +1,50 @@
+---
+title: Troubleshooting
+description: Common setup and workflow failures, with the quickest path to the right diagnostic command.
+---
+
+## Run `doctor` first
+
+If the suite feels broken, start with:
+
+```bash
+gdsuite doctor
+```
+
+That prints resolved paths, config locations, setup state, and warnings about product config drift.
+
+## Common failure modes
+
+### `run gdsuite init first`
+
+The project was never bootstrapped. Run:
+
+```bash
+gdsuite init
+```
+
+### Product config drift warnings
+
+`doctor` warns when `gdtest.toml` or `gdhealth.toml` drift from suite-owned invariants. The preferred repair path is:
+
+```bash
+gdsuite migrate
+```
+
+Use `gdsuite setup --sync-product-configs` only when you specifically want the lower-level repair/bootstrap flow.
+
+### CI aggregation fails
+
+`gdsuite report ci` needs existing JSON artifacts from:
+
+- `gdsuite check --report json`
+- `gdsuite test --report json`
+- `gdsuite health --report json`
+
+### Health seems to ignore config exclusions
+
+Remember that `gdsuite health` writes and uses a suite overlay for `gdhealth.toml` so suite-generated state does not leak into analysis.
+
+## Next step
+
+Next step: go to [Install](/install), [Migrate an Existing Project](/migrate), or [CI](/ci) depending on where the failure happened.

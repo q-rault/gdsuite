@@ -37,6 +37,12 @@ pub struct Toolchain {
     pub gdhealth: PathBuf,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct AddonInstallReport {
+    pub installed_files: usize,
+    pub skipped_modified: Vec<PathBuf>,
+}
+
 impl ProjectContext {
     pub fn new(root: PathBuf) -> Self {
         let gdsuite_dir = root.join(GD_DIR);
@@ -481,6 +487,8 @@ pub fn merged_gdtest_config(
         "coverage_exclude".to_string(),
         string_array_value(&config.gdtest.coverage_exclude),
     );
+    table.remove("editor_plugin_dir");
+    table.remove("install_editor");
 
     let profile_table = table
         .entry("profile")
@@ -921,6 +929,12 @@ fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestCo
     if let Some(harness) = value.get("harness").and_then(|value| value.as_str()) {
         config.harness = harness.to_string();
     }
+    if let Some(editor_plugin_dir) = value.get("editor_plugin_dir").and_then(|value| value.as_str()) {
+        config.editor_plugin_dir = editor_plugin_dir.to_string();
+    }
+    if let Some(install_editor) = value.get("install_editor").and_then(|value| value.as_bool()) {
+        config.install_editor = install_editor;
+    }
     if let Some(patterns) = array_of_strings(value.get("patterns")) {
         config.patterns = patterns;
     }
@@ -1024,4 +1038,143 @@ fn array_of_strings(value: Option<&toml::Value>) -> Option<Vec<String>> {
 
 fn usize_value(value: Option<&toml::Value>) -> Option<usize> {
     value.and_then(|value| value.as_integer()).map(|value| value as usize)
+}
+
+pub fn install_gdtest_addons(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<AddonInstallReport> {
+    let source_root = context.root.join(&config.tools.gdtest_source);
+    let runtime_source = source_root.join("addons").join("gdtest");
+    if !runtime_source.exists() {
+        return Err(anyhow!(
+            "gdtest runtime addon source missing at {}",
+            runtime_source.display()
+        ));
+    }
+
+    let mut report = AddonInstallReport::default();
+    let runtime_target_dir = harness_parent_dir(&config.gdtest.harness);
+    let runtime_res_dir = res_dir_from_rel_path(&runtime_target_dir);
+    install_addon_dir(
+        &runtime_source,
+        &context.root.join(&runtime_target_dir),
+        &mut report,
+        |relative, contents| rewrite_runtime_asset(relative, contents, &runtime_res_dir),
+    )?;
+
+    if config.gdtest.install_editor {
+        let editor_source = source_root.join("addons").join("gdtest_editor");
+        if !editor_source.exists() {
+            return Err(anyhow!(
+                "gdtest editor addon source missing at {}",
+                editor_source.display()
+            ));
+        }
+        let editor_res_dir = res_dir_from_rel_path(Path::new(&config.gdtest.editor_plugin_dir));
+        install_addon_dir(
+            &editor_source,
+            &context.root.join(&config.gdtest.editor_plugin_dir),
+            &mut report,
+            |relative, contents| rewrite_editor_asset(relative, contents, &editor_res_dir),
+        )?;
+    }
+
+    Ok(report)
+}
+
+fn install_addon_dir(
+    source_dir: &Path,
+    target_dir: &Path,
+    report: &mut AddonInstallReport,
+    rewrite: impl Fn(&Path, &str) -> String + Copy,
+) -> Result<()> {
+    for entry in fs::read_dir(source_dir)
+        .with_context(|| format!("failed to read addon source {}", source_dir.display()))?
+    {
+        let entry = entry?;
+        let source_path = entry.path();
+        let relative = source_path.strip_prefix(source_dir).unwrap();
+        let target_path = target_dir.join(relative);
+
+        if entry.file_type()?.is_dir() {
+            fs::create_dir_all(&target_path)
+                .with_context(|| format!("failed to create {}", target_path.display()))?;
+            install_addon_dir(&source_path, &target_path, report, rewrite)?;
+            continue;
+        }
+
+        let contents = fs::read_to_string(&source_path)
+            .with_context(|| format!("failed to read {}", source_path.display()))?;
+        let rewritten = rewrite(relative, &contents);
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+
+        if target_path.exists() {
+            let current = fs::read_to_string(&target_path)
+                .with_context(|| format!("failed to read {}", target_path.display()))?;
+            if current == rewritten {
+                continue;
+            }
+            report.skipped_modified.push(target_path);
+            continue;
+        }
+
+        fs::write(&target_path, rewritten)
+            .with_context(|| format!("failed to write {}", target_path.display()))?;
+        report.installed_files += 1;
+    }
+
+    Ok(())
+}
+
+fn rewrite_runtime_asset(relative: &Path, contents: &str, runtime_res_dir: &str) -> String {
+    let runtime_prefix = join_res_path(runtime_res_dir, "gdunit4_chain.gd");
+    let compat_prefix = join_res_path(runtime_res_dir, "gdunit4_compat.gd");
+    match relative.to_string_lossy().replace('\\', "/").as_str() {
+        "gdtest_worker.gd" => contents
+            .replace("res://addons/gdtest/gdunit4_chain.gd", &runtime_prefix)
+            .replace("res://addons/gdtest/gdunit4_compat.gd", &compat_prefix),
+        "gdunit4_compat.gd" => {
+            contents.replace("res://addons/gdtest/gdunit4_chain.gd", &runtime_prefix)
+        }
+        _ => contents.to_string(),
+    }
+}
+
+fn rewrite_editor_asset(relative: &Path, contents: &str, editor_res_dir: &str) -> String {
+    match relative.to_string_lossy().replace('\\', "/").as_str() {
+        "plugin.gd" => contents.replace(
+            "res://addons/gdtest_editor/test_panel.gd",
+            &join_res_path(editor_res_dir, "test_panel.gd"),
+        ),
+        _ => contents.to_string(),
+    }
+}
+
+fn harness_parent_dir(harness: &str) -> PathBuf {
+    Path::new(harness)
+        .parent()
+        .map(Path::to_path_buf)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn res_dir_from_rel_path(path: &Path) -> String {
+    let normalized = path.display().to_string().replace('\\', "/");
+    if normalized == "." || normalized.is_empty() {
+        "res://".to_string()
+    } else {
+        format!("res://{}", normalized.trim_end_matches('/'))
+    }
+}
+
+fn join_res_path(base: &str, file: &str) -> String {
+    if base.ends_with('/') {
+        format!("{base}{file}")
+    } else {
+        format!("{base}/{file}")
+    }
 }

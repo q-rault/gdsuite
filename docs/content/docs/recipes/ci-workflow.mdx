@@ -1,0 +1,13 @@
+---
+title: CI workflow
+description: The explicit suite CI sequence that produces individual artifacts plus a final aggregate report.
+---
+
+```bash
+gdsuite check --report json
+gdsuite test --report json
+gdsuite health --report json
+gdsuite report ci
+```
+
+This is the current supported CI model. Do not document a separate `gdsuite ci` command.

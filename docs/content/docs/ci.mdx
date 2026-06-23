@@ -1,0 +1,66 @@
+---
+title: CI
+description: Compose the suite's real CI flow using explicit check, test, health, and report aggregation steps.
+---
+
+## What this page is for
+
+This page documents the current CI workflow that actually exists in this repo.
+
+## When you should use this
+
+Use this page when creating or fixing CI, when you need machine-readable artifacts, or when old docs still imply a standalone `gdsuite ci` command.
+
+## What you need before starting
+
+- A project already bootstrapped with `gdsuite`
+- CI runners that can build Rust tooling
+- Python available for `gdtoolkit`
+- A resolvable Godot executable on the runner
+
+## Step-by-step instructions
+
+1. Run the suite gate with JSON output.
+
+```bash
+gdsuite check --report json
+```
+
+2. Run delegated tests with JSON output.
+
+```bash
+gdsuite test --report json
+```
+
+3. Run delegated health with JSON output.
+
+```bash
+gdsuite health --report json
+```
+
+4. Aggregate the final CI report.
+
+```bash
+gdsuite report ci
+```
+
+## What success looks like
+
+Success means CI produced:
+
+- `reports/gdsuite/check.json`
+- `reports/gdsuite/test.json`
+- `reports/gdsuite/health.json`
+- `reports/gdsuite/ci.json`
+
+The final aggregated report also refreshes `latest.json`.
+
+## Common mistakes
+
+- Documenting or calling a nonexistent `gdsuite ci` command
+- Running only `check --profile ci` when the pipeline still expects separate `test.json` and `health.json`
+- Forgetting to persist `reports/code-health/` when raw `gdhealth` artifacts matter
+
+## Where to go next
+
+Next step: use [CI Workflow](/recipes/ci-workflow) for a recipe view, or [Report JSON Format](/reference/report-json-format) if you need to consume the artifacts programmatically.

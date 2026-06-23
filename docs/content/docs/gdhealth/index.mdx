@@ -1,0 +1,29 @@
+---
+title: gdhealth Overview
+description: Learn why architecture health is a first-class suite workflow and when to go deeper into gdhealth itself.
+---
+
+`gdhealth` is the architecture health engine inside the suite story. For normal workflows, start with `gdsuite health`. That keeps the command naming, report handling, and config overlay behavior consistent with the rest of the suite.
+
+## Stay in `gdsuite health` when
+
+- you want the normal suite health run
+- you want a suite report with `--report json`
+- you care about CI-friendly workflow framing first
+
+## Go deeper into direct gdhealth docs when
+
+- you need report interpretation details
+- you need configuration depth for groups, thresholds, or policy
+- you are doing an architecture review rather than a normal suite pass
+
+## Start here
+
+- [Why gdhealth](/gdhealth/why-gdhealth)
+- [Installation](/gdhealth/installation)
+- [Quickstart](/gdhealth/quickstart)
+- [Interpreting Reports](/gdhealth/interpreting-reports)
+- [CI Recipe](/gdhealth/recipe-ci)
+- [Architecture Review Recipe](/gdhealth/recipe-architecture-review)
+- [CLI Reference](/gdhealth/cli-reference)
+- [Configuration](/gdhealth/configuration)

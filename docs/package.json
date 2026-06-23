@@ -1,0 +1,30 @@
+{
+  "name": "gdsuite-docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "sync-content": "node --import tsx ./lib/docs/import-product-docs.ts",
+    "build": "npm run sync-content && next build",
+    "dev": "npm run sync-content && next dev --turbopack",
+    "start": "next start",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "fumadocs-core": "^15",
+    "fumadocs-mdx": "^11",
+    "fumadocs-ui": "^15",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.3",
+    "typescript": "^5"
+  }
+}

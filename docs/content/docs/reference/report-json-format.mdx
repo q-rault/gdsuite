@@ -1,0 +1,21 @@
+---
+title: Report JSON format
+description: High-level structure of the suite report envelope and how it relates to delegated product output.
+---
+
+The suite writes a stable envelope for commands like `check`, `test`, and `health`. That envelope is different from raw delegated tool output.
+
+## Typical report names
+
+- `check.json`
+- `test.json`
+- `health.json`
+- `ci.json`
+- `latest.json`
+
+## Use it for
+
+- CI aggregation
+- dashboards
+- machine-readable command summaries
+- lightweight scripting over suite workflow results

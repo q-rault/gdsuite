@@ -1,0 +1,52 @@
+---
+title: gdsuite check
+description: Understand the suite's fast local gate, what it runs, and why it does not automatically become a full CI pipeline.
+---
+
+## What this page is for
+
+This page explains the purpose of `gdsuite check`, the suite's default local validation command.
+
+## When you should use this
+
+Use this page when you want fast feedback during normal development or when you need to understand why `check` behaves differently from `test` and `health`.
+
+## What you need before starting
+
+- A bootstrapped project
+- Resolved local tooling from `gdsuite init` or `gdsuite setup`
+
+## Step-by-step instructions
+
+1. Run the default local gate.
+
+```bash
+gdsuite check
+```
+
+2. If you need a different pipeline, choose a profile.
+
+```bash
+gdsuite check --profile ci
+gdsuite check --profile strict
+```
+
+3. If CI or automation needs a machine-readable envelope, ask for JSON explicitly.
+
+```bash
+gdsuite check --report json
+```
+
+## What success looks like
+
+A successful `check` run means the configured pipeline for that profile passed. By default, the built-in `local` profile is a fast static gate centered on formatting, linting, and type loading.
+
+## Common mistakes
+
+- Assuming `gdsuite check` always runs tests and health checks
+- Forgetting that profiles change the pipeline shape
+- Treating `check --profile ci` as a replacement for explicit CI artifacts when you still want `test.json` and `health.json`
+
+## Where to go next
+
+Next step: read [CI](/ci) for explicit pipeline composition, or [Profiles](/config/profiles) if you need to customize the pipeline.

@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,14 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     tooling::save_manifest(context, &manifest)?;
     tooling::save_versions(context, &config)?;
-    run_gdtest_init(context, &manifest)?;
+    let addon_report = tooling::install_gdtest_addons(context, &config)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    for skipped in addon_report.skipped_modified {
+        println!(
+            "warning=gdtest addon install skipped modified file {}",
+            skipped.display()
+        );
+    }
     let toolchain = tooling::resolve_toolchain(context, Some(&manifest))
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
@@ -616,16 +623,6 @@ fn parse_lint_finding(line: &str) -> Option<JsonLintFinding> {
         message: message.to_string(),
         rule: parsed_rule.map(|(_, value)| value.to_string()),
     })
-}
-
-fn run_gdtest_init(context: &ProjectContext, manifest: &Manifest) -> Result<()> {
-    let gdtest = manifest
-        .gdtest
-        .as_ref()
-        .ok_or_else(|| anyhow!("missing gdtest path in manifest"))?;
-    let args = vec!["init".to_string()];
-    process::run_checked(gdtest, &args, &context.root)?;
-    Ok(())
 }
 
 fn print_version(name: &str, path: &Path, args: &[&str]) -> Result<()> {

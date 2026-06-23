@@ -1,0 +1,25 @@
+---
+title: Config Overview
+description: Understand which config belongs to the suite, which belongs to each delegated product, and where drift warnings come from.
+---
+
+`gdsuite.toml` is the suite-owned top-level contract. `gdtest.toml` and `gdhealth.toml` remain real product configs, but the suite synchronizes a narrow set of invariants into them so the workflow stays coherent.
+
+## Ownership split
+
+- Suite-owned: the workflow contract in `gdsuite.toml`, suite report paths, local toolchain state, and the product config invariants required for suite correctness
+- Product-owned: direct `gdtest` harness and runtime knobs, direct `gdhealth` groups and policy thresholds, and deeper product-only behavior
+
+## What changes the suite writes
+
+- `gdsuite init` writes missing config files
+- `gdsuite migrate` adopts an existing repo into the current contract
+- `gdsuite doctor` warns when existing product configs drift from suite-owned invariants
+
+## Where to look next
+
+- [gdsuite.toml](/config/gdsuite-toml)
+- [Profiles](/config/profiles)
+- [Product Config Generation](/config/product-config-generation)
+- [gdtest.toml compatibility](/config/gdtest-compatibility)
+- [gdhealth.toml compatibility](/config/gdhealth-compatibility)

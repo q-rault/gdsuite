@@ -1,0 +1,25 @@
+{
+  "title": "GDSuite Docs",
+  "pages": [
+    "index",
+    "---Guide---",
+    "install",
+    "quickstart",
+    "migrate",
+    "workflow-check",
+    "workflow-test",
+    "workflow-health",
+    "ci",
+    "reports",
+    "troubleshooting",
+    "---Config---",
+    "config",
+    "---Products---",
+    "gdtest",
+    "gdhealth",
+    "---Recipes---",
+    "recipes",
+    "---Reference---",
+    "reference"
+  ]
+}

@@ -123,6 +123,10 @@ pub struct GdtestConfig {
     pub display_mode: String,
     #[serde(default = "default_gdtest_harness")]
     pub harness: String,
+    #[serde(default = "default_gdtest_editor_plugin_dir")]
+    pub editor_plugin_dir: String,
+    #[serde(default = "default_gdtest_install_editor")]
+    pub install_editor: bool,
     #[serde(default = "default_gdtest_patterns")]
     pub patterns: Vec<String>,
     #[serde(default = "default_exclude")]
@@ -326,6 +330,8 @@ impl Default for GdtestConfig {
         Self {
             display_mode: default_gdtest_display_mode(),
             harness: default_gdtest_harness(),
+            editor_plugin_dir: default_gdtest_editor_plugin_dir(),
+            install_editor: default_gdtest_install_editor(),
             patterns: default_gdtest_patterns(),
             coverage_exclude: default_exclude(),
             profile: default_gdtest_profiles(),
@@ -585,6 +591,14 @@ fn default_gdtest_harness() -> String {
     "addons/gdtest/gdtest_worker.gd".to_string()
 }
 
+fn default_gdtest_editor_plugin_dir() -> String {
+    "addons/gdtest_editor".to_string()
+}
+
+fn default_gdtest_install_editor() -> bool {
+    true
+}
+
 fn default_gdtest_patterns() -> Vec<String> {
     vec!["test/**/*.gd".to_string(), "**/*.test.gd".to_string()]
 }
@@ -684,6 +698,8 @@ bundle_dir = "reports/code-health"
 [gdtest]
 display_mode = "headless"
 harness = "addons/gdtest/gdtest_worker.gd"
+editor_plugin_dir = "addons/gdtest_editor"
+install_editor = true
 patterns = ["test/**/*.gd", "**/*.test.gd"]
 coverage_exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 
@@ -788,6 +804,8 @@ bundle_dir = "{}"
 [gdtest]
 display_mode = "{}"
 harness = "{}"
+editor_plugin_dir = "{}"
+install_editor = {}
 patterns = {}
 coverage_exclude = {}
 "#,
@@ -799,6 +817,8 @@ coverage_exclude = {}
         escape_path(&config.health.bundle_dir),
         escape_string(&config.gdtest.display_mode),
         escape_string(&config.gdtest.harness),
+        escape_string(&config.gdtest.editor_plugin_dir),
+        config.gdtest.install_editor,
         render_string_array(&config.gdtest.patterns),
         render_string_array(&config.gdtest.coverage_exclude),
     ));

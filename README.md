@@ -1,152 +1,22 @@
 # gdsuite
 
-`gdsuite` is the platform entrypoint for a project-owned Godot developer stack.
-It installs tooling under `.gdsuite/`, generates product configs, and gives a single workflow surface for:
+`gdsuite` is the suite-owned workflow entrypoint for Godot projects. It installs local tooling, owns the top-level config contract, and coordinates `gdtoolkit`, `gdtest`, and `gdhealth`.
 
-- `gdtoolkit` for `gdformat` and `gdlint`
-- `gdtest` for tests
-- `gdhealth` for architectural health checks
+The primary user documentation now lives in the local docs portal under [`docs/`](docs/). That portal is intended to be the main docs home for `gdsuite`, `gdtest`, and `gdhealth`.
 
-The intended default flow is:
+Common commands:
 
 ```bash
 gdsuite init
 gdsuite check
 gdsuite test
 gdsuite health
-```
-
-The suite-first workflow boundary is deliberate:
-
-- `gdsuite check` is the default local validation command.
-- CI should compose explicit suite steps instead of relying on a separate `ci` command.
-- `gdsuite test` and `gdsuite health` are delegated product entrypoints when you need direct subsystem control.
-- `gdsuite migrate` is the canonical path for bringing an existing repo onto the suite-first config contract.
-
-## Commands
-
-- `gdsuite init` bootstraps the local platform state and is the recommended first command.
-- `gdsuite migrate` adopts an existing repo into the suite-first config model, syncing suite-owned config invariants and rewriting obvious `gdtest` / `gdhealth health` entrypoints in docs and CI.
-- `gdsuite setup [--sync-product-configs]` installs the local toolchain, writes missing config files, and can merge safe suite-owned defaults into existing product configs.
-- `gdsuite doctor` prints resolved tool paths, versions, setup status, and warnings for stale product config drift.
-- `gdsuite fmt [--check]` runs `gdformat` on discovered `.gd` files.
-- `gdsuite lint [--fix] [--unsafe-fixes] [--report text|json]` runs lint and suite-owned fixers.
-- `gdsuite typecheck` runs a Godot headless `load()` pass over discovered scripts.
-- `gdsuite test [--report text|json] -- ...` forwards arguments to project-local `gdtest` and can emit a suite report.
-- `gdsuite health [--report text|json] -- ...` forwards arguments to project-local `gdhealth` and can emit a suite report.
-- `gdsuite check [--profile <name>] [--report text|json]` runs the fast local gate by default and can use any configured suite profile, including the built-in `ci` profile.
-- `gdsuite report [latest|check|test|health|ci]` prints a saved suite JSON report artifact, or aggregates the explicit CI artifacts into one final suite report.
-
-## Workflow
-
-Local development should usually use `gdsuite check` first and only add tests or health checks when the change justifies them:
-
-```bash
-gdsuite check
-gdsuite test
-gdsuite health
-```
-
-CI should use explicit suite steps. A typical flow is:
-
-```bash
-gdsuite check --report json
-gdsuite test --report json
-gdsuite health --report json
 gdsuite report ci
 ```
 
-Delegated commands are intentionally narrow:
-
-- `gdsuite test` defaults to the configured `gdtest` target and is the right entrypoint for behavior validation.
-- `gdsuite test -- --filter combat` is for direct `gdtest` filtering or advanced flags.
-- `gdsuite health` defaults to `gdhealth health` and preserves `gdhealth` artifact output.
-- `gdsuite health -- --format json` or other forwarded arguments are for direct `gdhealth` usage beyond the suite default.
-
-## Reporting
-
-`gdlint` does not provide native JSON output. `gdsuite lint --report json` therefore emits a suite-owned JSON report derived from `gdlint` diagnostics, while `--report text` preserves the original text stream.
-
-`gdsuite check --report json`, `gdsuite test --report json`, and `gdsuite health --report json` emit a suite-level report envelope and save artifacts under `reports/gdsuite/`.
-
-When CI runs those commands as separate steps, `gdsuite report ci` aggregates `check.json`, `test.json`, and `health.json` into a final `ci.json` suite report and refreshes `latest.json`.
-
-`gdsuite.toml` can set the default suite report mode:
-
-```toml
-[reports]
-default = "json"
-artifacts_dir = "reports/gdsuite"
-```
-
-When this is set, `check`, `test`, `health`, and `lint` use the configured mode unless `--report` overrides it on the command line.
-
-`gdsuite init` now writes these suite sections explicitly into `gdsuite.toml` by default instead of relying on hidden internal defaults.
-
-## Profiles
-
-`gdsuite.toml` can define named suite pipelines. Built-in defaults are available even when omitted from the file:
-
-```toml
-[profiles.local]
-pipeline = ["fmt", "lint", "typecheck"]
-
-[profiles.strict]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-health_fail_on = "warning"
-```
-
-The built-in `ci` profile also exists with `["fmt", "lint", "typecheck", "test", "health"]` and uses the default `[health].fail_on` threshold. `strict` overrides the health threshold to `warning`. `gdsuite check` defaults to the `local` profile. Use `--profile ci`, `--profile strict`, or another configured profile to override the pipeline for a single run.
-
-## CI Template
-
-A starter GitHub Actions workflow is available at [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It installs Rust and Python, bootstraps the local suite toolchain, and runs explicit suite steps:
-
-```bash
-gdsuite check --report json
-gdsuite test --report json
-gdsuite health --report json
-```
-
-Additional workflow notes live in [`docs/ci-recipes.md`](docs/ci-recipes.md).
-
-## Product Configs
-
-`gdsuite init` generates plain product configs when they are missing. `gdsuite migrate` goes further and rewrites existing configs into the current suite contract.
-
-The intended ownership split is:
-
-- suite-owned: `.gdsuite/**` and report-path excludes, `gdtest` CI profile wiring, suite report artifact locations, and the top-level `gdsuite.toml` pipeline/report contract.
-- product-owned: `gdhealth` groups and policy thresholds, `gdtest` advanced harness/timeouts/filtering, and any direct subsystem-only knobs.
-
-Generated or migrated product configs therefore keep product-specific sections but sync suite-owned invariants:
-
-- `gdtest.toml` gets suite-aligned test discovery patterns and a `profile.ci` reporter default.
-- `gdhealth.toml` gets suite-aligned discovery include/exclude rules and logical file groups.
-
-Those files remain ordinary `gdtest` and `gdhealth` configs. Users can run either product directly without `gdsuite`, and `gdsuite` will not overwrite an existing product config.
-
-When an existing product config drifts from those suite-owned invariants, `gdsuite doctor` warns about it. `gdsuite migrate` is the preferred repair path, while `gdsuite setup --sync-product-configs` remains the lower-level sync operation during setup/repair flows.
-
-`gdsuite health` still applies a runtime overlay for `gdhealth.toml` so generated suite files do not leak into health analysis even before the drift is persisted.
-
-## Validation
-
-Local verification:
+Local validation for the Rust CLI remains:
 
 ```bash
 cargo fmt
 cargo test
-```
-
-Real-project validation against `../example-game`:
-
-```bash
-bash scripts/validate-example-game.sh
-```
-
-On Windows without Git Bash:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\validate-example-game.ps1
 ```

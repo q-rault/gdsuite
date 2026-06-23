@@ -25,6 +25,8 @@ fn setup_generates_project_local_toolchain_and_configs() {
     assert!(fixture.root.join("gdsuite.toml").exists());
     assert!(fixture.root.join("gdtest.toml").exists());
     assert!(fixture.root.join("gdhealth.toml").exists());
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+    assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 }
 
 #[test]
@@ -45,6 +47,8 @@ fn init_generates_project_local_toolchain_and_configs() {
     assert!(fixture.root.join("gdsuite.toml").exists());
     assert!(fixture.root.join("gdtest.toml").exists());
     assert!(fixture.root.join("gdhealth.toml").exists());
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+    assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
     assert!(config.contains("[profiles.local]"));
@@ -779,6 +783,54 @@ fn setup_is_rerunnable_with_partial_state() {
 }
 
 #[test]
+fn init_is_safe_when_existing_gdtest_addon_files_are_modified() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::create_dir_all(fixture.root.join("addons/gdtest")).unwrap();
+    fs::write(
+        fixture.root.join("addons/gdtest/README.md"),
+        "locally modified addon readme\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("init").assert().success().stdout(predicate::str::contains(
+        "warning=gdtest addon install skipped modified file",
+    ));
+
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("addons/gdtest/README.md")).unwrap(),
+        "locally modified addon readme\n"
+    );
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+}
+
+#[test]
+fn init_installs_gdtest_addon_into_custom_harness_directory() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.default_gdsuite_config().replace(
+            "harness = \"addons/gdtest/gdtest_worker.gd\"",
+            "harness = \"vendor/gdtest/gdtest_worker.gd\"",
+        ),
+    )
+    .unwrap();
+
+    fixture.cmd().arg("init").assert().success();
+
+    assert!(fixture.root.join("vendor/gdtest/gdtest_worker.gd").exists());
+    let worker = fs::read_to_string(fixture.root.join("vendor/gdtest/gdtest_worker.gd")).unwrap();
+    assert!(worker.contains("res://vendor/gdtest/gdunit4_chain.gd"));
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    assert!(gdtest.contains("harness = \"vendor/gdtest/gdtest_worker.gd\""));
+}
+
+#[test]
 fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_config() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -966,7 +1018,34 @@ impl Fixture {
     }
 
     fn seed_tool_sources(&self) {
-        fs::create_dir_all(self.root.join("../gdtest")).unwrap();
+        let gdtest_root = self.root.join("../gdtest");
+        fs::create_dir_all(gdtest_root.join("addons/gdtest")).unwrap();
+        fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
+            "load(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+        )
+        .unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest/gdunit4_compat.gd"),
+            "const GDUNIT4_CHAIN := preload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+        )
+        .unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/gdunit4_chain.gd"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/gdt.gd"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/gd_test.gd"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/scene_runner.gd"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/README.md"), "runtime readme\n").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest/LICENSE"), "license\n").unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest_editor/plugin.gd"),
+            "_panel = preload(\"res://addons/gdtest_editor/test_panel.gd\").new()\n",
+        )
+        .unwrap();
+        fs::write(gdtest_root.join("addons/gdtest_editor/test_panel.gd"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest_editor/plugin.cfg"), "").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest_editor/README.md"), "editor readme\n").unwrap();
+        fs::write(gdtest_root.join("addons/gdtest_editor/LICENSE"), "license\n").unwrap();
         fs::create_dir_all(self.root.join("../gdhealth/tools/gdhealth")).unwrap();
     }
 
@@ -1159,6 +1238,8 @@ bundle_dir = "reports/code-health"
 [gdtest]
 display_mode = "headless"
 harness = "addons/gdtest/gdtest_worker.gd"
+editor_plugin_dir = "addons/gdtest_editor"
+install_editor = true
 patterns = ["test/**/*.gd", "**/*.test.gd"]
 coverage_exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 

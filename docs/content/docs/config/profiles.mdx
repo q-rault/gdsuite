@@ -1,0 +1,32 @@
+---
+title: Profiles
+description: Named suite pipelines that decide which steps run under gdsuite check.
+---
+
+Profiles let `gdsuite check` mean different things in different contexts without changing the command name.
+
+## Built-in defaults
+
+- `local` -> `fmt`, `lint`, `typecheck`
+- `ci` -> `fmt`, `lint`, `typecheck`, `test`, `health`
+- `strict` -> `fmt`, `lint`, `typecheck`, `test`, `health`, with health enforcement tightened to `warning`
+
+## Example
+
+```toml
+[profiles.strict]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+health_fail_on = "warning"
+```
+
+## Important behavior
+
+`gdsuite check` defaults to `local`. Override it with:
+
+```bash
+gdsuite check --profile ci
+```
+
+## Next step
+
+Next step: read [CI](/ci) for the explicit pipeline shape you should document in automation.

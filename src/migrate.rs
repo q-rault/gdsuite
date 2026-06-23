@@ -208,7 +208,15 @@ fn rewrite_globbed_files(context: &ProjectContext, patterns: &[&str]) -> Result<
         let path = entry.path();
         let original = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let updated = rewrite_suite_entrypoints(&original);
+        let updated = if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            rewrite_markdown_entrypoints(&original)
+        } else {
+            rewrite_command_lines(&original)
+        };
         if updated != original {
             fs::write(path, updated)
                 .with_context(|| format!("failed to write {}", path.display()))?;
@@ -218,53 +226,88 @@ fn rewrite_globbed_files(context: &ProjectContext, patterns: &[&str]) -> Result<
     Ok(())
 }
 
-fn rewrite_suite_entrypoints(contents: &str) -> String {
-    let after_gdhealth = rewrite_command(
-        contents,
-        &["gdhealth", "health"],
-        &["gdsuite", "health"],
-    );
+fn rewrite_markdown_entrypoints(contents: &str) -> String {
+    let mut output = Vec::new();
+    let mut in_code_block = false;
+
+    for line in contents.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            output.push(line.to_string());
+            continue;
+        }
+
+        let rewritten = if in_code_block || looks_like_command_line(trimmed) {
+            rewrite_command_lines(line)
+        } else {
+            rewrite_inline_code_spans(line)
+        };
+        output.push(rewritten);
+    }
+
+    let mut body = output.join("\n");
+    if contents.ends_with('\n') {
+        body.push('\n');
+    }
+    body
+}
+
+fn rewrite_inline_code_spans(line: &str) -> String {
+    line.replace("`gdhealth health`", "`gdsuite health`")
+        .replace("`gdtest`", "`gdsuite test`")
+}
+
+fn rewrite_command_lines(line: &str) -> String {
+    let after_gdhealth = rewrite_command(line, &["gdhealth", "health"], &["gdsuite", "health"]);
     rewrite_command(&after_gdhealth, &["gdtest"], &["gdsuite", "test"])
 }
 
 fn rewrite_command(contents: &str, source: &[&str], target: &[&str]) -> String {
     let source_text = source.join(" ");
     let target_text = target.join(" ");
-    let bytes = contents.as_bytes();
-    let source_bytes = source_text.as_bytes();
     let mut output = String::with_capacity(contents.len());
-    let mut index = 0;
+    let mut index = 0usize;
 
-    while index < bytes.len() {
-        if index + source_bytes.len() <= bytes.len()
-            && &bytes[index..index + source_bytes.len()] == source_bytes
-            && command_boundary(bytes, index, source_bytes.len())
+    while index < contents.len() {
+        if contents[index..].starts_with(&source_text)
+            && command_boundary(contents, index, source_text.len())
         {
             output.push_str(&target_text);
-            index += source_bytes.len();
+            index += source_text.len();
         } else {
-            output.push(bytes[index] as char);
-            index += 1;
+            let ch = contents[index..].chars().next().unwrap();
+            output.push(ch);
+            index += ch.len_utf8();
         }
     }
 
     output
 }
 
-fn command_boundary(bytes: &[u8], start: usize, len: usize) -> bool {
-    let prev = start.checked_sub(1).and_then(|idx| bytes.get(idx)).copied();
-    let next = bytes.get(start + len).copied();
+fn looks_like_command_line(trimmed: &str) -> bool {
+    trimmed.starts_with("gdtest ")
+        || trimmed == "gdtest"
+        || trimmed.starts_with("gdhealth ")
+        || trimmed.starts_with("- run:")
+        || trimmed.starts_with("run:")
+        || trimmed.starts_with("$ ")
+}
+
+fn command_boundary(text: &str, start: usize, len: usize) -> bool {
+    let prev = text[..start].chars().next_back();
+    let next = text[start + len..].chars().next();
     is_command_left_boundary(prev) && is_command_right_boundary(next)
 }
 
-fn is_command_left_boundary(ch: Option<u8>) -> bool {
+fn is_command_left_boundary(ch: Option<char>) -> bool {
     ch.is_none_or(|byte| !is_command_name_char(byte))
 }
 
-fn is_command_right_boundary(ch: Option<u8>) -> bool {
+fn is_command_right_boundary(ch: Option<char>) -> bool {
     ch.is_none_or(|byte| !is_command_name_char(byte))
 }
 
-fn is_command_name_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'.')
+fn is_command_name_char(byte: char) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, '/' | '_' | '-' | '.')
 }

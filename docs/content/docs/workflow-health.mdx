@@ -1,0 +1,52 @@
+---
+title: gdsuite health
+description: Understand why architecture health is a first-class suite workflow and how it differs from direct gdhealth exploration.
+---
+
+## What this page is for
+
+This page explains how `gdsuite health` fits into daily work, refactoring, and CI.
+
+## When you should use this
+
+Use this page when structure matters: layering changes, boundary review, dependency growth, or CI policy enforcement.
+
+## What you need before starting
+
+- A bootstrapped project
+- A `gdhealth` configuration that reflects the codebase groups and policy you care about
+- Basic familiarity with the project structure
+
+## Step-by-step instructions
+
+1. Run the suite-owned health entrypoint.
+
+```bash
+gdsuite health
+```
+
+2. If you need direct product flags, forward them after `--`.
+
+```bash
+gdsuite health -- --format json
+```
+
+3. If CI wants a suite-level report envelope, request JSON explicitly.
+
+```bash
+gdsuite health --report json
+```
+
+## What success looks like
+
+Success means the delegated `gdhealth` run completed, raw health artifacts are preserved, and the suite can also emit `reports/gdsuite/health.json` when asked.
+
+## Common mistakes
+
+- Treating health as an optional afterthought instead of a first-class workflow
+- Confusing raw `gdhealth` bundle artifacts with the suite-owned report envelope
+- Assuming `gdsuite health` only matters in CI and not during refactors
+
+## Where to go next
+
+Next step: visit [gdhealth](/gdhealth) for deeper report interpretation, configuration, and recipes.

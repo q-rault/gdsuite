@@ -1,0 +1,52 @@
+---
+title: gdsuite test
+description: See when to stay in the suite entrypoint and when to go deeper into gdtest-specific behavior.
+---
+
+## What this page is for
+
+This page explains how `gdsuite test` fits into the suite workflow and where it stops being the right abstraction.
+
+## When you should use this
+
+Use this page when behavior changed and you want the suite-owned path into tests, or when you need to decide whether to use direct `gdtest` flags.
+
+## What you need before starting
+
+- A bootstrapped project
+- A working `gdtest` install under the local suite toolchain
+- Test files that match the configured patterns
+
+## Step-by-step instructions
+
+1. Run the normal suite entrypoint.
+
+```bash
+gdsuite test
+```
+
+2. If you need direct `gdtest` depth, forward flags after `--`.
+
+```bash
+gdsuite test -- --filter combat
+```
+
+3. If CI wants a suite envelope, emit JSON.
+
+```bash
+gdsuite test --report json
+```
+
+## What success looks like
+
+Success means the delegated `gdtest` run completed and, when requested, a suite report artifact was written under `reports/gdsuite/test.json`.
+
+## Common mistakes
+
+- Jumping straight into raw `gdtest` commands for normal suite workflows
+- Forgetting the `--` separator before product-specific arguments
+- Treating the suite report as a replacement for direct `gdtest` product details when you actually need harness-specific depth
+
+## Where to go next
+
+Next step: visit [gdtest](/gdtest) for product-specific docs such as mocking, scene runner, and CLI reference.

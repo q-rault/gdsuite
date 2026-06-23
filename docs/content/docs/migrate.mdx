@@ -1,0 +1,65 @@
+---
+title: Migrate an Existing Project
+description: Adopt an existing Godot repo into the suite-first contract without pretending it is a brand new project.
+---
+
+## What this page is for
+
+This page explains how to bring an existing repository onto the current `gdsuite` config and workflow contract.
+
+## When you should use this
+
+Use this page when the project already has `gdtest`, `gdhealth`, CI files, or older docs wording that predates the current suite-first model.
+
+## What you need before starting
+
+- A repository that already exists
+- A committed or otherwise recoverable starting point
+- Enough familiarity with the project to review config and docs changes
+
+## Step-by-step instructions
+
+1. Start from the project root.
+
+```bash
+cd path/to/existing-project
+```
+
+2. Run the migration command.
+
+```bash
+gdsuite migrate
+```
+
+3. Review the resulting top-level and product config files.
+
+```bash
+git diff -- gdsuite.toml gdtest.toml gdhealth.toml README.md docs
+```
+
+4. Run the normal suite checks.
+
+```bash
+gdsuite check
+gdsuite test
+gdsuite health
+```
+
+## What success looks like
+
+Success means:
+
+- `gdsuite.toml` reflects the current suite contract
+- suite-owned invariants are synchronized into `gdtest.toml` and `gdhealth.toml`
+- obvious old `gdtest` and `gdhealth health` entrypoints in docs or CI are rewritten toward suite entrypoints
+- `gdsuite doctor` no longer warns about known config drift
+
+## Common mistakes
+
+- Using `setup --sync-product-configs` as if it were the main adoption path
+- Skipping review of generated config changes in an older repo
+- Leaving stale CI wording that still implies a nonexistent `gdsuite ci` command
+
+## Where to go next
+
+Next step: read [Config Overview](/config) if you need to understand ownership boundaries, or [CI](/ci) if migration is mainly about pipeline cleanup.
