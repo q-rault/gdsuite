@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -8,7 +9,7 @@ use clap::Parser;
 use serde::Serialize;
 
 use crate::{
-    cli::{Cli, Commands, FmtArgs, LintArgs},
+    cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs},
     config::{GdsuiteConfig, Manifest},
     fixers, process,
     tooling::{self, ProjectContext},
@@ -36,19 +37,33 @@ pub fn run() -> Result<()> {
     let context = ProjectContext::new(root);
 
     match cli.command {
+        Commands::Init => init(&context, cli.godot_exe.as_deref()),
         Commands::Setup => setup(&context, cli.godot_exe.as_deref()),
         Commands::Doctor => doctor(&context, cli.godot_exe.as_deref()),
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
         Commands::Typecheck => typecheck(&context),
         Commands::Test(args) => test(&context, args.args),
-        Commands::Health(args) => health(&context, args.args),
-        Commands::Check => check(&context),
-        Commands::Ci => ci(&context),
+        Commands::Health(args) => health(&context, args),
+        Commands::Check(args) => check(&context, args),
+        Commands::Ci(args) => ci(&context, args),
+        Commands::Report(args) => report(&context, args),
     }
 }
 
+fn init(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+    setup_impl(context, cli_godot)?;
+    println!("init complete");
+    Ok(())
+}
+
 fn setup(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+    setup_impl(context, cli_godot)?;
+    println!("setup complete");
+    Ok(())
+}
+
+fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
     let godot_path = if context.config_path.exists() {
         let existing = tooling::load_config(context)?;
@@ -69,18 +84,13 @@ fn setup(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-
-    println!("setup complete");
     Ok(())
 }
 
 fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
-    let config = tooling::load_config(context)
-        .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
-    let manifest = tooling::load_manifest(context)
-        .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
-    let toolchain = tooling::resolve_toolchain(context, Some(&manifest))
-        .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
+    let config = load_config_or_error(context)?;
+    let manifest = load_manifest_or_error(context, EXIT_VALIDATION_ERROR)?;
+    let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_VALIDATION_ERROR)?;
     let godot = tooling::resolve_godot(context, cli_godot, Some(&config))
         .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
 
@@ -165,11 +175,26 @@ fn test(context: &ProjectContext, forwarded: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn health(context: &ProjectContext, forwarded: Vec<String>) -> Result<()> {
+fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
+    if args.report == "json" {
+        let config = load_config_or_error(context)?;
+        let step = run_health_step(context, &config, args.args)?;
+        let report = SuiteReport::from_steps("health", context, vec![step]);
+        print_and_store_report(context, &config, "health", &report)?;
+        if report.status == "failed" {
+            return Err(command_error(
+                EXIT_VALIDATION_ERROR,
+                "health failed".to_string(),
+            ));
+        }
+        return Ok(());
+    }
+
+    let forwarded = args.args;
     let config = load_config_or_error(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let mut args = if forwarded.is_empty() {
-        vec![config.commands.default_health_subcommand]
+        vec![config.health.command.clone()]
     } else {
         forwarded
     };
@@ -226,90 +251,99 @@ fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
         .with_context(|| format!("failed to write typecheck script {}", path.display()))
 }
 
-fn check(context: &ProjectContext) -> Result<()> {
-    let mut failures = Vec::new();
-
-    if let Err(error) = fmt(context, FmtArgs { check: true }) {
-        failures.push(format!("fmt: {}", display_error(&error)));
-    }
-    if let Err(error) = lint(
-        context,
-        LintArgs {
-            fix: false,
-            unsafe_fixes: false,
-            report: "text".to_string(),
-        },
-    ) {
-        failures.push(format!("lint: {}", display_error(&error)));
-    }
-    if let Err(error) = typecheck(context) {
-        failures.push(format!("typecheck: {}", display_error(&error)));
-    }
-
-    if !failures.is_empty() {
-        for failure in failures {
-            println!("{failure}");
-        }
-        return Err(command_error(
-            EXIT_VALIDATION_ERROR,
-            "one or more checks failed".to_string(),
-        ));
-    }
-
-    println!("check passed");
-    Ok(())
+fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
+    let config = load_config_or_error(context)?;
+    let steps = vec![
+        run_fmt_step(context, true)?,
+        run_lint_step(context, &config)?,
+        run_typecheck_step(context)?,
+    ];
+    finish_pipeline(context, &config, "check", args.report, steps)
 }
 
-fn ci(context: &ProjectContext) -> Result<()> {
-    let mut failures = Vec::new();
+fn ci(context: &ProjectContext, args: RunArgs) -> Result<()> {
+    let config = load_config_or_error(context)?;
+    let mut steps = vec![
+        run_fmt_step(context, true)?,
+        run_lint_step(context, &config)?,
+        run_typecheck_step(context)?,
+        run_test_step(context)?,
+    ];
+    if config.health.enabled {
+        steps.push(run_health_step(context, &config, Vec::new())?);
+    }
+    finish_pipeline(context, &config, "ci", args.report, steps)
+}
 
-    if let Err(error) = fmt(context, FmtArgs { check: true }) {
-        failures.push(format!("fmt: {}", display_error(&error)));
-    }
-    if let Err(error) = lint(
-        context,
-        LintArgs {
-            fix: false,
-            unsafe_fixes: false,
-            report: "text".to_string(),
-        },
-    ) {
-        failures.push(format!("lint: {}", display_error(&error)));
-    }
-    if let Err(error) = typecheck(context) {
-        failures.push(format!("typecheck: {}", display_error(&error)));
-    }
-    if let Err(error) = test(context, Vec::new()) {
-        failures.push(format!("test: {}", display_error(&error)));
-    }
-    if let Err(error) = health(context, Vec::new()) {
-        failures.push(format!("health: {}", display_error(&error)));
-    }
-
-    if !failures.is_empty() {
-        for failure in failures {
-            println!("{failure}");
-        }
+fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
+    let config = load_config_or_error(context)?;
+    let path = report_path(context, &config, &args.name);
+    if !path.exists() {
         return Err(command_error(
-            EXIT_VALIDATION_ERROR,
-            "one or more checks failed".to_string(),
+            EXIT_USAGE_ERROR,
+            format!(
+                "report artifact not found at {}; run `gdsuite check --report json`, `gdsuite ci --report json`, or `gdsuite health --report json` first",
+                path.display()
+            ),
         ));
     }
-
-    println!("ci passed");
+    let body = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read report {}", path.display()))
+        .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))?;
+    println!("{body}");
     Ok(())
 }
 
 fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
+    if !context.config_path.exists() {
+        return Err(command_error(
+            EXIT_USAGE_ERROR,
+            format!(
+                "missing {}; run `gdsuite init` first to bootstrap this project",
+                context.config_path.display()
+            ),
+        ));
+    }
+
     tooling::load_config(context)
         .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))
 }
 
 fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchain> {
-    let manifest = tooling::load_manifest(context)
-        .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))?;
-    tooling::resolve_toolchain(context, Some(&manifest))
-        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))
+    let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
+    resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)
+}
+
+fn load_manifest_or_error(context: &ProjectContext, code: u8) -> Result<Manifest> {
+    if !context.manifest_path.exists() {
+        return Err(command_error(
+            code,
+            format!(
+                "missing {}; run `gdsuite init` or `gdsuite setup` to install the local toolchain",
+                context.manifest_path.display()
+            ),
+        ));
+    }
+
+    tooling::load_manifest(context).map_err(|error| command_error(code, error.to_string()))
+}
+
+fn resolve_toolchain_or_error(
+    context: &ProjectContext,
+    manifest: Option<&Manifest>,
+    code: u8,
+) -> Result<tooling::Toolchain> {
+    tooling::resolve_toolchain(context, Some(&manifest.cloned().unwrap_or_default())).map_err(
+        |error| {
+            command_error(
+                code,
+                format!(
+                    "{}; run `gdsuite setup` to repair the local toolchain",
+                    error
+                ),
+            )
+        },
+    )
 }
 
 fn lint_args(
@@ -457,4 +491,273 @@ fn display_error(error: &anyhow::Error) -> String {
         .downcast_ref::<CommandError>()
         .map(|value| value.message.clone())
         .unwrap_or_else(|| error.to_string())
+}
+
+fn run_fmt_step(context: &ProjectContext, check: bool) -> Result<StepReport> {
+    let started = Instant::now();
+    match fmt(context, FmtArgs { check }) {
+        Ok(()) => Ok(StepReport::ok(
+            "fmt",
+            started.elapsed().as_millis(),
+            "format check passed",
+        )),
+        Err(error) => Ok(StepReport::failed(
+            "fmt",
+            started.elapsed().as_millis(),
+            display_error(&error),
+        )),
+    }
+}
+
+fn run_lint_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<StepReport> {
+    let started = Instant::now();
+    let toolchain = load_toolchain_or_error(context)?;
+    let cmd_args = lint_args(context, config, "json")?;
+    let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let lint_report = JsonLintReport::from_output(&output);
+    let findings = lint_report
+        .findings
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<serde_json::Result<Vec<_>>>()?;
+
+    Ok(StepReport {
+        name: "lint".to_string(),
+        status: if output.status.success() {
+            "ok".to_string()
+        } else {
+            "failed".to_string()
+        },
+        duration_ms: started.elapsed().as_millis(),
+        summary: lint_report
+            .summary
+            .unwrap_or_else(|| "lint completed".to_string()),
+        findings,
+        artifacts: Vec::new(),
+    })
+}
+
+fn run_typecheck_step(context: &ProjectContext) -> Result<StepReport> {
+    let started = Instant::now();
+    match typecheck(context) {
+        Ok(()) => Ok(StepReport::ok(
+            "typecheck",
+            started.elapsed().as_millis(),
+            "typecheck passed",
+        )),
+        Err(error) => Ok(StepReport::failed(
+            "typecheck",
+            started.elapsed().as_millis(),
+            display_error(&error),
+        )),
+    }
+}
+
+fn run_test_step(context: &ProjectContext) -> Result<StepReport> {
+    let started = Instant::now();
+    match test(context, Vec::new()) {
+        Ok(()) => Ok(StepReport::ok(
+            "test",
+            started.elapsed().as_millis(),
+            "tests passed",
+        )),
+        Err(error) => Ok(StepReport::failed(
+            "test",
+            started.elapsed().as_millis(),
+            display_error(&error),
+        )),
+    }
+}
+
+fn run_health_step(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    forwarded: Vec<String>,
+) -> Result<StepReport> {
+    let started = Instant::now();
+    let toolchain = load_toolchain_or_error(context)?;
+    let mut args = if forwarded.is_empty() {
+        vec![config.health.command.clone()]
+    } else {
+        forwarded
+    };
+    if args.first().map(|value| value == "--").unwrap_or(false) {
+        args.remove(0);
+    }
+
+    let output = process::run(&toolchain.gdhealth, &args, &context.root)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let bundle_dir = context.root.join(&config.health.bundle_dir);
+    let mut artifacts = Vec::new();
+
+    for (name, path) in [
+        ("summary", bundle_dir.join("summary.txt")),
+        ("health_json", bundle_dir.join("health.json")),
+    ] {
+        if path.exists() {
+            artifacts.push(ArtifactRef {
+                name: name.to_string(),
+                path: path.display().to_string(),
+            });
+        }
+    }
+
+    let summary = if output.status.success() {
+        if artifacts.is_empty() {
+            "health passed".to_string()
+        } else {
+            format!("health passed; artifacts in {}", bundle_dir.display())
+        }
+    } else if !output.stderr.trim().is_empty() {
+        output.stderr.trim().to_string()
+    } else if !output.stdout.trim().is_empty() {
+        output.stdout.trim().to_string()
+    } else {
+        "health failed".to_string()
+    };
+
+    Ok(StepReport {
+        name: "health".to_string(),
+        status: if output.status.success() {
+            "ok".to_string()
+        } else {
+            "failed".to_string()
+        },
+        duration_ms: started.elapsed().as_millis(),
+        summary,
+        findings: Vec::new(),
+        artifacts,
+    })
+}
+
+fn finish_pipeline(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    command: &str,
+    report_mode: String,
+    steps: Vec<StepReport>,
+) -> Result<()> {
+    let report = SuiteReport::from_steps(command, context, steps);
+    if report_mode == "json" {
+        print_and_store_report(context, config, command, &report)?;
+    } else if report.status == "ok" {
+        println!("{command} passed");
+    } else {
+        for step in report.steps.iter().filter(|step| step.status == "failed") {
+            println!("{}: {}", step.name, step.summary);
+        }
+    }
+
+    if report.status == "failed" {
+        return Err(command_error(
+            EXIT_VALIDATION_ERROR,
+            "one or more checks failed".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn print_and_store_report(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    command: &str,
+    report: &SuiteReport,
+) -> Result<()> {
+    let json = serde_json::to_string_pretty(report)?;
+    println!("{json}");
+    write_report_artifacts(context, config, command, &json)?;
+    Ok(())
+}
+
+fn write_report_artifacts(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    command: &str,
+    json: &str,
+) -> Result<()> {
+    let dir = context.root.join(&config.reports.artifacts_dir);
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create report directory {}", dir.display()))?;
+    fs::write(dir.join(format!("{command}.json")), json)
+        .with_context(|| format!("failed to write {} report", command))?;
+    fs::write(dir.join("latest.json"), json)
+        .with_context(|| format!("failed to write latest report in {}", dir.display()))?;
+    Ok(())
+}
+
+fn report_path(context: &ProjectContext, config: &GdsuiteConfig, name: &str) -> PathBuf {
+    let dir = context.root.join(&config.reports.artifacts_dir);
+    if name == "latest" {
+        return dir.join("latest.json");
+    }
+    dir.join(format!("{name}.json"))
+}
+
+#[derive(Debug, Serialize)]
+struct SuiteReport {
+    status: String,
+    command: String,
+    project_root: String,
+    duration_ms: u128,
+    steps: Vec<StepReport>,
+}
+
+impl SuiteReport {
+    fn from_steps(command: &str, context: &ProjectContext, steps: Vec<StepReport>) -> Self {
+        let duration_ms = steps.iter().map(|step| step.duration_ms).sum();
+        let status = if steps.iter().any(|step| step.status == "failed") {
+            "failed"
+        } else {
+            "ok"
+        };
+
+        Self {
+            status: status.to_string(),
+            command: command.to_string(),
+            project_root: context.root.display().to_string(),
+            duration_ms,
+            steps,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct StepReport {
+    name: String,
+    status: String,
+    duration_ms: u128,
+    summary: String,
+    findings: Vec<serde_json::Value>,
+    artifacts: Vec<ArtifactRef>,
+}
+
+impl StepReport {
+    fn ok(name: &str, duration_ms: u128, summary: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: "ok".to_string(),
+            duration_ms,
+            summary: summary.into(),
+            findings: Vec::new(),
+            artifacts: Vec::new(),
+        }
+    }
+
+    fn failed(name: &str, duration_ms: u128, summary: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: "failed".to_string(),
+            duration_ms,
+            summary: summary.into(),
+            findings: Vec::new(),
+            artifacts: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactRef {
+    name: String,
+    path: String,
 }

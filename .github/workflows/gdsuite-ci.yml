@@ -1,0 +1,55 @@
+name: gdsuite-ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build gdsuite
+        run: cargo build --release
+
+      - name: Bootstrap local suite toolchain
+        env:
+          GODOT_EXE: godot
+        run: ./target/release/gdsuite init
+
+      - name: Run canonical CI pipeline
+        env:
+          GODOT_EXE: godot
+        run: ./target/release/gdsuite ci --report json
+
+      - name: Upload suite reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdsuite-reports
+          path: |
+            reports/gdsuite
+            reports/code-health

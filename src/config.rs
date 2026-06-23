@@ -20,6 +20,10 @@ pub struct GdsuiteConfig {
     pub fix: FixConfig,
     #[serde(default)]
     pub lint: LintConfig,
+    #[serde(default)]
+    pub reports: ReportsConfig,
+    #[serde(default)]
+    pub health: HealthConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +73,26 @@ pub struct LintConfig {
     pub line_length: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportsConfig {
+    #[serde(default = "default_report_format")]
+    pub default: String,
+    #[serde(default = "default_artifacts_dir")]
+    pub artifacts_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthConfig {
+    #[serde(default = "default_health_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_health_command")]
+    pub command: String,
+    #[serde(default = "default_health_fail_on")]
+    pub fail_on: String,
+    #[serde(default = "default_health_bundle_dir")]
+    pub bundle_dir: PathBuf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Manifest {
     pub godot_exe: Option<PathBuf>,
@@ -95,6 +119,8 @@ impl Default for GdsuiteConfig {
             commands: CommandsConfig::default(),
             fix: FixConfig::default(),
             lint: LintConfig::default(),
+            reports: ReportsConfig::default(),
+            health: HealthConfig::default(),
         }
     }
 }
@@ -149,6 +175,26 @@ impl Default for LintConfig {
     fn default() -> Self {
         Self {
             line_length: default_line_length(),
+        }
+    }
+}
+
+impl Default for ReportsConfig {
+    fn default() -> Self {
+        Self {
+            default: default_report_format(),
+            artifacts_dir: default_artifacts_dir(),
+        }
+    }
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_health_enabled(),
+            command: default_health_command(),
+            fail_on: default_health_fail_on(),
+            bundle_dir: default_health_bundle_dir(),
         }
     }
 }
@@ -249,4 +295,28 @@ fn default_unsafe_rules() -> Vec<String> {
 
 fn default_line_length() -> usize {
     100
+}
+
+fn default_report_format() -> String {
+    "text".to_string()
+}
+
+fn default_artifacts_dir() -> PathBuf {
+    PathBuf::from("reports/gdsuite")
+}
+
+fn default_health_enabled() -> bool {
+    true
+}
+
+fn default_health_command() -> String {
+    "health".to_string()
+}
+
+fn default_health_fail_on() -> String {
+    "critical".to_string()
+}
+
+fn default_health_bundle_dir() -> PathBuf {
+    PathBuf::from("reports/code-health")
 }

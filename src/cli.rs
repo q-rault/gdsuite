@@ -6,7 +6,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 #[command(
     name = "gdsuite",
     version,
-    about = "Project-local Godot tooling wrapper"
+    about = "Godot developer platform entrypoint"
 )]
 pub struct Cli {
     #[arg(long, global = true, default_value = ".")]
@@ -19,15 +19,34 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(about = "Bootstrap the local gdsuite toolchain and product configs")]
+    Init,
+    #[command(about = "Install or repair the local gdsuite toolchain and product configs")]
     Setup,
+    #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor,
+    #[command(about = "Run gdformat on discovered GDScript files")]
     Fmt(FmtArgs),
+    #[command(about = "Run gdlint and optional suite-owned fixers")]
     Lint(LintArgs),
+    #[command(about = "Run a Godot headless load() pass over discovered scripts")]
     Typecheck,
+    #[command(
+        about = "Forward arguments to project-local gdtest",
+        long_about = "Forward arguments to project-local gdtest.\n\nUse `gdsuite test` for normal suite-owned test execution. Use `gdsuite test -- ...` when you need direct gdtest flags or subcommands."
+    )]
     Test(ForwardArgs),
-    Health(ForwardArgs),
-    Check,
-    Ci,
+    #[command(
+        about = "Forward arguments to project-local gdhealth",
+        long_about = "Forward arguments to project-local gdhealth.\n\nUse `gdsuite health` for the standard suite-owned health entrypoint. Use `gdsuite health -- ...` when you need direct gdhealth subcommands or flags."
+    )]
+    Health(ForwardReportArgs),
+    #[command(about = "Run the default fast local validation pipeline")]
+    Check(RunArgs),
+    #[command(about = "Run the default CI validation pipeline")]
+    Ci(RunArgs),
+    #[command(about = "Print a saved suite JSON report artifact")]
+    Report(ReportArgs),
 }
 
 #[derive(Debug, Args)]
@@ -42,12 +61,32 @@ pub struct LintArgs {
     pub fix: bool,
     #[arg(long)]
     pub unsafe_fixes: bool,
-    #[arg(long, default_value = "text", value_parser = ["json", "text"])]
-    pub report: String,
+    #[arg(long, value_parser = ["json", "text"])]
+    pub report: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct ForwardArgs {
     #[arg(last = true, action = ArgAction::Append)]
     pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ForwardReportArgs {
+    #[arg(long, value_parser = ["json", "text"])]
+    pub report: Option<String>,
+    #[arg(last = true, action = ArgAction::Append)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    #[arg(long, value_parser = ["json", "text"])]
+    pub report: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReportArgs {
+    #[arg(default_value = "latest")]
+    pub name: String,
 }

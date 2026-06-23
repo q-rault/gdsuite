@@ -28,6 +28,26 @@ fn setup_generates_project_local_toolchain_and_configs() {
 }
 
 #[test]
+fn init_generates_project_local_toolchain_and_configs() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("init complete"));
+
+    assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
+    assert!(fixture.root.join("gdsuite.toml").exists());
+    assert!(fixture.root.join("gdtest.toml").exists());
+    assert!(fixture.root.join("gdhealth.toml").exists());
+}
+
+#[test]
 fn doctor_reports_resolved_paths() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -150,6 +170,30 @@ fn delegated_commands_forward_arguments() {
 }
 
 #[test]
+fn delegated_test_uses_default_target_without_forwarded_args() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture.cmd().arg("test").assert().success();
+
+    let gdtest_args = fs::read_to_string(fixture.root.join("logs/gdtest-args.txt")).unwrap();
+    assert!(gdtest_args.contains("test/"));
+}
+
+#[test]
+fn delegated_health_uses_default_subcommand_without_forwarded_args() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture.cmd().arg("health").assert().success();
+
+    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
+    assert!(gdhealth_args.contains("health"));
+}
+
+#[test]
 fn check_reports_aggregate_failure() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -163,6 +207,27 @@ fn check_reports_aggregate_failure() {
         .failure()
         .stdout(predicate::str::contains("lint:"))
         .stderr(predicate::str::contains("one or more checks failed"));
+}
+
+#[test]
+fn check_report_json_emits_suite_envelope_and_writes_artifact() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"check\""))
+        .stdout(predicate::str::contains("\"status\": \"ok\""))
+        .stdout(predicate::str::contains("\"name\": \"fmt\""))
+        .stdout(predicate::str::contains("\"name\": \"lint\""))
+        .stdout(predicate::str::contains("\"name\": \"typecheck\""));
+
+    assert!(fixture.root.join("reports/gdsuite/check.json").exists());
+    assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
 }
 
 #[test]
@@ -253,6 +318,96 @@ fn ci_reports_aggregate_failure() {
 }
 
 #[test]
+fn ci_report_json_includes_health_step() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["ci", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"ci\""))
+        .stdout(predicate::str::contains("\"name\": \"health\""));
+}
+
+#[test]
+fn ci_runs_test_and_health_by_default() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture.cmd().arg("ci").assert().success();
+
+    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
+    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
+}
+
+#[test]
+fn health_report_json_references_bundle_artifacts_when_present() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::create_dir_all(fixture.root.join("reports/code-health")).unwrap();
+    fs::write(
+        fixture.root.join("reports/code-health/summary.txt"),
+        "health summary",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("reports/code-health/health.json"),
+        "{\"status\":\"ok\"}",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["health", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"health\""))
+        .stdout(predicate::str::contains("\"name\": \"summary\""))
+        .stdout(predicate::str::contains("\"name\": \"health_json\""));
+}
+
+#[test]
+fn report_reads_latest_saved_report() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success();
+
+    fixture
+        .cmd()
+        .arg("report")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"check\""));
+}
+
+#[test]
+fn report_fails_with_actionable_guidance_when_no_report_exists() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .arg("report")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "run `gdsuite check --report json`",
+        ));
+}
+
+#[test]
 fn check_does_not_run_test_or_health() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -292,6 +447,36 @@ fn commands_fail_with_invalid_gdsuite_toml() {
     fs::write(fixture.root.join("gdsuite.toml"), "[ not valid toml").unwrap();
 
     fixture.cmd().args(["lint"]).assert().failure();
+}
+
+#[test]
+fn commands_fail_with_init_guidance_when_project_is_not_bootstrapped() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `gdsuite init` first"));
+}
+
+#[test]
+fn commands_fail_with_setup_guidance_when_manifest_is_missing() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::remove_file(fixture.root.join(".gdsuite/state/manifest.json")).unwrap();
+
+    fixture
+        .cmd()
+        .arg("ci")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "run `gdsuite init` or `gdsuite setup`",
+        ));
 }
 
 #[test]
