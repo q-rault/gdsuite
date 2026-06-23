@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::{
     cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs},
-    config::{GdsuiteConfig, Manifest},
+    config::{GdsuiteConfig, Manifest, ProfileConfig},
     fixers, process,
     tooling::{self, ProjectContext},
 };
@@ -46,7 +46,6 @@ pub fn run() -> Result<()> {
         Commands::Test(args) => test(&context, args.args),
         Commands::Health(args) => health(&context, args),
         Commands::Check(args) => check(&context, args),
-        Commands::Ci(args) => ci(&context, args),
         Commands::Report(args) => report(&context, args),
     }
 }
@@ -180,7 +179,7 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     if report_mode == "json" {
-        let step = run_health_step(context, &config, args.args)?;
+        let step = run_health_step(context, &config, None, args.args)?;
         let report = SuiteReport::from_steps("health", context, vec![step]);
         print_and_store_report(context, &config, "health", &report)?;
         if report.status == "failed" {
@@ -194,14 +193,11 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
 
     let forwarded = args.args;
     let toolchain = load_toolchain_or_error(context)?;
-    let mut args = if forwarded.is_empty() {
-        vec![config.health.command.clone()]
+    let args = if forwarded.is_empty() {
+        build_default_health_args(&config, None)
     } else {
         forwarded
     };
-    if args.first().map(|value| value == "--").unwrap_or(false) {
-        args.remove(0);
-    }
     process::run_checked(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
@@ -255,27 +251,9 @@ fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
 fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let steps = vec![
-        run_fmt_step(context, true)?,
-        run_lint_step(context, &config)?,
-        run_typecheck_step(context)?,
-    ];
+    let profile = resolve_profile(&config, args.profile.as_deref(), "local")?;
+    let steps = run_profile_pipeline(context, &config, profile)?;
     finish_pipeline(context, &config, "check", report_mode, steps)
-}
-
-fn ci(context: &ProjectContext, args: RunArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
-    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let mut steps = vec![
-        run_fmt_step(context, true)?,
-        run_lint_step(context, &config)?,
-        run_typecheck_step(context)?,
-        run_test_step(context)?,
-    ];
-    if config.health.enabled {
-        steps.push(run_health_step(context, &config, Vec::new())?);
-    }
-    finish_pipeline(context, &config, "ci", report_mode, steps)
 }
 
 fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
@@ -285,7 +263,7 @@ fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
         return Err(command_error(
             EXIT_USAGE_ERROR,
             format!(
-                "report artifact not found at {}; run `gdsuite check --report json`, `gdsuite ci --report json`, or `gdsuite health --report json` first",
+                "report artifact not found at {}; run `gdsuite check --report json`, `gdsuite check --profile ci --report json`, or `gdsuite health --report json` first",
                 path.display()
             ),
         ));
@@ -357,6 +335,76 @@ fn resolve_report_mode(config: &GdsuiteConfig, cli_report: Option<&str>) -> Resu
             EXIT_USAGE_ERROR,
             format!(
                 "unsupported report mode `{other}` in gdsuite config; expected `text` or `json`"
+            ),
+        )),
+    }
+}
+
+fn resolve_profile<'a>(
+    config: &'a GdsuiteConfig,
+    cli_profile: Option<&str>,
+    default_profile: &str,
+) -> Result<&'a ProfileConfig> {
+    let profile_name = cli_profile.unwrap_or(default_profile);
+    config.profiles.entries.get(profile_name).ok_or_else(|| {
+        command_error(
+            EXIT_USAGE_ERROR,
+            format!(
+                "unknown profile `{profile_name}`; available profiles: {}",
+                config
+                    .profiles
+                    .entries
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+    })
+}
+
+fn run_profile_pipeline(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    profile: &ProfileConfig,
+) -> Result<Vec<StepReport>> {
+    let mut steps = Vec::new();
+    for step in &profile.pipeline {
+        steps.push(run_pipeline_step(context, config, profile, step)?);
+    }
+    Ok(steps)
+}
+
+fn run_pipeline_step(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    profile: &ProfileConfig,
+    step: &str,
+) -> Result<StepReport> {
+    match step {
+        "fmt" => run_fmt_step(context, true),
+        "lint" => run_lint_step(context, config),
+        "typecheck" => run_typecheck_step(context),
+        "test" => run_test_step(context),
+        "health" => {
+            if config.health.enabled {
+                run_health_step(
+                    context,
+                    config,
+                    profile.health_fail_on.as_deref(),
+                    Vec::new(),
+                )
+            } else {
+                Ok(StepReport::skipped(
+                    "health",
+                    "health disabled in gdsuite config",
+                ))
+            }
+        }
+        other => Err(command_error(
+            EXIT_USAGE_ERROR,
+            format!(
+                "unsupported pipeline step `{other}`; expected one of `fmt`, `lint`, `typecheck`, `test`, `health`"
             ),
         )),
     }
@@ -589,18 +637,16 @@ fn run_test_step(context: &ProjectContext) -> Result<StepReport> {
 fn run_health_step(
     context: &ProjectContext,
     config: &GdsuiteConfig,
+    fail_on_override: Option<&str>,
     forwarded: Vec<String>,
 ) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let mut args = if forwarded.is_empty() {
-        vec![config.health.command.clone()]
+    let args = if forwarded.is_empty() {
+        build_default_health_args(config, fail_on_override)
     } else {
         forwarded
     };
-    if args.first().map(|value| value == "--").unwrap_or(false) {
-        args.remove(0);
-    }
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
@@ -645,6 +691,18 @@ fn run_health_step(
         findings: Vec::new(),
         artifacts,
     })
+}
+
+fn build_default_health_args(
+    config: &GdsuiteConfig,
+    fail_on_override: Option<&str>,
+) -> Vec<String> {
+    let fail_on = fail_on_override.unwrap_or(&config.health.fail_on);
+    vec![
+        config.health.command.clone(),
+        "--fail-on".to_string(),
+        fail_on.to_string(),
+    ]
 }
 
 fn finish_pipeline(
@@ -765,6 +823,17 @@ impl StepReport {
             name: name.to_string(),
             status: "failed".to_string(),
             duration_ms,
+            summary: summary.into(),
+            findings: Vec::new(),
+            artifacts: Vec::new(),
+        }
+    }
+
+    fn skipped(name: &str, summary: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: "skipped".to_string(),
+            duration_ms: 0,
             summary: summary.into(),
             findings: Vec::new(),
             artifacts: Vec::new(),

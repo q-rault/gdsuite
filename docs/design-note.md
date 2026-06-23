@@ -13,10 +13,17 @@
 - `test`
 - `health`
 - `check`
-- `ci`
 - `report`
 
-`test` and `health` are delegated commands with passthrough argument forwarding. `check` is the fast static gate and runs `fmt --check`, `lint`, and `typecheck`. `ci` is the full sequential gate and runs `fmt --check`, `lint`, `typecheck`, `test`, and `health`.
+`test` and `health` are delegated commands with passthrough argument forwarding. `check` is the fast static gate and runs `fmt --check`, `lint`, and `typecheck`.
+
+`check` resolves named suite profiles from `gdsuite.toml`. The built-in defaults are:
+
+- `local` -> `fmt`, `lint`, `typecheck`
+- `ci` -> `fmt`, `lint`, `typecheck`, `test`, `health`
+- `strict` -> `fmt`, `lint`, `typecheck`, `test`, `health`
+
+`strict` differs from `ci` through health enforcement: it overrides `gdhealth` to use `--fail-on warning`, while `ci` uses the configured default health threshold.
 
 ## Local install layout
 

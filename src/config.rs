@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -20,6 +21,8 @@ pub struct GdsuiteConfig {
     pub fix: FixConfig,
     #[serde(default)]
     pub lint: LintConfig,
+    #[serde(default)]
+    pub profiles: ProfilesConfig,
     #[serde(default)]
     pub reports: ReportsConfig,
     #[serde(default)]
@@ -74,6 +77,19 @@ pub struct LintConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfilesConfig {
+    #[serde(flatten, default = "default_profiles")]
+    pub entries: BTreeMap<String, ProfileConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileConfig {
+    #[serde(default)]
+    pub pipeline: Vec<String>,
+    pub health_fail_on: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportsConfig {
     #[serde(default = "default_report_format")]
     pub default: String,
@@ -119,6 +135,7 @@ impl Default for GdsuiteConfig {
             commands: CommandsConfig::default(),
             fix: FixConfig::default(),
             lint: LintConfig::default(),
+            profiles: ProfilesConfig::default(),
             reports: ReportsConfig::default(),
             health: HealthConfig::default(),
         }
@@ -184,6 +201,23 @@ impl Default for ReportsConfig {
         Self {
             default: default_report_format(),
             artifacts_dir: default_artifacts_dir(),
+        }
+    }
+}
+
+impl Default for ProfilesConfig {
+    fn default() -> Self {
+        Self {
+            entries: default_profiles(),
+        }
+    }
+}
+
+impl Default for ProfileConfig {
+    fn default() -> Self {
+        Self {
+            pipeline: Vec::new(),
+            health_fail_on: None,
         }
     }
 }
@@ -295,6 +329,48 @@ fn default_unsafe_rules() -> Vec<String> {
 
 fn default_line_length() -> usize {
     100
+}
+
+fn default_profiles() -> BTreeMap<String, ProfileConfig> {
+    BTreeMap::from([
+        (
+            "local".to_string(),
+            ProfileConfig {
+                pipeline: vec![
+                    "fmt".to_string(),
+                    "lint".to_string(),
+                    "typecheck".to_string(),
+                ],
+                health_fail_on: None,
+            },
+        ),
+        (
+            "ci".to_string(),
+            ProfileConfig {
+                pipeline: vec![
+                    "fmt".to_string(),
+                    "lint".to_string(),
+                    "typecheck".to_string(),
+                    "test".to_string(),
+                    "health".to_string(),
+                ],
+                health_fail_on: None,
+            },
+        ),
+        (
+            "strict".to_string(),
+            ProfileConfig {
+                pipeline: vec![
+                    "fmt".to_string(),
+                    "lint".to_string(),
+                    "typecheck".to_string(),
+                    "test".to_string(),
+                    "health".to_string(),
+                ],
+                health_fail_on: Some("warning".to_string()),
+            },
+        ),
+    ])
 }
 
 fn default_report_format() -> String {

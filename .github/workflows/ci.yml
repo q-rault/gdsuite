@@ -1,4 +1,4 @@
-name: gdsuite-ci
+name: ci
 
 on:
   push:
@@ -40,10 +40,20 @@ jobs:
           GODOT_EXE: godot
         run: ./target/release/gdsuite init
 
-      - name: Run canonical CI pipeline
+      - name: Run suite checks
         env:
           GODOT_EXE: godot
-        run: ./target/release/gdsuite ci --report json
+        run: ./target/release/gdsuite check --report json
+
+      - name: Run tests
+        env:
+          GODOT_EXE: godot
+        run: ./target/release/gdsuite test
+
+      - name: Run health checks
+        env:
+          GODOT_EXE: godot
+        run: ./target/release/gdsuite health --report json
 
       - name: Upload suite reports
         if: always()

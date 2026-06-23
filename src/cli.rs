@@ -43,8 +43,6 @@ pub enum Commands {
     Health(ForwardReportArgs),
     #[command(about = "Run the default fast local validation pipeline")]
     Check(RunArgs),
-    #[command(about = "Run the default CI validation pipeline")]
-    Ci(RunArgs),
     #[command(about = "Print a saved suite JSON report artifact")]
     Report(ReportArgs),
 }
@@ -81,6 +79,8 @@ pub struct ForwardReportArgs {
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
+    #[arg(long)]
+    pub profile: Option<String>,
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
 }

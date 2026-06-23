@@ -191,6 +191,8 @@ fn delegated_health_uses_default_subcommand_without_forwarded_args() {
 
     let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
     assert!(gdhealth_args.contains("health"));
+    assert!(gdhealth_args.contains("--fail-on"));
+    assert!(gdhealth_args.contains("critical"));
 }
 
 #[test]
@@ -228,6 +230,44 @@ fn check_report_json_emits_suite_envelope_and_writes_artifact() {
 
     assert!(fixture.root.join("reports/gdsuite/check.json").exists());
     assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
+fn check_strict_profile_runs_test_and_health() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--profile", "strict"])
+        .assert()
+        .success();
+
+    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
+    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
+    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
+    assert!(gdhealth_args.contains("--fail-on"));
+    assert!(gdhealth_args.contains("warning"));
+}
+
+#[test]
+fn check_ci_profile_runs_test_and_health() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--profile", "ci"])
+        .assert()
+        .success();
+
+    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
+    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
+    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
+    assert!(gdhealth_args.contains("--fail-on"));
+    assert!(gdhealth_args.contains("critical"));
 }
 
 #[test]
@@ -313,21 +353,7 @@ fn check_includes_typecheck_in_failure_summary() {
 }
 
 #[test]
-fn ci_passes_full_pipeline() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-
-    fixture
-        .cmd()
-        .arg("ci")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("ci passed"));
-}
-
-#[test]
-fn ci_reports_aggregate_failure() {
+fn check_ci_profile_reports_aggregate_failure() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
@@ -335,7 +361,7 @@ fn ci_reports_aggregate_failure() {
 
     fixture
         .cmd()
-        .arg("ci")
+        .args(["check", "--profile", "ci"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("lint:"))
@@ -343,30 +369,40 @@ fn ci_reports_aggregate_failure() {
 }
 
 #[test]
-fn ci_report_json_includes_health_step() {
+fn check_ci_profile_report_json_includes_health_step() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
 
     fixture
         .cmd()
-        .args(["ci", "--report", "json"])
+        .args(["check", "--profile", "ci", "--report", "json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"command\": \"ci\""))
+        .stdout(predicate::str::contains("\"command\": \"check\""))
         .stdout(predicate::str::contains("\"name\": \"health\""));
 }
 
 #[test]
-fn ci_runs_test_and_health_by_default() {
+fn check_local_profile_skips_test_and_health() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
 
-    fixture.cmd().arg("ci").assert().success();
+    fixture
+        .cmd()
+        .args(["check", "--profile", "local"])
+        .assert()
+        .success();
 
-    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
-    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
+    assert!(
+        !fixture.root.join("logs/gdtest-args.txt").exists(),
+        "local profile should not invoke gdtest"
+    );
+    assert!(
+        !fixture.root.join("logs/gdhealth-args.txt").exists(),
+        "local profile should not invoke gdhealth"
+    );
 }
 
 #[test]
@@ -497,6 +533,44 @@ fn commands_fail_with_invalid_report_mode_in_config() {
 }
 
 #[test]
+fn commands_fail_with_unknown_profile() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--profile", "missing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown profile `missing`"));
+}
+
+#[test]
+fn commands_fail_with_unsupported_pipeline_step_in_profile() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        format!(
+            "{}\n[profiles.broken]\npipeline = [\"fmt\", \"deploy\"]\n",
+            fixture.read_gdsuite_config().trim_end()
+        ),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["check", "--profile", "broken"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "unsupported pipeline step `deploy`",
+        ));
+}
+
+#[test]
 fn commands_fail_with_init_guidance_when_project_is_not_bootstrapped() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -518,7 +592,7 @@ fn commands_fail_with_setup_guidance_when_manifest_is_missing() {
 
     fixture
         .cmd()
-        .arg("ci")
+        .args(["check", "--profile", "ci"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(

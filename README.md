@@ -12,13 +12,14 @@ The intended default flow is:
 ```bash
 gdsuite init
 gdsuite check
-gdsuite ci
+gdsuite test
+gdsuite health
 ```
 
 The suite-first workflow boundary is deliberate:
 
 - `gdsuite check` is the default local validation command.
-- `gdsuite ci` is the default CI validation command.
+- CI should compose explicit suite steps instead of relying on a separate `ci` command.
 - `gdsuite test` and `gdsuite health` are delegated product entrypoints when you need direct subsystem control.
 
 ## Commands
@@ -31,9 +32,8 @@ The suite-first workflow boundary is deliberate:
 - `gdsuite typecheck` runs a Godot headless `load()` pass over discovered scripts.
 - `gdsuite test -- ...` forwards arguments to project-local `gdtest`.
 - `gdsuite health [--report text|json] -- ...` forwards arguments to project-local `gdhealth` and can emit a suite report.
-- `gdsuite check [--report text|json]` runs the fast local gate: `fmt --check -> lint -> typecheck`.
-- `gdsuite ci [--report text|json]` runs the CI-grade pipeline: `fmt --check -> lint -> typecheck -> test -> health`.
-- `gdsuite report [latest|check|ci|health]` prints the last saved JSON suite report artifact.
+- `gdsuite check [--profile <name>] [--report text|json]` runs the fast local gate by default and can use any configured suite profile, including the built-in `ci` profile.
+- `gdsuite report [latest|check|health]` prints the last saved JSON suite report artifact.
 
 ## Workflow
 
@@ -45,10 +45,12 @@ gdsuite test
 gdsuite health
 ```
 
-CI should use `gdsuite ci` as the canonical full validation contract:
+CI should use explicit suite steps. A typical flow is:
 
 ```bash
-gdsuite ci --report json
+gdsuite check --report json
+gdsuite test
+gdsuite health --report json
 ```
 
 Delegated commands are intentionally narrow:
@@ -62,14 +64,41 @@ Delegated commands are intentionally narrow:
 
 `gdlint` does not provide native JSON output. `gdsuite lint --report json` therefore emits a suite-owned JSON report derived from `gdlint` diagnostics, while `--report text` preserves the original text stream.
 
-`gdsuite check --report json`, `gdsuite ci --report json`, and `gdsuite health --report json` emit a suite-level report envelope and save artifacts under `reports/gdsuite/`.
+`gdsuite check --report json` and `gdsuite health --report json` emit a suite-level report envelope and save artifacts under `reports/gdsuite/`.
+
+`gdsuite.toml` can set the default suite report mode:
+
+```toml
+[reports]
+default = "json"
+artifacts_dir = "reports/gdsuite"
+```
+
+When this is set, `check`, `health`, and `lint` use the configured mode unless `--report` overrides it on the command line.
+
+## Profiles
+
+`gdsuite.toml` can define named suite pipelines. Built-in defaults are available even when omitted from the file:
+
+```toml
+[profiles.local]
+pipeline = ["fmt", "lint", "typecheck"]
+
+[profiles.strict]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+health_fail_on = "warning"
+```
+
+The built-in `ci` profile also exists with `["fmt", "lint", "typecheck", "test", "health"]` and uses the default `[health].fail_on` threshold. `strict` overrides the health threshold to `warning`. `gdsuite check` defaults to the `local` profile. Use `--profile ci`, `--profile strict`, or another configured profile to override the pipeline for a single run.
 
 ## CI Template
 
-A starter GitHub Actions workflow is available at [`.github/workflows/gdsuite-ci.yml`](.github/workflows/gdsuite-ci.yml). It installs Rust and Python, bootstraps the local suite toolchain, and runs the canonical CI command:
+A starter GitHub Actions workflow is available at [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It installs Rust and Python, bootstraps the local suite toolchain, and runs explicit suite steps:
 
 ```bash
-gdsuite ci --report json
+gdsuite check --report json
+gdsuite test
+gdsuite health --report json
 ```
 
 Additional workflow notes live in [`docs/ci-recipes.md`](docs/ci-recipes.md).
