@@ -245,9 +245,7 @@ impl GdsuiteConfig {
             return Ok(());
         }
 
-        let mut config = GdsuiteConfig::default();
-        config.project.godot_exe = godot_exe.map(Path::to_path_buf);
-        fs::write(path, toml::to_string_pretty(&config)?)
+        fs::write(path, default_config_template(godot_exe))
             .with_context(|| format!("failed to write config {}", path.display()))
     }
 }
@@ -395,4 +393,61 @@ fn default_health_fail_on() -> String {
 
 fn default_health_bundle_dir() -> PathBuf {
     PathBuf::from("reports/code-health")
+}
+
+fn default_config_template(godot_exe: Option<&Path>) -> String {
+    let godot_exe = godot_exe
+        .map(|path| {
+            format!(
+                "godot_exe = \"{}\"\n",
+                path.display().to_string().replace('\\', "\\\\")
+            )
+        })
+        .unwrap_or_default();
+
+    format!(
+        r#"[project]
+root = "."
+{godot_exe}[tools]
+
+gdtoolkit = "4.*"
+gdtest_source = "../gdtest"
+gdhealth_source = "../gdhealth/tools/gdhealth"
+
+[paths]
+scripts = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[commands]
+default_test_target = "test/"
+default_health_subcommand = "health"
+
+[fix]
+safe_rules = ["format", "trailing-whitespace", "final-newline"]
+unsafe_rules = ["class-definitions-order"]
+
+[lint]
+line_length = 100
+
+[profiles.local]
+pipeline = ["fmt", "lint", "typecheck"]
+
+[profiles.ci]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+
+[profiles.strict]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+health_fail_on = "warning"
+
+[reports]
+default = "text"
+artifacts_dir = "reports/gdsuite"
+
+[health]
+enabled = true
+command = "health"
+fail_on = "critical"
+bundle_dir = "reports/code-health"
+"#
+    )
 }

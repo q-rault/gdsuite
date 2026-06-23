@@ -72,8 +72,8 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> 
     };
 
     GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
-    tooling::generate_external_configs(context)?;
     let config = tooling::load_config(context)?;
+    tooling::generate_external_configs(context, &config)?;
     let manifest = tooling::install_toolchain(context, &config, &godot_path)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     tooling::save_manifest(context, &manifest)?;

@@ -45,6 +45,25 @@ fn init_generates_project_local_toolchain_and_configs() {
     assert!(fixture.root.join("gdsuite.toml").exists());
     assert!(fixture.root.join("gdtest.toml").exists());
     assert!(fixture.root.join("gdhealth.toml").exists());
+
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(config.contains("[profiles.local]"));
+    assert!(config.contains("[profiles.ci]"));
+    assert!(config.contains("[profiles.strict]"));
+    assert!(config.contains("[reports]"));
+    assert!(config.contains("[health]"));
+
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    assert!(gdtest.contains("patterns = [\"test/**/*.gd\"]"));
+    assert!(gdtest.contains("[profile.ci]"));
+    assert!(gdtest.contains("reporter = \"junit\""));
+
+    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+    assert!(gdhealth.contains("[discovery]"));
+    assert!(gdhealth.contains(
+        "include = [\"*.gd\", \"client/**/*.gd\", \"server/**/*.gd\", \"test/**/*.gd\"]"
+    ));
+    assert!(gdhealth.contains("[groups]"));
 }
 
 #[test]
@@ -277,10 +296,9 @@ fn check_uses_configured_default_report_mode_when_flag_is_omitted() {
     fixture.seed_installed_toolchain();
     fs::write(
         fixture.root.join("gdsuite.toml"),
-        format!(
-            "{}\n[reports]\ndefault = \"json\"\n",
-            fixture.read_gdsuite_config().trim_end()
-        ),
+        fixture
+            .read_gdsuite_config()
+            .replace("default = \"text\"", "default = \"json\""),
     )
     .unwrap();
 
@@ -517,10 +535,9 @@ fn commands_fail_with_invalid_report_mode_in_config() {
     fixture.seed_installed_toolchain();
     fs::write(
         fixture.root.join("gdsuite.toml"),
-        format!(
-            "{}\n[reports]\ndefault = \"yaml\"\n",
-            fixture.read_gdsuite_config().trim_end()
-        ),
+        fixture
+            .read_gdsuite_config()
+            .replace("default = \"text\"", "default = \"yaml\""),
     )
     .unwrap();
 
@@ -614,6 +631,27 @@ fn setup_is_rerunnable_with_partial_state() {
         .assert()
         .success()
         .stdout(predicate::str::contains("setup complete"));
+}
+
+#[test]
+fn existing_product_configs_are_not_overwritten() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(fixture.root.join("gdtest.toml"), "reporter = \"json\"\n").unwrap();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[groups]\ncustom = [\"mods/**/*.gd\"]\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("init").assert().success();
+
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+    assert_eq!(gdtest, "reporter = \"json\"\n");
+    assert_eq!(gdhealth, "[groups]\ncustom = [\"mods/**/*.gd\"]\n");
 }
 
 struct Fixture {
@@ -827,6 +865,26 @@ unsafe_rules = ["class-definitions-order"]
 
 [lint]
 line_length = 100
+
+[profiles.local]
+pipeline = ["fmt", "lint", "typecheck"]
+
+[profiles.ci]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+
+[profiles.strict]
+pipeline = ["fmt", "lint", "typecheck", "test", "health"]
+health_fail_on = "warning"
+
+[reports]
+default = "text"
+artifacts_dir = "reports/gdsuite"
+
+[health]
+enabled = true
+command = "health"
+fail_on = "critical"
+bundle_dir = "reports/code-health"
 "#
     }
 

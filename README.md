@@ -76,6 +76,8 @@ artifacts_dir = "reports/gdsuite"
 
 When this is set, `check`, `health`, and `lint` use the configured mode unless `--report` overrides it on the command line.
 
+`gdsuite init` now writes these suite sections explicitly into `gdsuite.toml` by default instead of relying on hidden internal defaults.
+
 ## Profiles
 
 `gdsuite.toml` can define named suite pipelines. Built-in defaults are available even when omitted from the file:
@@ -102,6 +104,15 @@ gdsuite health --report json
 ```
 
 Additional workflow notes live in [`docs/ci-recipes.md`](docs/ci-recipes.md).
+
+## Product Configs
+
+`gdsuite init` generates plain product configs when they are missing:
+
+- `gdtest.toml` gets suite-aligned test discovery patterns and a `profile.ci` reporter default.
+- `gdhealth.toml` gets suite-aligned discovery include/exclude rules and logical file groups.
+
+Those files remain ordinary `gdtest` and `gdhealth` configs. Users can run either product directly without `gdsuite`, and `gdsuite` will not overwrite an existing product config.
 
 ## Validation
 

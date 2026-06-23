@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
-    config::{GdsuiteConfig, Manifest, Versions},
+    config::{GdsuiteConfig, Manifest, ProfileConfig, Versions},
     process,
 };
 
@@ -180,21 +180,11 @@ pub fn install_toolchain(
     })
 }
 
-pub fn generate_external_configs(context: &ProjectContext) -> Result<()> {
-    write_if_missing(
-        &context.gdtest_config_path,
-        r#"project_path = "."
-test_dir = "test/"
-headless = true
-"#,
-    )?;
+pub fn generate_external_configs(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
+    write_if_missing(&context.gdtest_config_path, &render_gdtest_config(config))?;
     write_if_missing(
         &context.gdhealth_config_path,
-        r#"[groups]
-gameplay = ["client/**/*.gd"]
-server = ["server/**/*.gd"]
-tests = ["test/**/*.gd"]
-"#,
+        &render_gdhealth_config(config),
     )?;
     Ok(())
 }
@@ -381,4 +371,138 @@ fn write_if_missing(path: &Path, contents: &str) -> Result<()> {
         return Ok(());
     }
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn render_gdtest_config(config: &GdsuiteConfig) -> String {
+    let mut lines = vec![
+        "project_path = \".\"".to_string(),
+        "display_mode = \"headless\"".to_string(),
+        format!("patterns = {}", toml_array(test_patterns(config))),
+        format!(
+            "coverage_exclude = {}",
+            toml_array(config.paths.exclude.clone())
+        ),
+        String::new(),
+        "[profile.ci]".to_string(),
+        "reporter = \"junit\"".to_string(),
+        "fail_fast = true".to_string(),
+    ];
+
+    if let Some(godot_exe) = &config.project.godot_exe {
+        lines.insert(
+            1,
+            format!(
+                "godot_exe = \"{}\"",
+                godot_exe.display().to_string().replace('\\', "\\\\")
+            ),
+        );
+    }
+
+    if let Some(strict) = config.profiles.entries.get("strict") {
+        append_gdtest_profile(&mut lines, "strict", strict);
+    }
+    if let Some(local) = config.profiles.entries.get("local")
+        && local.pipeline.iter().any(|step| step == "test")
+    {
+        append_gdtest_profile(&mut lines, "local", local);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+fn append_gdtest_profile(lines: &mut Vec<String>, name: &str, profile: &ProfileConfig) {
+    if !profile.pipeline.iter().any(|step| step == "test") {
+        return;
+    }
+
+    lines.push(String::new());
+    lines.push(format!("[profile.{name}]"));
+    if profile.health_fail_on.as_deref() == Some("warning") {
+        lines.push("fail_fast = true".to_string());
+    }
+}
+
+fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
+    let lines = vec![
+        "[project]".to_string(),
+        "root = \".\"".to_string(),
+        String::new(),
+        "[discovery]".to_string(),
+        format!("include = {}", toml_array(config.paths.scripts.clone())),
+        format!("exclude = {}", toml_array(config.paths.exclude.clone())),
+        String::new(),
+        "[groups]".to_string(),
+        format!("client = {}", toml_array(group_patterns(config, "client"))),
+        format!("server = {}", toml_array(group_patterns(config, "server"))),
+        format!("test = {}", toml_array(group_patterns(config, "test"))),
+        format!(
+            "root_gameplay = {}",
+            toml_array(root_gameplay_patterns(config))
+        ),
+    ];
+
+    lines.join("\n") + "\n"
+}
+
+fn test_patterns(config: &GdsuiteConfig) -> Vec<String> {
+    let patterns = config
+        .paths
+        .scripts
+        .iter()
+        .filter(|pattern| pattern.contains("test"))
+        .cloned()
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        vec!["test/**/*.gd".to_string(), "**/*.test.gd".to_string()]
+    } else {
+        patterns
+    }
+}
+
+fn group_patterns(config: &GdsuiteConfig, segment: &str) -> Vec<String> {
+    let patterns = config
+        .paths
+        .scripts
+        .iter()
+        .filter(|pattern| pattern.contains(segment))
+        .cloned()
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        vec![format!("{segment}/**/*.gd"), format!("{segment}/**")]
+    } else {
+        patterns
+    }
+}
+
+fn root_gameplay_patterns(config: &GdsuiteConfig) -> Vec<String> {
+    let mut patterns = config
+        .paths
+        .scripts
+        .iter()
+        .filter(|pattern| {
+            !pattern.contains("client") && !pattern.contains("server") && !pattern.contains("test")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if patterns.is_empty() {
+        patterns.push("*.gd".to_string());
+    }
+
+    patterns.extend(
+        config
+            .paths
+            .exclude
+            .iter()
+            .map(|pattern| format!("!{pattern}")),
+    );
+    patterns
+}
+
+fn toml_array(values: Vec<String>) -> String {
+    let values = values
+        .into_iter()
+        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\")))
+        .collect::<Vec<_>>();
+    format!("[{}]", values.join(", "))
 }
