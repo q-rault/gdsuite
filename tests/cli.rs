@@ -83,6 +83,28 @@ fn doctor_reports_resolved_paths() {
 }
 
 #[test]
+fn doctor_warns_when_gdhealth_config_misses_suite_excludes() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "warning=gdhealth config missing suite excludes: .gdsuite/**",
+        ))
+        .stdout(predicate::str::contains("status=ok"));
+}
+
+#[test]
 fn fmt_and_lint_fix_normalize_files() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -231,6 +253,29 @@ fn delegated_health_uses_default_subcommand_without_forwarded_args() {
     assert!(gdhealth_args.contains("health"));
     assert!(gdhealth_args.contains("--fail-on"));
     assert!(gdhealth_args.contains("critical"));
+}
+
+#[test]
+fn health_uses_overlay_config_that_enforces_suite_excludes() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("health").assert().success();
+
+    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
+    assert!(gdhealth_args.contains("--config"));
+    assert!(gdhealth_args.contains(".gdsuite\\state\\gdhealth.gdsuite.toml"));
+
+    let overlay =
+        fs::read_to_string(fixture.root.join(".gdsuite/state/gdhealth.gdsuite.toml")).unwrap();
+    assert!(overlay.contains("\".gdsuite/**\""));
+    assert!(overlay.contains("legacy = [\"*.gd\"]"));
 }
 
 #[test]
@@ -709,6 +754,30 @@ fn setup_is_rerunnable_with_partial_state() {
         .assert()
         .success()
         .stdout(predicate::str::contains("setup complete"));
+}
+
+#[test]
+fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_config() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["setup", "--sync-product-configs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("setup complete"));
+
+    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+    assert!(gdhealth.contains("\".gdsuite/**\""));
+    assert!(gdhealth.contains("legacy = [\"*.gd\"]"));
 }
 
 #[test]

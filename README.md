@@ -25,8 +25,8 @@ The suite-first workflow boundary is deliberate:
 ## Commands
 
 - `gdsuite init` bootstraps the local platform state and is the recommended first command.
-- `gdsuite setup` installs the local toolchain and writes missing config files.
-- `gdsuite doctor` prints resolved tool paths, versions, and setup status.
+- `gdsuite setup [--sync-product-configs]` installs the local toolchain, writes missing config files, and can merge safe suite-owned defaults into existing product configs.
+- `gdsuite doctor` prints resolved tool paths, versions, setup status, and warnings for stale product config drift.
 - `gdsuite fmt [--check]` runs `gdformat` on discovered `.gd` files.
 - `gdsuite lint [--fix] [--unsafe-fixes] [--report text|json]` runs lint and suite-owned fixers.
 - `gdsuite typecheck` runs a Godot headless `load()` pass over discovered scripts.
@@ -117,6 +117,8 @@ Additional workflow notes live in [`docs/ci-recipes.md`](docs/ci-recipes.md).
 
 Those files remain ordinary `gdtest` and `gdhealth` configs. Users can run either product directly without `gdsuite`, and `gdsuite` will not overwrite an existing product config.
 
+When an existing `gdhealth.toml` is missing suite-required excludes like `.gdsuite/**`, `gdsuite health` applies a runtime overlay so generated suite files do not leak into health analysis. `gdsuite doctor` warns about that drift, and `gdsuite setup --sync-product-configs` persists the safe merged config back into `gdhealth.toml`.
+
 ## Validation
 
 Local verification:
@@ -130,4 +132,10 @@ Real-project validation against `../example-game`:
 
 ```bash
 bash scripts/validate-example-game.sh
+```
+
+On Windows without Git Bash:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\validate-example-game.ps1
 ```

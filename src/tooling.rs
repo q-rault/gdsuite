@@ -189,6 +189,28 @@ pub fn generate_external_configs(context: &ProjectContext, config: &GdsuiteConfi
     Ok(())
 }
 
+pub fn sync_product_configs(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
+    let merged = merged_gdhealth_config(context, config)?;
+    fs::write(&context.gdhealth_config_path, toml::to_string(&merged)?)
+        .with_context(|| format!("failed to write {}", context.gdhealth_config_path.display()))?;
+    Ok(())
+}
+
+pub fn product_config_warnings(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<Vec<String>> {
+    let missing = missing_gdhealth_excludes(context, config)?;
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(vec![format!(
+        "gdhealth config missing suite excludes: {}; run `gdsuite setup --sync-product-configs` to persist the suite-safe merge",
+        missing.join(", ")
+    )])
+}
+
 pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Result<()> {
     process::run_checked(
         &toolchain.godot_exe,
@@ -422,7 +444,7 @@ fn append_gdtest_profile(lines: &mut Vec<String>, name: &str, profile: &ProfileC
     }
 }
 
-fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
+pub(crate) fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
     let lines = vec![
         "[project]".to_string(),
         "root = \".\"".to_string(),
@@ -442,6 +464,83 @@ fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
     ];
 
     lines.join("\n") + "\n"
+}
+
+pub fn merged_gdhealth_config(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<toml::Value> {
+    let mut doc = if context.gdhealth_config_path.exists() {
+        let body = fs::read_to_string(&context.gdhealth_config_path).with_context(|| {
+            format!("failed to read {}", context.gdhealth_config_path.display())
+        })?;
+        body.parse::<toml::Value>().with_context(|| {
+            format!("failed to parse {}", context.gdhealth_config_path.display())
+        })?
+    } else {
+        render_gdhealth_config(config)
+            .parse::<toml::Value>()
+            .context("failed to render fallback gdhealth config")?
+    };
+
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("gdhealth config root must be a TOML table"))?;
+    let discovery = table
+        .entry("discovery")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("gdhealth discovery section must be a TOML table"))?;
+    let excludes = discovery
+        .entry("exclude")
+        .or_insert_with(|| toml::Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("gdhealth discovery.exclude must be an array"))?;
+
+    for pattern in &config.paths.exclude {
+        if !excludes
+            .iter()
+            .any(|value| value.as_str() == Some(pattern.as_str()))
+        {
+            excludes.push(toml::Value::String(pattern.clone()));
+        }
+    }
+
+    Ok(doc)
+}
+
+pub fn missing_gdhealth_excludes(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<Vec<String>> {
+    if !context.gdhealth_config_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let body = fs::read_to_string(&context.gdhealth_config_path)
+        .with_context(|| format!("failed to read {}", context.gdhealth_config_path.display()))?;
+    let doc = body
+        .parse::<toml::Value>()
+        .with_context(|| format!("failed to parse {}", context.gdhealth_config_path.display()))?;
+    let existing = doc
+        .get("discovery")
+        .and_then(|value| value.get("exclude"))
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(config
+        .paths
+        .exclude
+        .iter()
+        .filter(|pattern| !existing.iter().any(|value| value == &pattern.as_str()))
+        .cloned()
+        .collect())
 }
 
 fn test_patterns(config: &GdsuiteConfig) -> Vec<String> {

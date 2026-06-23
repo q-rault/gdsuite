@@ -9,7 +9,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs},
+    cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs, SetupArgs},
     config::{GdsuiteConfig, Manifest, ProfileConfig},
     fixers, process,
     tooling::{self, ProjectContext},
@@ -38,7 +38,7 @@ pub fn run() -> Result<()> {
 
     match cli.command {
         Commands::Init => init(&context, cli.godot_exe.as_deref()),
-        Commands::Setup => setup(&context, cli.godot_exe.as_deref()),
+        Commands::Setup(args) => setup(&context, cli.godot_exe.as_deref(), args),
         Commands::Doctor => doctor(&context, cli.godot_exe.as_deref()),
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
@@ -51,18 +51,24 @@ pub fn run() -> Result<()> {
 }
 
 fn init(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
-    setup_impl(context, cli_godot)?;
+    setup_impl(
+        context,
+        cli_godot,
+        SetupArgs {
+            sync_product_configs: false,
+        },
+    )?;
     println!("init complete");
     Ok(())
 }
 
-fn setup(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
-    setup_impl(context, cli_godot)?;
+fn setup(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
+    setup_impl(context, cli_godot, args)?;
     println!("setup complete");
     Ok(())
 }
 
-fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
     context.ensure_dirs()?;
     let godot_path = if context.config_path.exists() {
         let existing = tooling::load_config(context)?;
@@ -74,6 +80,9 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> 
     GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
     let config = tooling::load_config(context)?;
     tooling::generate_external_configs(context, &config)?;
+    if args.sync_product_configs {
+        tooling::sync_product_configs(context, &config)?;
+    }
     let manifest = tooling::install_toolchain(context, &config, &godot_path)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     tooling::save_manifest(context, &manifest)?;
@@ -109,6 +118,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     print_version("python", &toolchain.python, &["--version"])?;
     print_version("gdtest", &toolchain.gdtest, &["--version"])?;
     print_version("gdhealth", &toolchain.gdhealth, &["--help"])?;
+    for warning in tooling::product_config_warnings(context, &config)? {
+        println!("warning={warning}");
+    }
 
     println!("status=ok");
     Ok(())
@@ -208,9 +220,9 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     let forwarded = args.args;
     let toolchain = load_toolchain_or_error(context)?;
     let args = if forwarded.is_empty() {
-        build_default_health_args(&config, None)
+        build_default_health_args(context, &config, None)?
     } else {
-        forwarded
+        prepare_health_args(context, &config, forwarded)?
     };
     process::run_checked(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
@@ -727,9 +739,9 @@ fn run_health_step(
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
     let args = if forwarded.is_empty() {
-        build_default_health_args(config, fail_on_override)
+        build_default_health_args(context, config, fail_on_override)?
     } else {
-        forwarded
+        prepare_health_args(context, config, forwarded)?
     };
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
@@ -778,15 +790,46 @@ fn run_health_step(
 }
 
 fn build_default_health_args(
+    context: &ProjectContext,
     config: &GdsuiteConfig,
     fail_on_override: Option<&str>,
-) -> Vec<String> {
+) -> Result<Vec<String>> {
     let fail_on = fail_on_override.unwrap_or(&config.health.fail_on);
-    vec![
-        config.health.command.clone(),
-        "--fail-on".to_string(),
-        fail_on.to_string(),
-    ]
+    prepare_health_args(
+        context,
+        config,
+        vec![
+            config.health.command.clone(),
+            "--fail-on".to_string(),
+            fail_on.to_string(),
+        ],
+    )
+}
+
+fn prepare_health_args(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    forwarded: Vec<String>,
+) -> Result<Vec<String>> {
+    if forwarded.iter().any(|arg| arg == "--config") {
+        return Ok(forwarded);
+    }
+
+    let overlay_path = write_health_overlay_config(context, config)?;
+    let mut args = vec!["--config".to_string(), overlay_path.display().to_string()];
+    args.extend(forwarded);
+    Ok(args)
+}
+
+fn write_health_overlay_config(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<PathBuf> {
+    let doc = tooling::merged_gdhealth_config(context, config)?;
+    let overlay_path = context.state_dir.join("gdhealth.gdsuite.toml");
+    fs::write(&overlay_path, toml::to_string(&doc)?)
+        .with_context(|| format!("failed to write {}", overlay_path.display()))?;
+    Ok(overlay_path)
 }
 
 fn finish_pipeline(

@@ -22,7 +22,7 @@ pub enum Commands {
     #[command(about = "Bootstrap the local gdsuite toolchain and product configs")]
     Init,
     #[command(about = "Install or repair the local gdsuite toolchain and product configs")]
-    Setup,
+    Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor,
     #[command(about = "Run gdformat on discovered GDScript files")]
@@ -51,6 +51,15 @@ pub enum Commands {
 pub struct FmtArgs {
     #[arg(long)]
     pub check: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SetupArgs {
+    #[arg(
+        long,
+        help = "Merge safe suite-owned defaults into existing product configs"
+    )]
+    pub sync_product_configs: bool,
 }
 
 #[derive(Debug, Args)]
