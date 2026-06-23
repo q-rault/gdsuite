@@ -231,6 +231,31 @@ fn check_report_json_emits_suite_envelope_and_writes_artifact() {
 }
 
 #[test]
+fn check_uses_configured_default_report_mode_when_flag_is_omitted() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        format!(
+            "{}\n[reports]\ndefault = \"json\"\n",
+            fixture.read_gdsuite_config().trim_end()
+        ),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"check\""))
+        .stdout(predicate::str::contains("\"status\": \"ok\""));
+
+    assert!(fixture.root.join("reports/gdsuite/check.json").exists());
+}
+
+#[test]
 fn typecheck_succeeds_and_generates_checker_script() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -450,6 +475,28 @@ fn commands_fail_with_invalid_gdsuite_toml() {
 }
 
 #[test]
+fn commands_fail_with_invalid_report_mode_in_config() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        format!(
+            "{}\n[reports]\ndefault = \"yaml\"\n",
+            fixture.read_gdsuite_config().trim_end()
+        ),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported report mode `yaml`"));
+}
+
+#[test]
 fn commands_fail_with_init_guidance_when_project_is_not_bootstrapped() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -655,29 +702,7 @@ echo %*> "%CD%\logs\gdhealth-args.txt"
         );
         fs::write(
             self.root.join("gdsuite.toml"),
-            r#"[project]
-root = "."
-
-[tools]
-gdtoolkit = "4.*"
-gdtest_source = "../gdtest"
-gdhealth_source = "../gdhealth/tools/gdhealth"
-
-[paths]
-scripts = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
-exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
-
-[commands]
-default_test_target = "test/"
-default_health_subcommand = "health"
-
-[fix]
-safe_rules = ["format", "trailing-whitespace", "final-newline"]
-unsafe_rules = ["class-definitions-order"]
-
-[lint]
-line_length = 100
-"#,
+            self.default_gdsuite_config(),
         )
         .unwrap();
         fs::write(
@@ -703,6 +728,36 @@ line_length = 100
         fs::write(self.root.join("gdtest.toml"), "test_dir = \"test/\"\n").unwrap();
         fs::write(self.root.join("gdhealth.toml"), "[groups]\n").unwrap();
         self.seed_path_tools();
+    }
+
+    fn default_gdsuite_config(&self) -> &'static str {
+        r#"[project]
+root = "."
+
+[tools]
+gdtoolkit = "4.*"
+gdtest_source = "../gdtest"
+gdhealth_source = "../gdhealth/tools/gdhealth"
+
+[paths]
+scripts = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[commands]
+default_test_target = "test/"
+default_health_subcommand = "health"
+
+[fix]
+safe_rules = ["format", "trailing-whitespace", "final-newline"]
+unsafe_rules = ["class-definitions-order"]
+
+[lint]
+line_length = 100
+"#
+    }
+
+    fn read_gdsuite_config(&self) -> String {
+        fs::read_to_string(self.root.join("gdsuite.toml")).unwrap()
     }
 }
 

@@ -4,6 +4,7 @@
 
 `gdsuite` owns the user-facing workflow:
 
+- `init`
 - `setup`
 - `doctor`
 - `fmt`
@@ -13,6 +14,7 @@
 - `health`
 - `check`
 - `ci`
+- `report`
 
 `test` and `health` are delegated commands with passthrough argument forwarding. `check` is the fast static gate and runs `fmt --check`, `lint`, and `typecheck`. `ci` is the full sequential gate and runs `fmt --check`, `lint`, `typecheck`, `test`, and `health`.
 
@@ -50,6 +52,8 @@ The PoC defaults assume local sibling source checkouts for `gdtest` and `gdhealt
 Safe fixers are deterministic whitespace-level rewrites. The experimental unsafe fixer only handles declaration-only class files and skips ambiguous cases.
 
 `lint --report json` is also suite-owned. `gdlint` only emits text, so `gdsuite` parses the text diagnostics into a stable JSON report rather than depending on upstream JSON support.
+
+`[reports].default` in `gdsuite.toml` controls the default report mode for suite commands. `--report` still overrides config per invocation.
 
 ## Source resolution assumptions
 

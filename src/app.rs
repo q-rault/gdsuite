@@ -133,6 +133,7 @@ fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
 fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
     let toolchain = load_toolchain_or_error(context)?;
+    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
 
     if args.fix {
         let safe_report = fixers::apply_safe_fixes(context, &config, &toolchain.gdformat)?;
@@ -146,10 +147,10 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
         println!("safe_changed={}", safe_report.changed_files.len());
     }
 
-    let cmd_args = lint_args(context, &config, &args.report)?;
+    let cmd_args = lint_args(context, &config, &report_mode)?;
     let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    print_lint_output(&output, &args.report)?;
+    print_lint_output(&output, &report_mode)?;
     if !output.status.success() {
         return Err(command_error(
             EXIT_VALIDATION_ERROR,
@@ -176,8 +177,9 @@ fn test(context: &ProjectContext, forwarded: Vec<String>) -> Result<()> {
 }
 
 fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
-    if args.report == "json" {
-        let config = load_config_or_error(context)?;
+    let config = load_config_or_error(context)?;
+    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
+    if report_mode == "json" {
         let step = run_health_step(context, &config, args.args)?;
         let report = SuiteReport::from_steps("health", context, vec![step]);
         print_and_store_report(context, &config, "health", &report)?;
@@ -191,7 +193,6 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     }
 
     let forwarded = args.args;
-    let config = load_config_or_error(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let mut args = if forwarded.is_empty() {
         vec![config.health.command.clone()]
@@ -253,16 +254,18 @@ fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
 
 fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
+    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     let steps = vec![
         run_fmt_step(context, true)?,
         run_lint_step(context, &config)?,
         run_typecheck_step(context)?,
     ];
-    finish_pipeline(context, &config, "check", args.report, steps)
+    finish_pipeline(context, &config, "check", report_mode, steps)
 }
 
 fn ci(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
+    let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     let mut steps = vec![
         run_fmt_step(context, true)?,
         run_lint_step(context, &config)?,
@@ -272,7 +275,7 @@ fn ci(context: &ProjectContext, args: RunArgs) -> Result<()> {
     if config.health.enabled {
         steps.push(run_health_step(context, &config, Vec::new())?);
     }
-    finish_pipeline(context, &config, "ci", args.report, steps)
+    finish_pipeline(context, &config, "ci", report_mode, steps)
 }
 
 fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
@@ -344,6 +347,19 @@ fn resolve_toolchain_or_error(
             )
         },
     )
+}
+
+fn resolve_report_mode(config: &GdsuiteConfig, cli_report: Option<&str>) -> Result<String> {
+    let report = cli_report.unwrap_or(&config.reports.default);
+    match report {
+        "text" | "json" => Ok(report.to_string()),
+        other => Err(command_error(
+            EXIT_USAGE_ERROR,
+            format!(
+                "unsupported report mode `{other}` in gdsuite config; expected `text` or `json`"
+            ),
+        )),
+    }
 }
 
 fn lint_args(
