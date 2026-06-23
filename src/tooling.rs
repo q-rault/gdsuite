@@ -209,11 +209,7 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     process::run_checked(&toolchain.gdformat, &["--help".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdlint, &["--help".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
-    process::run_checked(
-        &toolchain.gdhealth,
-        &["--help".to_string()],
-        &context.root,
-    )?;
+    process::run_checked(&toolchain.gdhealth, &["--help".to_string()], &context.root)?;
     Ok(())
 }
 
@@ -329,7 +325,9 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("workspace at {} has no members", source_root.display()))?;
 
     for member in members {
-        let member_path = member.as_str().ok_or_else(|| anyhow!("invalid workspace member"))?;
+        let member_path = member
+            .as_str()
+            .ok_or_else(|| anyhow!("invalid workspace member"))?;
         let candidate = source_root.join(member_path);
         let member_manifest = candidate.join("Cargo.toml");
         if !member_manifest.exists() {

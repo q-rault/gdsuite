@@ -84,6 +84,49 @@ fn lint_with_unsafe_fixes_reorders_supported_declarations() {
 }
 
 #[test]
+fn lint_report_json_outputs_suite_owned_json() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fs::write(fixture.root.join("test/sample.gd"), "extends Node\n").unwrap();
+
+    fixture
+        .cmd()
+        .args(["lint", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"status\": \"ok\""))
+        .stdout(predicate::str::contains(
+            "\"summary\": \"Success: no problems found\"",
+        ))
+        .stdout(predicate::str::contains("\"findings\": []"));
+
+    let gdlint_args = fs::read_to_string(fixture.root.join("logs/gdlint-args.txt")).unwrap();
+    assert!(gdlint_args.contains("--verbose"));
+}
+
+#[test]
+fn lint_report_json_includes_parsed_findings_on_failure() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fs::write(fixture.root.join("test/sample.gd"), "extends Node\n").unwrap();
+    fs::write(fixture.root.join("mock-state/lint-fail.flag"), "").unwrap();
+
+    fixture
+        .cmd()
+        .args(["lint", "--report", "json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("\"file\": \"test/sample.gd\""))
+        .stdout(predicate::str::contains("\"rule\": \"function-name\""))
+        .stderr(predicate::str::contains("lint failed with exit code"));
+}
+
+#[test]
 fn delegated_commands_forward_arguments() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -111,7 +154,7 @@ fn check_reports_aggregate_failure() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
-    fs::write(fixture.root.join("mock-state/lint-fail"), "").unwrap();
+    fs::write(fixture.root.join("mock-state/lint-fail.flag"), "").unwrap();
 
     fixture
         .cmd()
@@ -198,7 +241,7 @@ fn ci_reports_aggregate_failure() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
-    fs::write(fixture.root.join("mock-state/lint-fail"), "").unwrap();
+    fs::write(fixture.root.join("mock-state/lint-fail.flag"), "").unwrap();
 
     fixture
         .cmd()
@@ -392,8 +435,13 @@ if "%5" neq "" (
         write_cmd(
             &gdsuite_dir.join("python/Scripts/gdlint.cmd"),
             r#"@echo off
-if exist "%CD%\mock-state\lint-fail" exit /b 1
-echo lint ok
+echo %*> "%CD%\logs\gdlint-args.txt"
+if exist "%CD%\mock-state\lint-fail.flag" (
+  echo test/sample.gd:3: Error: Function name "BadName" is not valid ^(function-name^)
+  >&2 echo Failure: 1 problem found
+  exit /b 1
+)
+echo Success: no problems found
 "#,
         );
         write_cmd(

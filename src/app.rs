@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
+use serde::Serialize;
 
 use crate::{
     cli::{Cli, Commands, FmtArgs, LintArgs},
@@ -138,12 +139,7 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let cmd_args = lint_args(context, &config, &args.report)?;
     let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    if !output.stdout.is_empty() {
-        print!("{}", output.stdout);
-    }
-    if !output.stderr.is_empty() {
-        eprint!("{}", output.stderr);
-    }
+    print_lint_output(&output, &args.report)?;
     if !output.status.success() {
         return Err(command_error(
             EXIT_VALIDATION_ERROR,
@@ -319,13 +315,116 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
 fn lint_args(
     context: &ProjectContext,
     config: &GdsuiteConfig,
-    _report: &str,
+    report: &str,
 ) -> Result<Vec<String>> {
     let mut args = Vec::new();
+    if report == "json" {
+        args.push("--verbose".to_string());
+    }
     for file in fixers::discover_script_files(context, config)? {
         args.push(file.display().to_string());
     }
     Ok(args)
+}
+
+fn print_lint_output(output: &process::ProcessOutput, report: &str) -> Result<()> {
+    if report == "json" {
+        let report = JsonLintReport::from_output(output);
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    if !output.stdout.is_empty() {
+        print!("{}", output.stdout);
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", output.stderr);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct JsonLintReport {
+    status: &'static str,
+    success: bool,
+    exit_code: Option<i32>,
+    summary: Option<String>,
+    findings: Vec<JsonLintFinding>,
+    stderr: Vec<String>,
+    raw_stdout: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonLintFinding {
+    file: String,
+    line: usize,
+    severity: String,
+    message: String,
+    rule: Option<String>,
+}
+
+impl JsonLintReport {
+    fn from_output(output: &process::ProcessOutput) -> Self {
+        let mut findings = Vec::new();
+        let mut raw_stdout = Vec::new();
+
+        for line in output.stdout.lines().filter(|line| !line.trim().is_empty()) {
+            if let Some(finding) = parse_lint_finding(line) {
+                findings.push(finding);
+            } else {
+                raw_stdout.push(line.to_string());
+            }
+        }
+
+        let stderr = output
+            .stderr
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        let summary = raw_stdout
+            .iter()
+            .find(|line| {
+                line.starts_with("Success: ")
+                    || line.starts_with("Failure: ")
+                    || line.starts_with("Cannot open file ")
+            })
+            .cloned()
+            .or_else(|| stderr.last().cloned());
+
+        Self {
+            status: if output.status.success() {
+                "ok"
+            } else {
+                "failed"
+            },
+            success: output.status.success(),
+            exit_code: output.status.code(),
+            summary,
+            findings,
+            stderr,
+            raw_stdout,
+        }
+    }
+}
+
+fn parse_lint_finding(line: &str) -> Option<JsonLintFinding> {
+    let (prefix, remainder) = line.split_once(": Error: ")?;
+    let (file, line_number) = prefix.rsplit_once(':')?;
+    let line = line_number.parse().ok()?;
+    let parsed_rule = remainder
+        .rsplit_once(" (")
+        .and_then(|(message, suffix)| suffix.strip_suffix(')').map(|rule| (message, rule)));
+    let (message, _) = parsed_rule.unwrap_or((remainder, ""));
+
+    Some(JsonLintFinding {
+        file: file.to_string(),
+        line,
+        severity: "error".to_string(),
+        message: message.to_string(),
+        rule: parsed_rule.map(|(_, value)| value.to_string()),
+    })
 }
 
 fn run_gdtest_init(context: &ProjectContext, manifest: &Manifest) -> Result<()> {

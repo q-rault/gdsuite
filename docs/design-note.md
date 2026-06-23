@@ -8,11 +8,13 @@
 - `doctor`
 - `fmt`
 - `lint`
+- `typecheck`
 - `test`
 - `health`
 - `check`
+- `ci`
 
-`test` and `health` are delegated commands with passthrough argument forwarding. `check` runs formatter check, lint, tests, and health in sequence and reports an aggregate result.
+`test` and `health` are delegated commands with passthrough argument forwarding. `check` is the fast static gate and runs `fmt --check`, `lint`, and `typecheck`. `ci` is the full sequential gate and runs `fmt --check`, `lint`, `typecheck`, `test`, and `health`.
 
 ## Local install layout
 
@@ -46,6 +48,8 @@ The PoC defaults assume local sibling source checkouts for `gdtest` and `gdhealt
 4. `gdlint` verification
 
 Safe fixers are deterministic whitespace-level rewrites. The experimental unsafe fixer only handles declaration-only class files and skips ambiguous cases.
+
+`lint --report json` is also suite-owned. `gdlint` only emits text, so `gdsuite` parses the text diagnostics into a stable JSON report rather than depending on upstream JSON support.
 
 ## Source resolution assumptions
 
