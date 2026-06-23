@@ -6,7 +6,10 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
-    config::{GdsuiteConfig, Manifest, ProfileConfig, Versions},
+    config::{
+        GdhealthConfig, GdhealthPolicyConfig, GdhealthProjectConfig, GdhealthThresholdsConfig,
+        GdtestConfig, GdsuiteConfig, Manifest, Versions,
+    },
     process,
 };
 
@@ -190,8 +193,12 @@ pub fn generate_external_configs(context: &ProjectContext, config: &GdsuiteConfi
 }
 
 pub fn sync_product_configs(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
-    let merged = merged_gdhealth_config(context, config)?;
-    fs::write(&context.gdhealth_config_path, toml::to_string(&merged)?)
+    let gdtest = merged_gdtest_config(context, config)?;
+    fs::write(&context.gdtest_config_path, toml::to_string(&gdtest)?)
+        .with_context(|| format!("failed to write {}", context.gdtest_config_path.display()))?;
+
+    let gdhealth = merged_gdhealth_config(context, config)?;
+    fs::write(&context.gdhealth_config_path, toml::to_string(&gdhealth)?)
         .with_context(|| format!("failed to write {}", context.gdhealth_config_path.display()))?;
     Ok(())
 }
@@ -200,15 +207,25 @@ pub fn product_config_warnings(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<Vec<String>> {
-    let missing = missing_gdhealth_excludes(context, config)?;
-    if missing.is_empty() {
-        return Ok(Vec::new());
+    let mut warnings = Vec::new();
+
+    let gdtest = missing_gdtest_suite_settings(context, config)?;
+    if !gdtest.is_empty() {
+        warnings.push(format!(
+            "gdtest config drift from gdsuite.toml: {}; run `gdsuite migrate` or `gdsuite setup --sync-product-configs` to re-render the canonical subset",
+            gdtest.join(", ")
+        ));
     }
 
-    Ok(vec![format!(
-        "gdhealth config missing suite excludes: {}; run `gdsuite setup --sync-product-configs` to persist the suite-safe merge",
-        missing.join(", ")
-    )])
+    let gdhealth = missing_gdhealth_settings(context, config)?;
+    if !gdhealth.is_empty() {
+        warnings.push(format!(
+            "gdhealth config drift from gdsuite.toml: {}; run `gdsuite migrate` or `gdsuite setup --sync-product-configs` to re-render the canonical subset",
+            gdhealth.join(", ")
+        ));
+    }
+
+    Ok(warnings)
 }
 
 pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Result<()> {
@@ -395,94 +412,166 @@ fn write_if_missing(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn load_product_config_or_render(
+    path: &Path,
+    fallback: impl FnOnce() -> String,
+) -> Result<toml::Value> {
+    if path.exists() {
+        let body = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        return body
+            .parse::<toml::Value>()
+            .with_context(|| format!("failed to parse {}", path.display()));
+    }
+
+    fallback()
+        .parse::<toml::Value>()
+        .with_context(|| format!("failed to render fallback {}", path.display()))
+}
+
 fn render_gdtest_config(config: &GdsuiteConfig) -> String {
     let mut lines = vec![
-        "project_path = \".\"".to_string(),
-        "display_mode = \"headless\"".to_string(),
-        format!("patterns = {}", toml_array(test_patterns(config))),
+        format!("display_mode = {}", toml_string(&config.gdtest.display_mode)),
+        format!("harness = {}", toml_string(&config.gdtest.harness)),
+        format!("patterns = {}", toml_array(config.gdtest.patterns.clone())),
         format!(
             "coverage_exclude = {}",
-            toml_array(config.paths.exclude.clone())
+            toml_array(config.gdtest.coverage_exclude.clone())
         ),
-        String::new(),
-        "[profile.ci]".to_string(),
-        "reporter = \"junit\"".to_string(),
-        "fail_fast = true".to_string(),
     ];
 
-    if let Some(godot_exe) = &config.project.godot_exe {
-        lines.insert(
-            1,
-            format!(
-                "godot_exe = \"{}\"",
-                godot_exe.display().to_string().replace('\\', "\\\\")
-            ),
-        );
-    }
-
-    if let Some(strict) = config.profiles.entries.get("strict") {
-        append_gdtest_profile(&mut lines, "strict", strict);
-    }
-    if let Some(local) = config.profiles.entries.get("local")
-        && local.pipeline.iter().any(|step| step == "test")
-    {
-        append_gdtest_profile(&mut lines, "local", local);
+    for (name, profile) in &config.gdtest.profile {
+        lines.push(String::new());
+        lines.push(format!("[profile.{name}]"));
+        if let Some(reporter) = &profile.reporter {
+            lines.push(format!("reporter = {}", toml_string(reporter)));
+        }
+        if let Some(fail_fast) = profile.fail_fast {
+            lines.push(format!("fail_fast = {fail_fast}"));
+        }
     }
 
     lines.join("\n") + "\n"
 }
 
-fn append_gdtest_profile(lines: &mut Vec<String>, name: &str, profile: &ProfileConfig) {
-    if !profile.pipeline.iter().any(|step| step == "test") {
-        return;
+pub fn merged_gdtest_config(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<toml::Value> {
+    let mut doc = load_product_config_or_render(&context.gdtest_config_path, || {
+        render_gdtest_config(config)
+    })?;
+
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("gdtest config root must be a TOML table"))?;
+    table.insert(
+        "display_mode".to_string(),
+        toml::Value::String(config.gdtest.display_mode.clone()),
+    );
+    table.insert(
+        "harness".to_string(),
+        toml::Value::String(config.gdtest.harness.clone()),
+    );
+    table.insert(
+        "patterns".to_string(),
+        string_array_value(&config.gdtest.patterns),
+    );
+    table.insert(
+        "coverage_exclude".to_string(),
+        string_array_value(&config.gdtest.coverage_exclude),
+    );
+
+    let profile_table = table
+        .entry("profile")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("gdtest profile section must be a TOML table"))?;
+    for (name, profile) in &config.gdtest.profile {
+        let profile_doc = profile_table
+            .entry(name.clone())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("gdtest profile entry must be a TOML table"))?;
+        if let Some(reporter) = &profile.reporter {
+            profile_doc.insert("reporter".to_string(), toml::Value::String(reporter.clone()));
+        }
+        if let Some(fail_fast) = profile.fail_fast {
+            profile_doc.insert("fail_fast".to_string(), toml::Value::Boolean(fail_fast));
+        }
     }
 
-    lines.push(String::new());
-    lines.push(format!("[profile.{name}]"));
-    if profile.health_fail_on.as_deref() == Some("warning") {
-        lines.push("fail_fast = true".to_string());
+    Ok(doc)
+}
+
+pub fn missing_gdtest_suite_settings(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<Vec<String>> {
+    if !context.gdtest_config_path.exists() {
+        return Ok(Vec::new());
     }
+
+    let body = fs::read_to_string(&context.gdtest_config_path)
+        .with_context(|| format!("failed to read {}", context.gdtest_config_path.display()))?;
+    let doc = body
+        .parse::<toml::Value>()
+        .with_context(|| format!("failed to parse {}", context.gdtest_config_path.display()))?;
+
+    let expected: toml::Value = render_gdtest_config(config).parse()?;
+    Ok(diff_owned_keys(&doc, &expected, &gdtest_owned_paths(config)))
 }
 
 pub(crate) fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
     let lines = vec![
         "[project]".to_string(),
-        "root = \".\"".to_string(),
+        format!("root = {}", toml_string(&config.gdhealth.project.root)),
         String::new(),
         "[discovery]".to_string(),
-        format!("include = {}", toml_array(config.paths.scripts.clone())),
-        format!("exclude = {}", toml_array(config.paths.exclude.clone())),
+        format!(
+            "include = {}",
+            toml_array(config.gdhealth.discovery.include.clone())
+        ),
+        format!(
+            "exclude = {}",
+            toml_array(config.gdhealth.discovery.exclude.clone())
+        ),
         String::new(),
         "[groups]".to_string(),
-        format!("client = {}", toml_array(group_patterns(config, "client"))),
-        format!("server = {}", toml_array(group_patterns(config, "server"))),
-        format!("test = {}", toml_array(group_patterns(config, "test"))),
-        format!(
-            "root_gameplay = {}",
-            toml_array(root_gameplay_patterns(config))
-        ),
+        render_group_lines(&config.gdhealth.groups),
     ];
 
-    lines.join("\n") + "\n"
+    let mut body = lines[..lines.len() - 1].join("\n");
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(&lines.last().cloned().unwrap_or_default());
+    body.push('\n');
+    append_gdhealth_thresholds_and_policy(&mut body, &config.gdhealth);
+    body
 }
 
 pub fn merged_gdhealth_config(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<toml::Value> {
-    let mut doc = if context.gdhealth_config_path.exists() {
-        let body = fs::read_to_string(&context.gdhealth_config_path).with_context(|| {
-            format!("failed to read {}", context.gdhealth_config_path.display())
-        })?;
-        body.parse::<toml::Value>().with_context(|| {
-            format!("failed to parse {}", context.gdhealth_config_path.display())
-        })?
-    } else {
+    let mut doc = load_product_config_or_render(&context.gdhealth_config_path, || {
         render_gdhealth_config(config)
-            .parse::<toml::Value>()
-            .context("failed to render fallback gdhealth config")?
-    };
+    })?;
 
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("gdhealth config root must be a TOML table"))?;
+    replace_gdhealth_owned_sections(table, &config.gdhealth, false);
+
+    Ok(doc)
+}
+
+pub fn merged_gdhealth_overlay_config(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<toml::Value> {
+    let mut doc = merged_gdhealth_config(context, config)?;
     let table = doc
         .as_table_mut()
         .ok_or_else(|| anyhow!("gdhealth config root must be a TOML table"))?;
@@ -496,20 +585,16 @@ pub fn merged_gdhealth_config(
         .or_insert_with(|| toml::Value::Array(Vec::new()))
         .as_array_mut()
         .ok_or_else(|| anyhow!("gdhealth discovery.exclude must be an array"))?;
-
-    for pattern in &config.paths.exclude {
-        if !excludes
-            .iter()
-            .any(|value| value.as_str() == Some(pattern.as_str()))
-        {
-            excludes.push(toml::Value::String(pattern.clone()));
-        }
+    if !excludes
+        .iter()
+        .any(|value| value.as_str() == Some(".gdsuite/**"))
+    {
+        excludes.push(toml::Value::String(".gdsuite/**".to_string()));
     }
-
     Ok(doc)
 }
 
-pub fn missing_gdhealth_excludes(
+pub fn missing_gdhealth_settings(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<Vec<String>> {
@@ -522,80 +607,8 @@ pub fn missing_gdhealth_excludes(
     let doc = body
         .parse::<toml::Value>()
         .with_context(|| format!("failed to parse {}", context.gdhealth_config_path.display()))?;
-    let existing = doc
-        .get("discovery")
-        .and_then(|value| value.get("exclude"))
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Ok(config
-        .paths
-        .exclude
-        .iter()
-        .filter(|pattern| !existing.iter().any(|value| value == &pattern.as_str()))
-        .cloned()
-        .collect())
-}
-
-fn test_patterns(config: &GdsuiteConfig) -> Vec<String> {
-    let patterns = config
-        .paths
-        .scripts
-        .iter()
-        .filter(|pattern| pattern.contains("test"))
-        .cloned()
-        .collect::<Vec<_>>();
-    if patterns.is_empty() {
-        vec!["test/**/*.gd".to_string(), "**/*.test.gd".to_string()]
-    } else {
-        patterns
-    }
-}
-
-fn group_patterns(config: &GdsuiteConfig, segment: &str) -> Vec<String> {
-    let patterns = config
-        .paths
-        .scripts
-        .iter()
-        .filter(|pattern| pattern.contains(segment))
-        .cloned()
-        .collect::<Vec<_>>();
-    if patterns.is_empty() {
-        vec![format!("{segment}/**/*.gd"), format!("{segment}/**")]
-    } else {
-        patterns
-    }
-}
-
-fn root_gameplay_patterns(config: &GdsuiteConfig) -> Vec<String> {
-    let mut patterns = config
-        .paths
-        .scripts
-        .iter()
-        .filter(|pattern| {
-            !pattern.contains("client") && !pattern.contains("server") && !pattern.contains("test")
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if patterns.is_empty() {
-        patterns.push("*.gd".to_string());
-    }
-
-    patterns.extend(
-        config
-            .paths
-            .exclude
-            .iter()
-            .map(|pattern| format!("!{pattern}")),
-    );
-    patterns
+    let expected: toml::Value = render_gdhealth_config(config).parse()?;
+    Ok(diff_owned_keys(&doc, &expected, &gdhealth_owned_paths(config)))
 }
 
 fn toml_array(values: Vec<String>) -> String {
@@ -604,4 +617,411 @@ fn toml_array(values: Vec<String>) -> String {
         .map(|value| format!("\"{}\"", value.replace('\\', "\\\\")))
         .collect::<Vec<_>>();
     format!("[{}]", values.join(", "))
+}
+
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\"))
+}
+
+fn string_array_value(values: &[String]) -> toml::Value {
+    toml::Value::Array(
+        values
+            .iter()
+            .cloned()
+            .map(toml::Value::String)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn render_group_lines(groups: &std::collections::BTreeMap<String, Vec<String>>) -> String {
+    groups
+        .iter()
+        .map(|(name, patterns)| format!("{name} = {}", toml_array(patterns.clone())))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn append_gdhealth_thresholds_and_policy(body: &mut String, config: &GdhealthConfig) {
+    if has_thresholds(&config.thresholds) {
+        body.push_str("\n[thresholds]\n");
+        append_optional_threshold(body, "file_lines_warn", config.thresholds.file_lines_warn);
+        append_optional_threshold(
+            body,
+            "file_lines_critical",
+            config.thresholds.file_lines_critical,
+        );
+        append_optional_threshold(
+            body,
+            "function_lines_warn",
+            config.thresholds.function_lines_warn,
+        );
+        append_optional_threshold(
+            body,
+            "function_lines_critical",
+            config.thresholds.function_lines_critical,
+        );
+        append_optional_threshold(body, "cyclomatic_warn", config.thresholds.cyclomatic_warn);
+        append_optional_threshold(
+            body,
+            "cyclomatic_critical",
+            config.thresholds.cyclomatic_critical,
+        );
+        append_optional_threshold(body, "nesting_warn", config.thresholds.nesting_warn);
+        append_optional_threshold(
+            body,
+            "nesting_critical",
+            config.thresholds.nesting_critical,
+        );
+        append_optional_threshold(body, "parameters_warn", config.thresholds.parameters_warn);
+    }
+
+    if !config.policy.allow_cycles.is_empty() || !config.policy.forbidden_dependencies.is_empty() {
+        body.push_str("\n[policy]\n");
+        body.push_str(&format!(
+            "allow_cycles = {}\n",
+            toml_array(config.policy.allow_cycles.clone())
+        ));
+        for rule in &config.policy.forbidden_dependencies {
+            body.push_str("\n[[policy.forbidden_dependencies]]\n");
+            body.push_str(&format!("from = {}\n", toml_string(&rule.from)));
+            body.push_str(&format!("to = {}\n", toml_string(&rule.to)));
+            body.push_str(&format!("severity = {}\n", toml_string(&rule.severity)));
+        }
+    }
+}
+
+fn append_optional_threshold(body: &mut String, key: &str, value: Option<usize>) {
+    if let Some(value) = value {
+        body.push_str(&format!("{key} = {value}\n"));
+    }
+}
+
+fn has_thresholds(config: &GdhealthThresholdsConfig) -> bool {
+    config.file_lines_warn.is_some()
+        || config.file_lines_critical.is_some()
+        || config.function_lines_warn.is_some()
+        || config.function_lines_critical.is_some()
+        || config.cyclomatic_warn.is_some()
+        || config.cyclomatic_critical.is_some()
+        || config.nesting_warn.is_some()
+        || config.nesting_critical.is_some()
+        || config.parameters_warn.is_some()
+}
+
+fn gdtest_owned_paths(config: &GdsuiteConfig) -> Vec<String> {
+    let mut keys = vec![
+        "display_mode".to_string(),
+        "harness".to_string(),
+        "patterns".to_string(),
+        "coverage_exclude".to_string(),
+    ];
+    for (name, profile) in &config.gdtest.profile {
+        if profile.reporter.is_some() {
+            keys.push(format!("profile.{name}.reporter"));
+        }
+        if profile.fail_fast.is_some() {
+            keys.push(format!("profile.{name}.fail_fast"));
+        }
+    }
+    keys
+}
+
+fn gdhealth_owned_paths(config: &GdsuiteConfig) -> Vec<String> {
+    let mut keys = vec![
+        "project.root".to_string(),
+        "discovery.include".to_string(),
+        "discovery.exclude".to_string(),
+    ];
+    for name in config.gdhealth.groups.keys() {
+        keys.push(format!("groups.{name}"));
+    }
+    for name in [
+        "file_lines_warn",
+        "file_lines_critical",
+        "function_lines_warn",
+        "function_lines_critical",
+        "cyclomatic_warn",
+        "cyclomatic_critical",
+        "nesting_warn",
+        "nesting_critical",
+        "parameters_warn",
+    ] {
+        keys.push(format!("thresholds.{name}"));
+    }
+    keys.push("policy.allow_cycles".to_string());
+    if !config.gdhealth.policy.forbidden_dependencies.is_empty() {
+        keys.push("policy.forbidden_dependencies".to_string());
+    }
+    keys
+}
+
+fn diff_owned_keys(actual: &toml::Value, expected: &toml::Value, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .filter(|path| value_at_path(actual, path) != value_at_path(expected, path))
+        .cloned()
+        .collect()
+}
+
+fn value_at_path<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+fn replace_gdhealth_owned_sections(
+    table: &mut toml::map::Map<String, toml::Value>,
+    config: &GdhealthConfig,
+    include_runtime_overlay: bool,
+) {
+    let mut project = toml::map::Map::new();
+    project.insert("root".to_string(), toml::Value::String(config.project.root.clone()));
+    table.insert("project".to_string(), toml::Value::Table(project));
+
+    let mut discovery = toml::map::Map::new();
+    discovery.insert("include".to_string(), string_array_value(&config.discovery.include));
+    let mut exclude = config.discovery.exclude.clone();
+    if include_runtime_overlay && !exclude.iter().any(|pattern| pattern == ".gdsuite/**") {
+        exclude.push(".gdsuite/**".to_string());
+    }
+    discovery.insert("exclude".to_string(), string_array_value(&exclude));
+    table.insert("discovery".to_string(), toml::Value::Table(discovery));
+
+    let groups = table
+        .entry("groups")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .expect("groups must be a TOML table");
+    for (name, patterns) in &config.groups {
+        groups.insert(name.clone(), string_array_value(patterns));
+    }
+
+    let mut thresholds = toml::map::Map::new();
+    insert_optional_usize(
+        &mut thresholds,
+        "file_lines_warn",
+        config.thresholds.file_lines_warn,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "file_lines_critical",
+        config.thresholds.file_lines_critical,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "function_lines_warn",
+        config.thresholds.function_lines_warn,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "function_lines_critical",
+        config.thresholds.function_lines_critical,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "cyclomatic_warn",
+        config.thresholds.cyclomatic_warn,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "cyclomatic_critical",
+        config.thresholds.cyclomatic_critical,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "nesting_warn",
+        config.thresholds.nesting_warn,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "nesting_critical",
+        config.thresholds.nesting_critical,
+    );
+    insert_optional_usize(
+        &mut thresholds,
+        "parameters_warn",
+        config.thresholds.parameters_warn,
+    );
+    if thresholds.is_empty() {
+        table.remove("thresholds");
+    } else {
+        table.insert("thresholds".to_string(), toml::Value::Table(thresholds));
+    }
+
+    let mut policy = toml::map::Map::new();
+    policy.insert(
+        "allow_cycles".to_string(),
+        string_array_value(&config.policy.allow_cycles),
+    );
+    if config.policy.forbidden_dependencies.is_empty() {
+        policy.remove("forbidden_dependencies");
+    } else {
+        let rules = config
+            .policy
+            .forbidden_dependencies
+            .iter()
+            .map(|rule| {
+                let mut doc = toml::map::Map::new();
+                doc.insert("from".to_string(), toml::Value::String(rule.from.clone()));
+                doc.insert("to".to_string(), toml::Value::String(rule.to.clone()));
+                doc.insert(
+                    "severity".to_string(),
+                    toml::Value::String(rule.severity.clone()),
+                );
+                toml::Value::Table(doc)
+            })
+            .collect::<Vec<_>>();
+        policy.insert("forbidden_dependencies".to_string(), toml::Value::Array(rules));
+    }
+    table.insert("policy".to_string(), toml::Value::Table(policy));
+}
+
+fn insert_optional_usize(
+    table: &mut toml::map::Map<String, toml::Value>,
+    key: &str,
+    value: Option<usize>,
+) {
+    if let Some(value) = value {
+        table.insert(key.to_string(), toml::Value::Integer(value as i64));
+    }
+}
+
+pub fn import_product_configs_into_canonical(
+    context: &ProjectContext,
+    config: &mut GdsuiteConfig,
+) -> Result<()> {
+    if context.gdtest_config_path.exists() {
+        let body = fs::read_to_string(&context.gdtest_config_path)
+            .with_context(|| format!("failed to read {}", context.gdtest_config_path.display()))?;
+        let value: toml::Value = body
+            .parse()
+            .with_context(|| format!("failed to parse {}", context.gdtest_config_path.display()))?;
+        config.gdtest = import_gdtest_config(value, &config.gdtest);
+    }
+
+    if context.gdhealth_config_path.exists() {
+        let body = fs::read_to_string(&context.gdhealth_config_path).with_context(|| {
+            format!("failed to read {}", context.gdhealth_config_path.display())
+        })?;
+        let value: toml::Value = body.parse().with_context(|| {
+            format!("failed to parse {}", context.gdhealth_config_path.display())
+        })?;
+        config.gdhealth = import_gdhealth_config(value, &config.gdhealth);
+    }
+
+    Ok(())
+}
+
+fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestConfig {
+    let mut config = defaults.clone();
+    if let Some(display_mode) = value.get("display_mode").and_then(|value| value.as_str()) {
+        config.display_mode = display_mode.to_string();
+    }
+    if let Some(harness) = value.get("harness").and_then(|value| value.as_str()) {
+        config.harness = harness.to_string();
+    }
+    if let Some(patterns) = array_of_strings(value.get("patterns")) {
+        config.patterns = patterns;
+    }
+    if let Some(exclude) = array_of_strings(value.get("coverage_exclude")) {
+        config.coverage_exclude = exclude;
+    }
+    if let Some(profile) = value.get("profile").and_then(|value| value.as_table()) {
+        for (name, profile_value) in profile {
+            let entry = config.profile.entry(name.clone()).or_default();
+            if let Some(reporter) = profile_value.get("reporter").and_then(|value| value.as_str()) {
+                entry.reporter = Some(reporter.to_string());
+            }
+            if let Some(fail_fast) =
+                profile_value.get("fail_fast").and_then(|value| value.as_bool())
+            {
+                entry.fail_fast = Some(fail_fast);
+            }
+        }
+    }
+    config
+}
+
+fn import_gdhealth_config(value: toml::Value, defaults: &GdhealthConfig) -> GdhealthConfig {
+    let mut config = defaults.clone();
+    if let Some(project) = value.get("project").and_then(|value| value.as_table()) {
+        if let Some(root) = project.get("root").and_then(|value| value.as_str()) {
+            config.project = GdhealthProjectConfig {
+                root: root.to_string(),
+            };
+        }
+    }
+    if let Some(discovery) = value.get("discovery").and_then(|value| value.as_table()) {
+        let mut imported = config.discovery.clone();
+        if let Some(include) = array_of_strings(discovery.get("include")) {
+            imported.include = include;
+        }
+        if let Some(exclude) = array_of_strings(discovery.get("exclude")) {
+            imported.exclude = exclude
+                .into_iter()
+                .filter(|pattern| pattern != ".gdsuite/**")
+                .collect();
+        }
+        config.discovery = imported;
+    }
+    if let Some(groups) = value.get("groups").and_then(|value| value.as_table()) {
+        config.groups = groups
+            .iter()
+            .filter_map(|(name, value)| array_of_strings(Some(value)).map(|patterns| (name.clone(), patterns)))
+            .collect();
+    }
+    if let Some(thresholds) = value.get("thresholds").and_then(|value| value.as_table()) {
+        config.thresholds = GdhealthThresholdsConfig {
+            file_lines_warn: usize_value(thresholds.get("file_lines_warn")),
+            file_lines_critical: usize_value(thresholds.get("file_lines_critical")),
+            function_lines_warn: usize_value(thresholds.get("function_lines_warn")),
+            function_lines_critical: usize_value(thresholds.get("function_lines_critical")),
+            cyclomatic_warn: usize_value(thresholds.get("cyclomatic_warn")),
+            cyclomatic_critical: usize_value(thresholds.get("cyclomatic_critical")),
+            nesting_warn: usize_value(thresholds.get("nesting_warn")),
+            nesting_critical: usize_value(thresholds.get("nesting_critical")),
+            parameters_warn: usize_value(thresholds.get("parameters_warn")),
+        };
+    }
+    if let Some(policy) = value.get("policy").and_then(|value| value.as_table()) {
+        let allow_cycles = array_of_strings(policy.get("allow_cycles")).unwrap_or_default();
+        let forbidden_dependencies = policy
+            .get("forbidden_dependencies")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| {
+                        let table = value.as_table()?;
+                        Some(crate::config::GdhealthForbiddenDependency {
+                            from: table.get("from")?.as_str()?.to_string(),
+                            to: table.get("to")?.as_str()?.to_string(),
+                            severity: table.get("severity")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        config.policy = GdhealthPolicyConfig {
+            allow_cycles,
+            forbidden_dependencies,
+        };
+    }
+    config
+}
+
+fn array_of_strings(value: Option<&toml::Value>) -> Option<Vec<String>> {
+    value.and_then(|value| {
+        value.as_array().map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+    })
+}
+
+fn usize_value(value: Option<&toml::Value>) -> Option<usize> {
+    value.and_then(|value| value.as_integer()).map(|value| value as usize)
 }

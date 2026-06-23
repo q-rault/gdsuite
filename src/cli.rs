@@ -21,6 +21,8 @@ pub struct Cli {
 pub enum Commands {
     #[command(about = "Bootstrap the local gdsuite toolchain and product configs")]
     Init,
+    #[command(about = "Migrate an existing project to the suite-first config model")]
+    Migrate,
     #[command(about = "Install or repair the local gdsuite toolchain and product configs")]
     Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs, SetupArgs},
     config::{GdsuiteConfig, Manifest, ProfileConfig},
-    fixers, process,
+    fixers, migrate, process,
     tooling::{self, ProjectContext},
 };
 
@@ -38,6 +38,7 @@ pub fn run() -> Result<()> {
 
     match cli.command {
         Commands::Init => init(&context, cli.godot_exe.as_deref()),
+        Commands::Migrate => migrate_project(&context, cli.godot_exe.as_deref()),
         Commands::Setup(args) => setup(&context, cli.godot_exe.as_deref(), args),
         Commands::Doctor => doctor(&context, cli.godot_exe.as_deref()),
         Commands::Fmt(args) => fmt(&context, args),
@@ -59,6 +60,12 @@ fn init(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         },
     )?;
     println!("init complete");
+    Ok(())
+}
+
+fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+    migrate::migrate_project(context, cli_godot)?;
+    println!("migrate complete");
     Ok(())
 }
 
@@ -129,7 +136,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
 fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_script_files(context, &config)?;
+    let files = fixers::discover_typecheck_files(context, &config)?;
 
     let mut cmd_args = Vec::new();
     if args.check {
@@ -825,7 +832,7 @@ fn write_health_overlay_config(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<PathBuf> {
-    let doc = tooling::merged_gdhealth_config(context, config)?;
+    let doc = tooling::merged_gdhealth_overlay_config(context, config)?;
     let overlay_path = context.state_dir.join("gdhealth.gdsuite.toml");
     fs::write(&overlay_path, toml::to_string(&doc)?)
         .with_context(|| format!("failed to write {}", overlay_path.display()))?;

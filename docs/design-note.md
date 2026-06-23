@@ -5,6 +5,7 @@
 `gdsuite` owns the user-facing workflow:
 
 - `init`
+- `migrate`
 - `setup`
 - `doctor`
 - `fmt`
@@ -43,7 +44,14 @@ The venv supplies `gdformat` and `gdlint`. Rust tools are installed with `cargo 
 
 ## Config schema
 
-`gdsuite.toml` is the suite-owned top-level config. `gdtest.toml` and `gdhealth.toml` remain delegated-tool configs and are generated only when missing.
+`gdsuite.toml` is the suite-owned top-level config. `gdtest.toml` and `gdhealth.toml` remain delegated-tool configs, but migrate/sync operations now enforce explicit suite-owned invariants inside them.
+
+Ownership split:
+
+- suite-owned: the full `gdsuite.toml` contract, `.gdsuite/**` and report excludes, `gdtest` CI profile wiring, and other shared workflow defaults required for suite correctness
+- product-owned: `gdhealth` groups and thresholds, `gdtest` advanced runtime knobs, and direct subsystem-specific behavior
+
+`gdsuite migrate` is the canonical adoption path for an existing repo. It rewrites `gdsuite.toml` into the current suite contract, merges suite-owned invariants into product configs, and rewrites obvious `gdtest` / `gdhealth health` entrypoints in project docs and CI files. `setup --sync-product-configs` reuses the same config-sync layer but is framed as repair/bootstrap, not migration.
 
 The PoC defaults assume local sibling source checkouts for `gdtest` and `gdhealth`, scripts under common Godot directories, and narrow safe/unsafe fixer rule sets.
 

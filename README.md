@@ -21,10 +21,12 @@ The suite-first workflow boundary is deliberate:
 - `gdsuite check` is the default local validation command.
 - CI should compose explicit suite steps instead of relying on a separate `ci` command.
 - `gdsuite test` and `gdsuite health` are delegated product entrypoints when you need direct subsystem control.
+- `gdsuite migrate` is the canonical path for bringing an existing repo onto the suite-first config contract.
 
 ## Commands
 
 - `gdsuite init` bootstraps the local platform state and is the recommended first command.
+- `gdsuite migrate` adopts an existing repo into the suite-first config model, syncing suite-owned config invariants and rewriting obvious `gdtest` / `gdhealth health` entrypoints in docs and CI.
 - `gdsuite setup [--sync-product-configs]` installs the local toolchain, writes missing config files, and can merge safe suite-owned defaults into existing product configs.
 - `gdsuite doctor` prints resolved tool paths, versions, setup status, and warnings for stale product config drift.
 - `gdsuite fmt [--check]` runs `gdformat` on discovered `.gd` files.
@@ -110,14 +112,23 @@ Additional workflow notes live in [`docs/ci-recipes.md`](docs/ci-recipes.md).
 
 ## Product Configs
 
-`gdsuite init` generates plain product configs when they are missing:
+`gdsuite init` generates plain product configs when they are missing. `gdsuite migrate` goes further and rewrites existing configs into the current suite contract.
+
+The intended ownership split is:
+
+- suite-owned: `.gdsuite/**` and report-path excludes, `gdtest` CI profile wiring, suite report artifact locations, and the top-level `gdsuite.toml` pipeline/report contract.
+- product-owned: `gdhealth` groups and policy thresholds, `gdtest` advanced harness/timeouts/filtering, and any direct subsystem-only knobs.
+
+Generated or migrated product configs therefore keep product-specific sections but sync suite-owned invariants:
 
 - `gdtest.toml` gets suite-aligned test discovery patterns and a `profile.ci` reporter default.
 - `gdhealth.toml` gets suite-aligned discovery include/exclude rules and logical file groups.
 
 Those files remain ordinary `gdtest` and `gdhealth` configs. Users can run either product directly without `gdsuite`, and `gdsuite` will not overwrite an existing product config.
 
-When an existing `gdhealth.toml` is missing suite-required excludes like `.gdsuite/**`, `gdsuite health` applies a runtime overlay so generated suite files do not leak into health analysis. `gdsuite doctor` warns about that drift, and `gdsuite setup --sync-product-configs` persists the safe merged config back into `gdhealth.toml`.
+When an existing product config drifts from those suite-owned invariants, `gdsuite doctor` warns about it. `gdsuite migrate` is the preferred repair path, while `gdsuite setup --sync-product-configs` remains the lower-level sync operation during setup/repair flows.
+
+`gdsuite health` still applies a runtime overlay for `gdhealth.toml` so generated suite files do not leak into health analysis even before the drift is persisted.
 
 ## Validation
 

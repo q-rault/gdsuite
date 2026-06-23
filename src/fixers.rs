@@ -18,9 +18,24 @@ pub fn discover_script_files(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<Vec<PathBuf>> {
+    discover_files(context, &config.lint.include, &config.lint.exclude)
+}
+
+pub fn discover_typecheck_files(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<Vec<PathBuf>> {
+    discover_files(context, &config.typecheck.include, &config.typecheck.exclude)
+}
+
+fn discover_files(
+    context: &ProjectContext,
+    include: &[String],
+    exclude: &[String],
+) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
-    for pattern in &config.paths.scripts {
+    for pattern in include {
         let walker = GlobWalkerBuilder::from_patterns(&context.root, &[pattern.as_str()])
             .file_type(globwalk::FileType::FILE)
             .build()?;
@@ -28,7 +43,7 @@ pub fn discover_script_files(
         for entry in walker {
             let entry = entry?;
             let relative = entry.path().strip_prefix(&context.root)?.to_path_buf();
-            if is_excluded(&relative, &config.paths.exclude) {
+            if is_excluded(&relative, exclude) {
                 continue;
             }
             if !files.iter().any(|path| path == &relative) {

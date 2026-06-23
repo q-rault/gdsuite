@@ -54,15 +54,13 @@ fn init_generates_project_local_toolchain_and_configs() {
     assert!(config.contains("[health]"));
 
     let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
-    assert!(gdtest.contains("patterns = [\"test/**/*.gd\"]"));
+    assert!(gdtest.contains("patterns = [\"test/**/*.gd\", \"**/*.test.gd\"]"));
     assert!(gdtest.contains("[profile.ci]"));
     assert!(gdtest.contains("reporter = \"junit\""));
 
     let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
     assert!(gdhealth.contains("[discovery]"));
-    assert!(gdhealth.contains(
-        "include = [\"*.gd\", \"client/**/*.gd\", \"server/**/*.gd\", \"test/**/*.gd\"]"
-    ));
+    assert!(gdhealth.contains("include = [\"**/*.gd\"]"));
     assert!(gdhealth.contains("[groups]"));
 }
 
@@ -83,13 +81,13 @@ fn doctor_reports_resolved_paths() {
 }
 
 #[test]
-fn doctor_warns_when_gdhealth_config_misses_suite_excludes() {
+fn doctor_warns_when_gdhealth_config_drifts_from_canonical_sections() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
     fs::write(
         fixture.root.join("gdhealth.toml"),
-        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n",
+        "[project]\nroot = \"src\"\n",
     )
     .unwrap();
 
@@ -99,8 +97,32 @@ fn doctor_warns_when_gdhealth_config_misses_suite_excludes() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "warning=gdhealth config missing suite excludes: .gdsuite/**",
+            "warning=gdhealth config drift from gdsuite.toml:",
         ))
+        .stdout(predicate::str::contains("project.root"))
+        .stdout(predicate::str::contains("status=ok"));
+}
+
+#[test]
+fn doctor_warns_when_gdtest_config_misses_suite_defaults() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdtest.toml"),
+        "patterns = [\"test/**/*.gd\"]\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "warning=gdtest config drift from gdsuite.toml:",
+        ))
+        .stdout(predicate::str::contains("profile.ci.reporter"))
         .stdout(predicate::str::contains("status=ok"));
 }
 
@@ -776,8 +798,107 @@ fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_con
         .stdout(predicate::str::contains("setup complete"));
 
     let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
-    assert!(gdhealth.contains("\".gdsuite/**\""));
+    assert!(!gdhealth.contains("\".gdsuite/**\""));
     assert!(gdhealth.contains("legacy = [\"*.gd\"]"));
+}
+
+#[test]
+fn setup_sync_product_configs_persists_suite_defaults_into_existing_gdtest_config() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join("gdtest.toml"),
+        "patterns = [\"spec/**/*.gd\"]\n[profile.ci]\nreporter = \"text\"\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["setup", "--sync-product-configs"])
+        .assert()
+        .success();
+
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    assert!(gdtest.contains("reporter = \"junit\""));
+    assert!(gdtest.contains("fail_fast = true"));
+    assert!(gdtest.contains("patterns = [\"test/**/*.gd\", \"**/*.test.gd\"]"));
+}
+
+#[test]
+fn migrate_syncs_suite_configs_and_rewrites_obvious_entrypoints() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::create_dir_all(fixture.root.join(".github/workflows")).unwrap();
+    fs::create_dir_all(fixture.root.join("docs")).unwrap();
+    fs::write(
+        fixture.root.join("gdtest.toml"),
+        "patterns = [\"spec/**/*.gd\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[discovery]\nexclude = [\"addons/**\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join(".github/workflows/ci.yml"),
+        "steps:\n  - run: gdtest --filter combat\n  - run: gdhealth health --fail-on critical\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("README.md"),
+        "Run `gdtest` and `gdhealth health`.\nReference: https://github.com/q-rault/gdtest\nAddon path: addons/gdtest/\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("migrate").assert().success();
+
+    let gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(gdsuite.contains("[profiles.local]"));
+
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    assert!(gdtest.contains("patterns = [\"spec/**/*.gd\"]"));
+    assert!(gdtest.contains("reporter = \"junit\""));
+
+    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+    assert!(!gdhealth.contains("\".gdsuite/**\""));
+
+    let workflow = fs::read_to_string(fixture.root.join(".github/workflows/ci.yml")).unwrap();
+    assert!(workflow.contains("gdsuite test --filter combat"));
+    assert!(workflow.contains("gdsuite health --fail-on critical"));
+
+    let readme = fs::read_to_string(fixture.root.join("README.md")).unwrap();
+    assert!(readme.contains("`gdsuite test`"));
+    assert!(readme.contains("`gdsuite health`"));
+    assert!(readme.contains("https://github.com/q-rault/gdtest"));
+    assert!(readme.contains("addons/gdtest/"));
+}
+
+#[test]
+fn migrate_is_idempotent() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[discovery]\nexclude = [\"addons/**\"]\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("migrate").assert().success();
+    let first_gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    let first_gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    let first_gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+
+    fixture.cmd().arg("migrate").assert().success();
+    let second_gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    let second_gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    let second_gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+
+    assert_eq!(first_gdsuite, second_gdsuite);
+    assert_eq!(first_gdtest, second_gdtest);
+    assert_eq!(first_gdhealth, second_gdhealth);
 }
 
 #[test]
@@ -998,10 +1119,6 @@ gdtoolkit = "4.*"
 gdtest_source = "../gdtest"
 gdhealth_source = "../gdhealth/tools/gdhealth"
 
-[paths]
-scripts = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
-exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
-
 [commands]
 default_test_target = "test/"
 default_health_subcommand = "health"
@@ -1012,6 +1129,12 @@ unsafe_rules = ["class-definitions-order"]
 
 [lint]
 line_length = 100
+include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[typecheck]
+include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 
 [profiles.local]
 pipeline = ["fmt", "lint", "typecheck"]
@@ -1032,6 +1155,29 @@ enabled = true
 command = "health"
 fail_on = "critical"
 bundle_dir = "reports/code-health"
+
+[gdtest]
+display_mode = "headless"
+harness = "addons/gdtest/gdtest_worker.gd"
+patterns = ["test/**/*.gd", "**/*.test.gd"]
+coverage_exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[gdtest.profile.ci]
+reporter = "junit"
+fail_fast = true
+
+[gdhealth.project]
+root = "."
+
+[gdhealth.discovery]
+include = ["**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**"]
+
+[gdhealth.groups]
+client = ["client/**/*.gd", "client/**"]
+server = ["server/**/*.gd", "server/**"]
+test = ["test/**/*.gd", "test/**"]
+root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
 "#
     }
 

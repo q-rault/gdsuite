@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod config;
 mod fixers;
+mod migrate;
 mod process;
 mod tooling;
 
