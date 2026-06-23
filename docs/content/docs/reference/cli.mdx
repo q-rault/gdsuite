@@ -17,15 +17,7 @@ description: The current implemented gdsuite command surface as of June 23, 2026
 - `gdsuite check [--profile <name>] [--report text|json]`
 - `gdsuite report [latest|check|test|health|ci]`
 
-## Important corrections
-
-- There is no standalone `gdsuite ci` command.
-- `gdsuite init` is the primary first command for a new project.
-- `gdsuite migrate` is the adoption path for an existing repo.
-- `gdsuite doctor` reports drift warnings against suite-owned product config invariants.
-- `gdhealth` is a first-class workflow surface, not an optional appendix.
-
-## CI commands
+## Common CI commands
 
 ```bash
 gdsuite check --report json
