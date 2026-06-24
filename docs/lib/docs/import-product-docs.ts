@@ -87,6 +87,7 @@ function importProductDocs(source: ProductDocsSource): ImportedDocPage[] {
   const productMetaPath = path.join(outputDir, 'meta.json');
   const generatedMeta = {
     title: source.title,
+    root: true,
     pages: ['index', ...meta.pages.filter((entry) => entry !== 'index')],
   };
   fs.writeFileSync(productMetaPath, `${JSON.stringify(generatedMeta, null, 2)}\n`);

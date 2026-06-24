@@ -1,5 +1,6 @@
 {
   "title": "GDSuite Docs",
+  "root": true,
   "pages": [
     "index",
     "---Guide---",
@@ -14,9 +15,6 @@
     "troubleshooting",
     "---Config---",
     "config",
-    "---Products---",
-    "gdtest",
-    "gdhealth",
     "---Recipes---",
     "recipes",
     "---Reference---",
