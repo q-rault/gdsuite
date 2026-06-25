@@ -385,7 +385,7 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
     ))
 }
 
-fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
+pub fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
     let bases = [
         context
             .gdsuite_dir
