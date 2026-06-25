@@ -541,6 +541,27 @@ fn health_report_json_references_bundle_artifacts_when_present() {
 }
 
 #[test]
+fn health_report_json_writes_artifact_even_when_health_fails() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(fixture.root.join("mock-state/health-fail.flag"), "").unwrap();
+
+    fixture
+        .cmd()
+        .args(["health", "--report", "json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"command\": \"health\""))
+        .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("\"name\": \"health_json\""))
+        .stderr(predicate::str::contains("health failed"));
+
+    assert!(fixture.root.join("reports/gdsuite/health.json").exists());
+    assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
 fn report_reads_latest_saved_report() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -558,6 +579,39 @@ fn report_reads_latest_saved_report() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"command\": \"check\""));
+}
+
+#[test]
+fn report_ci_aggregates_failed_health_report_artifact() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(fixture.root.join("mock-state/health-fail.flag"), "").unwrap();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["test", "--report", "json"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["health", "--report", "json"])
+        .assert()
+        .failure();
+
+    fixture
+        .cmd()
+        .args(["report", "ci"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"ci\""))
+        .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("\"name\": \"health\""));
 }
 
 #[test]
@@ -1174,6 +1228,13 @@ if "%1"=="--version" (
   exit /b 0
 )
 echo %*> "%CD%\logs\gdhealth-args.txt"
+if exist "%CD%\mock-state\health-fail.flag" (
+  mkdir "%CD%\reports\code-health" 2>nul
+  > "%CD%\reports\code-health\summary.txt" echo health summary
+  > "%CD%\reports\code-health\health.json" echo {"status":"failed"}
+  >&2 echo policy threshold triggered
+  exit /b 1
+)
 "#,
         );
         fs::write(
