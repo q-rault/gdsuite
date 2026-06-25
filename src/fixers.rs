@@ -25,7 +25,11 @@ pub fn discover_typecheck_files(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<Vec<PathBuf>> {
-    discover_files(context, &config.typecheck.include, &config.typecheck.exclude)
+    discover_files(
+        context,
+        &config.typecheck.include,
+        &config.typecheck.exclude,
+    )
 }
 
 fn discover_files(

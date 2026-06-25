@@ -75,7 +75,10 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
         if let Some(source) = tools.get("gdtest_source").and_then(|value| value.as_str()) {
             config.tools.gdtest_source = source.into();
         }
-        if let Some(source) = tools.get("gdhealth_source").and_then(|value| value.as_str()) {
+        if let Some(source) = tools
+            .get("gdhealth_source")
+            .and_then(|value| value.as_str())
+        {
             config.tools.gdhealth_source = source.into();
         }
     }
@@ -101,16 +104,19 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
             config.fix.unsafe_rules = rules;
         }
     }
-    if let Some(lint) = value.get("lint").and_then(|value| value.as_table()) {
-        if let Some(line_length) = lint.get("line_length").and_then(|value| value.as_integer()) {
-            config.lint.line_length = line_length as usize;
-        }
+    if let Some(lint) = value.get("lint").and_then(|value| value.as_table())
+        && let Some(line_length) = lint.get("line_length").and_then(|value| value.as_integer())
+    {
+        config.lint.line_length = line_length as usize;
     }
     if let Some(reports) = value.get("reports").and_then(|value| value.as_table()) {
         if let Some(default) = reports.get("default").and_then(|value| value.as_str()) {
             config.reports.default = default.to_string();
         }
-        if let Some(dir) = reports.get("artifacts_dir").and_then(|value| value.as_str()) {
+        if let Some(dir) = reports
+            .get("artifacts_dir")
+            .and_then(|value| value.as_str())
+        {
             config.reports.artifacts_dir = dir.into();
         }
     }
@@ -150,8 +156,10 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
     }
 
     if let Some(paths) = value.get("paths").and_then(|value| value.as_table()) {
-        let scripts = string_array(paths.get("scripts")).unwrap_or_else(|| config.lint.include.clone());
-        let exclude = string_array(paths.get("exclude")).unwrap_or_else(|| config.lint.exclude.clone());
+        let scripts =
+            string_array(paths.get("scripts")).unwrap_or_else(|| config.lint.include.clone());
+        let exclude =
+            string_array(paths.get("exclude")).unwrap_or_else(|| config.lint.exclude.clone());
         config.lint.include = scripts.clone();
         config.lint.exclude = exclude.clone();
         config.typecheck.include = scripts.clone();

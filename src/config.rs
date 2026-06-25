@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GdsuiteConfig {
     #[serde(default)]
     pub project: ProjectConfig,
@@ -90,7 +90,7 @@ pub struct ProfilesConfig {
     pub entries: BTreeMap<String, ProfileConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProfileConfig {
     #[serde(default)]
     pub pipeline: Vec<String>,
@@ -135,7 +135,7 @@ pub struct GdtestConfig {
     pub profile: BTreeMap<String, GdtestProfileConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GdtestProfileConfig {
     pub reporter: Option<String>,
     pub fail_fast: Option<bool>,
@@ -169,7 +169,7 @@ pub struct GdhealthDiscoveryConfig {
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GdhealthThresholdsConfig {
     pub file_lines_warn: Option<usize>,
     pub file_lines_critical: Option<usize>,
@@ -212,24 +212,6 @@ pub struct Versions {
     pub gdtoolkit: String,
     pub gdtest_source: PathBuf,
     pub gdhealth_source: PathBuf,
-}
-
-impl Default for GdsuiteConfig {
-    fn default() -> Self {
-        Self {
-            project: ProjectConfig::default(),
-            tools: ToolsConfig::default(),
-            commands: CommandsConfig::default(),
-            fix: FixConfig::default(),
-            lint: LintConfig::default(),
-            typecheck: TypecheckConfig::default(),
-            profiles: ProfilesConfig::default(),
-            reports: ReportsConfig::default(),
-            health: HealthConfig::default(),
-            gdtest: GdtestConfig::default(),
-            gdhealth: GdhealthConfig::default(),
-        }
-    }
 }
 
 impl Default for ProjectConfig {
@@ -305,15 +287,6 @@ impl Default for ProfilesConfig {
     }
 }
 
-impl Default for ProfileConfig {
-    fn default() -> Self {
-        Self {
-            pipeline: Vec::new(),
-            health_fail_on: None,
-        }
-    }
-}
-
 impl Default for HealthConfig {
     fn default() -> Self {
         Self {
@@ -335,15 +308,6 @@ impl Default for GdtestConfig {
             patterns: default_gdtest_patterns(),
             coverage_exclude: default_exclude(),
             profile: default_gdtest_profiles(),
-        }
-    }
-}
-
-impl Default for GdtestProfileConfig {
-    fn default() -> Self {
-        Self {
-            reporter: None,
-            fail_fast: None,
         }
     }
 }
@@ -373,22 +337,6 @@ impl Default for GdhealthDiscoveryConfig {
         Self {
             include: default_gdhealth_include(),
             exclude: default_gdhealth_exclude(),
-        }
-    }
-}
-
-impl Default for GdhealthThresholdsConfig {
-    fn default() -> Self {
-        Self {
-            file_lines_warn: None,
-            file_lines_critical: None,
-            function_lines_warn: None,
-            function_lines_critical: None,
-            cyclomatic_warn: None,
-            cyclomatic_critical: None,
-            nesting_warn: None,
-            nesting_critical: None,
-            parameters_warn: None,
         }
     }
 }
@@ -627,7 +575,10 @@ fn default_gdhealth_groups() -> BTreeMap<String, Vec<String>> {
             "server".to_string(),
             vec!["server/**/*.gd".to_string(), "server/**".to_string()],
         ),
-        ("test".to_string(), vec!["test/**/*.gd".to_string(), "test/**".to_string()]),
+        (
+            "test".to_string(),
+            vec!["test/**/*.gd".to_string(), "test/**".to_string()],
+        ),
         (
             "root_gameplay".to_string(),
             vec![

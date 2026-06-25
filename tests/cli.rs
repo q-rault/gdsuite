@@ -795,9 +795,14 @@ fn init_is_safe_when_existing_gdtest_addon_files_are_modified() {
     )
     .unwrap();
 
-    fixture.cmd().arg("init").assert().success().stdout(predicate::str::contains(
-        "warning=gdtest addon install skipped modified file",
-    ));
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "warning=gdtest addon install skipped modified file",
+        ));
 
     assert_eq!(
         fs::read_to_string(fixture.root.join("addons/gdtest/README.md")).unwrap(),
@@ -1035,7 +1040,11 @@ impl Fixture {
         fs::write(gdtest_root.join("addons/gdtest/gdt.gd"), "").unwrap();
         fs::write(gdtest_root.join("addons/gdtest/gd_test.gd"), "").unwrap();
         fs::write(gdtest_root.join("addons/gdtest/scene_runner.gd"), "").unwrap();
-        fs::write(gdtest_root.join("addons/gdtest/README.md"), "runtime readme\n").unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest/README.md"),
+            "runtime readme\n",
+        )
+        .unwrap();
         fs::write(gdtest_root.join("addons/gdtest/LICENSE"), "license\n").unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest_editor/plugin.gd"),
@@ -1044,8 +1053,16 @@ impl Fixture {
         .unwrap();
         fs::write(gdtest_root.join("addons/gdtest_editor/test_panel.gd"), "").unwrap();
         fs::write(gdtest_root.join("addons/gdtest_editor/plugin.cfg"), "").unwrap();
-        fs::write(gdtest_root.join("addons/gdtest_editor/README.md"), "editor readme\n").unwrap();
-        fs::write(gdtest_root.join("addons/gdtest_editor/LICENSE"), "license\n").unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest_editor/README.md"),
+            "editor readme\n",
+        )
+        .unwrap();
+        fs::write(
+            gdtest_root.join("addons/gdtest_editor/LICENSE"),
+            "license\n",
+        )
+        .unwrap();
         fs::create_dir_all(self.root.join("../gdhealth/tools/gdhealth")).unwrap();
     }
 

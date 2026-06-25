@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use crate::{
     config::{
         GdhealthConfig, GdhealthPolicyConfig, GdhealthProjectConfig, GdhealthThresholdsConfig,
-        GdtestConfig, GdsuiteConfig, Manifest, Versions,
+        GdsuiteConfig, GdtestConfig, Manifest, Versions,
     },
     process,
 };
@@ -114,7 +114,6 @@ pub fn resolve_godot(
     if let Ok(path) = which::which("godot4") {
         candidates.push(path);
     }
-    candidates.push(PathBuf::from(r"C:\Users\me\tools\Godot.exe"));
     candidates.push(PathBuf::from(r"C:\Program Files\Godot\Godot.exe"));
     candidates.push(PathBuf::from(r"C:\Program Files\Godot_v4\Godot.exe"));
 
@@ -437,7 +436,10 @@ fn load_product_config_or_render(
 
 fn render_gdtest_config(config: &GdsuiteConfig) -> String {
     let mut lines = vec![
-        format!("display_mode = {}", toml_string(&config.gdtest.display_mode)),
+        format!(
+            "display_mode = {}",
+            toml_string(&config.gdtest.display_mode)
+        ),
         format!("harness = {}", toml_string(&config.gdtest.harness)),
         format!("patterns = {}", toml_array(config.gdtest.patterns.clone())),
         format!(
@@ -502,7 +504,10 @@ pub fn merged_gdtest_config(
             .as_table_mut()
             .ok_or_else(|| anyhow!("gdtest profile entry must be a TOML table"))?;
         if let Some(reporter) = &profile.reporter {
-            profile_doc.insert("reporter".to_string(), toml::Value::String(reporter.clone()));
+            profile_doc.insert(
+                "reporter".to_string(),
+                toml::Value::String(reporter.clone()),
+            );
         }
         if let Some(fail_fast) = profile.fail_fast {
             profile_doc.insert("fail_fast".to_string(), toml::Value::Boolean(fail_fast));
@@ -527,7 +532,11 @@ pub fn missing_gdtest_suite_settings(
         .with_context(|| format!("failed to parse {}", context.gdtest_config_path.display()))?;
 
     let expected: toml::Value = render_gdtest_config(config).parse()?;
-    Ok(diff_owned_keys(&doc, &expected, &gdtest_owned_paths(config)))
+    Ok(diff_owned_keys(
+        &doc,
+        &expected,
+        &gdtest_owned_paths(config),
+    ))
 }
 
 pub(crate) fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
@@ -616,7 +625,11 @@ pub fn missing_gdhealth_settings(
         .parse::<toml::Value>()
         .with_context(|| format!("failed to parse {}", context.gdhealth_config_path.display()))?;
     let expected: toml::Value = render_gdhealth_config(config).parse()?;
-    Ok(diff_owned_keys(&doc, &expected, &gdhealth_owned_paths(config)))
+    Ok(diff_owned_keys(
+        &doc,
+        &expected,
+        &gdhealth_owned_paths(config),
+    ))
 }
 
 fn toml_array(values: Vec<String>) -> String {
@@ -675,11 +688,7 @@ fn append_gdhealth_thresholds_and_policy(body: &mut String, config: &GdhealthCon
             config.thresholds.cyclomatic_critical,
         );
         append_optional_threshold(body, "nesting_warn", config.thresholds.nesting_warn);
-        append_optional_threshold(
-            body,
-            "nesting_critical",
-            config.thresholds.nesting_critical,
-        );
+        append_optional_threshold(body, "nesting_critical", config.thresholds.nesting_critical);
         append_optional_threshold(body, "parameters_warn", config.thresholds.parameters_warn);
     }
 
@@ -784,11 +793,17 @@ fn replace_gdhealth_owned_sections(
     include_runtime_overlay: bool,
 ) {
     let mut project = toml::map::Map::new();
-    project.insert("root".to_string(), toml::Value::String(config.project.root.clone()));
+    project.insert(
+        "root".to_string(),
+        toml::Value::String(config.project.root.clone()),
+    );
     table.insert("project".to_string(), toml::Value::Table(project));
 
     let mut discovery = toml::map::Map::new();
-    discovery.insert("include".to_string(), string_array_value(&config.discovery.include));
+    discovery.insert(
+        "include".to_string(),
+        string_array_value(&config.discovery.include),
+    );
     let mut exclude = config.discovery.exclude.clone();
     if include_runtime_overlay && !exclude.iter().any(|pattern| pattern == ".gdsuite/**") {
         exclude.push(".gdsuite/**".to_string());
@@ -880,7 +895,10 @@ fn replace_gdhealth_owned_sections(
                 toml::Value::Table(doc)
             })
             .collect::<Vec<_>>();
-        policy.insert("forbidden_dependencies".to_string(), toml::Value::Array(rules));
+        policy.insert(
+            "forbidden_dependencies".to_string(),
+            toml::Value::Array(rules),
+        );
     }
     table.insert("policy".to_string(), toml::Value::Table(policy));
 }
@@ -929,10 +947,16 @@ fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestCo
     if let Some(harness) = value.get("harness").and_then(|value| value.as_str()) {
         config.harness = harness.to_string();
     }
-    if let Some(editor_plugin_dir) = value.get("editor_plugin_dir").and_then(|value| value.as_str()) {
+    if let Some(editor_plugin_dir) = value
+        .get("editor_plugin_dir")
+        .and_then(|value| value.as_str())
+    {
         config.editor_plugin_dir = editor_plugin_dir.to_string();
     }
-    if let Some(install_editor) = value.get("install_editor").and_then(|value| value.as_bool()) {
+    if let Some(install_editor) = value
+        .get("install_editor")
+        .and_then(|value| value.as_bool())
+    {
         config.install_editor = install_editor;
     }
     if let Some(patterns) = array_of_strings(value.get("patterns")) {
@@ -944,11 +968,15 @@ fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestCo
     if let Some(profile) = value.get("profile").and_then(|value| value.as_table()) {
         for (name, profile_value) in profile {
             let entry = config.profile.entry(name.clone()).or_default();
-            if let Some(reporter) = profile_value.get("reporter").and_then(|value| value.as_str()) {
+            if let Some(reporter) = profile_value
+                .get("reporter")
+                .and_then(|value| value.as_str())
+            {
                 entry.reporter = Some(reporter.to_string());
             }
-            if let Some(fail_fast) =
-                profile_value.get("fail_fast").and_then(|value| value.as_bool())
+            if let Some(fail_fast) = profile_value
+                .get("fail_fast")
+                .and_then(|value| value.as_bool())
             {
                 entry.fail_fast = Some(fail_fast);
             }
@@ -959,12 +987,12 @@ fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestCo
 
 fn import_gdhealth_config(value: toml::Value, defaults: &GdhealthConfig) -> GdhealthConfig {
     let mut config = defaults.clone();
-    if let Some(project) = value.get("project").and_then(|value| value.as_table()) {
-        if let Some(root) = project.get("root").and_then(|value| value.as_str()) {
-            config.project = GdhealthProjectConfig {
-                root: root.to_string(),
-            };
-        }
+    if let Some(project) = value.get("project").and_then(|value| value.as_table())
+        && let Some(root) = project.get("root").and_then(|value| value.as_str())
+    {
+        config.project = GdhealthProjectConfig {
+            root: root.to_string(),
+        };
     }
     if let Some(discovery) = value.get("discovery").and_then(|value| value.as_table()) {
         let mut imported = config.discovery.clone();
@@ -982,7 +1010,9 @@ fn import_gdhealth_config(value: toml::Value, defaults: &GdhealthConfig) -> Gdhe
     if let Some(groups) = value.get("groups").and_then(|value| value.as_table()) {
         config.groups = groups
             .iter()
-            .filter_map(|(name, value)| array_of_strings(Some(value)).map(|patterns| (name.clone(), patterns)))
+            .filter_map(|(name, value)| {
+                array_of_strings(Some(value)).map(|patterns| (name.clone(), patterns))
+            })
             .collect();
     }
     if let Some(thresholds) = value.get("thresholds").and_then(|value| value.as_table()) {
@@ -1037,7 +1067,9 @@ fn array_of_strings(value: Option<&toml::Value>) -> Option<Vec<String>> {
 }
 
 fn usize_value(value: Option<&toml::Value>) -> Option<usize> {
-    value.and_then(|value| value.as_integer()).map(|value| value as usize)
+    value
+        .and_then(|value| value.as_integer())
+        .map(|value| value as usize)
 }
 
 pub fn install_gdtest_addons(
