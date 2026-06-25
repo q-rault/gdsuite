@@ -111,33 +111,112 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
 
 fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     let config = load_config_or_error(context)?;
-    let manifest = load_manifest_or_error(context, EXIT_VALIDATION_ERROR)?;
-    let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_VALIDATION_ERROR)?;
-    let godot = tooling::resolve_godot(context, cli_godot, Some(&config))
-        .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
+    let manifest = if context.manifest_path.exists() {
+        tooling::load_manifest(context).ok()
+    } else {
+        None
+    };
 
     println!("project_root={}", context.root.display());
     println!("config={}", context.config_path.display());
     println!("gdtest_config={}", context.gdtest_config_path.display());
     println!("gdhealth_config={}", context.gdhealth_config_path.display());
     println!("manifest={}", context.manifest_path.display());
-    println!("godot={}", godot.display());
-    println!("python={}", toolchain.python.display());
-    println!("gdformat={}", toolchain.gdformat.display());
-    println!("gdlint={}", toolchain.gdlint.display());
-    println!("gdtest={}", toolchain.gdtest.display());
-    println!("gdhealth={}", toolchain.gdhealth.display());
 
-    print_version("godot", &godot, &["--version"])?;
-    print_version("python", &toolchain.python, &["--version"])?;
-    print_version("gdtest", &toolchain.gdtest, &["--version"])?;
-    print_version("gdhealth", &toolchain.gdhealth, &["--help"])?;
-    for warning in tooling::product_config_warnings(context, &config)? {
-        println!("warning={warning}");
+    let mut missing: Vec<String> = Vec::new();
+
+    match tooling::resolve_godot(context, cli_godot, Some(&config)) {
+        Ok(path) => {
+            println!("godot={}", path.display());
+            print_version_or_warn("godot", &path, &["--version"]);
+        }
+        Err(_) => {
+            println!("godot=not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml");
+            missing.push("godot".to_string());
+        }
     }
 
-    println!("status=ok");
-    Ok(())
+    let python = manifest.as_ref().and_then(|m| m.python.clone())
+        .or_else(|| tooling::find_python_in_venv(context));
+    match python {
+        Some(path) => {
+            println!("python={}", path.display());
+            print_version_or_warn("python", &path, &["--version"]);
+        }
+        None => {
+            println!("python=not found; run `gdsuite setup` to install the toolchain");
+            missing.push("python".to_string());
+        }
+    }
+
+    let gdformat = manifest.as_ref().and_then(|m| m.gdformat.clone())
+        .or_else(|| tooling::find_binary(context, &["gdformat"]));
+    match gdformat {
+        Some(path) => {
+            println!("gdformat={}", path.display());
+            print_version_or_warn("gdformat", &path, &["--version"]);
+        }
+        None => {
+            println!("gdformat=not found; run `gdsuite setup` to install the toolchain");
+            missing.push("gdformat".to_string());
+        }
+    }
+
+    let gdlint = manifest.as_ref().and_then(|m| m.gdlint.clone())
+        .or_else(|| tooling::find_binary(context, &["gdlint"]));
+    match gdlint {
+        Some(path) => {
+            println!("gdlint={}", path.display());
+            print_version_or_warn("gdlint", &path, &["--version"]);
+        }
+        None => {
+            println!("gdlint=not found; run `gdsuite setup` to install the toolchain");
+            missing.push("gdlint".to_string());
+        }
+    }
+
+    let gdtest = manifest.as_ref().and_then(|m| m.gdtest.clone())
+        .or_else(|| tooling::find_binary(context, &["gdtest"]));
+    match gdtest {
+        Some(path) => {
+            println!("gdtest={}", path.display());
+            print_version_or_warn("gdtest", &path, &["--version"]);
+        }
+        None => {
+            println!("gdtest=not found; run `gdsuite setup` to install the toolchain");
+            missing.push("gdtest".to_string());
+        }
+    }
+
+    let gdhealth = manifest.as_ref().and_then(|m| m.gdhealth.clone())
+        .or_else(|| tooling::find_binary(context, &["gdhealth"]));
+    match gdhealth {
+        Some(path) => {
+            println!("gdhealth={}", path.display());
+            print_version_or_warn("gdhealth", &path, &["--help"]);
+        }
+        None => {
+            println!("gdhealth=not found; run `gdsuite setup` to install the toolchain");
+            missing.push("gdhealth".to_string());
+        }
+    }
+
+    if missing.is_empty() {
+        for warning in tooling::product_config_warnings(context, &config)? {
+            println!("warning={warning}");
+        }
+        println!("status=ok");
+        Ok(())
+    } else {
+        println!("status=error");
+        Err(command_error(
+            EXIT_TOOLCHAIN_ERROR,
+            format!(
+                "missing tools: {}; run `gdsuite setup` to install the local toolchain",
+                missing.join(", ")
+            ),
+        ))
+    }
 }
 
 fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
@@ -625,15 +704,15 @@ fn parse_lint_finding(line: &str) -> Option<JsonLintFinding> {
     })
 }
 
-fn print_version(name: &str, path: &Path, args: &[&str]) -> Result<()> {
-    let args = args
-        .iter()
-        .map(|value| value.to_string())
-        .collect::<Vec<_>>();
-    let output = process::run_checked(path, &args, PathBuf::from(".").as_path())?;
-    let version = output.stdout.trim().lines().next().unwrap_or("unknown");
-    println!("{name}_version={version}");
-    Ok(())
+fn print_version_or_warn(name: &str, path: &Path, args: &[&str]) {
+    let args_owned: Vec<String> = args.iter().map(|v| v.to_string()).collect();
+    match process::run_checked(path, &args_owned, PathBuf::from(".").as_path()) {
+        Ok(output) => {
+            let version = output.stdout.trim().lines().next().unwrap_or("unknown");
+            println!("{name}_version={version}");
+        }
+        Err(_) => println!("{name}_version=unavailable"),
+    }
 }
 
 fn command_error(code: u8, message: String) -> anyhow::Error {
