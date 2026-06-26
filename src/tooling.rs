@@ -1,9 +1,13 @@
 use std::{
-    env, fs,
+    env, fs, io,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, anyhow};
+use flate2::read::GzDecoder;
+use reqwest::blocking::Client;
+use tar::Archive;
+use zip::ZipArchive;
 
 use crate::{
     config::{
@@ -41,6 +45,13 @@ pub struct Toolchain {
 pub struct AddonInstallReport {
     pub installed_files: usize,
     pub skipped_modified: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolSource {
+    Path(PathBuf),
+    Crate { name: String, version: String },
+    GithubRelease { url: String },
 }
 
 impl ProjectContext {
@@ -183,8 +194,8 @@ pub fn install_toolchain(
 ) -> Result<Manifest> {
     let python = ensure_venv(context)?;
     install_gdtoolkit(&python, &config.tools.gdtoolkit, context)?;
-    let gdtest = cargo_install(context, &config.tools.gdtest_source, "gdtest")?;
-    let gdhealth = cargo_install(context, &config.tools.gdhealth_source, "gdhealth")?;
+    let gdtest = install_tool(context, &config.tools.gdtest_source, "gdtest")?;
+    let gdhealth = install_tool(context, &config.tools.gdhealth_source, "gdhealth")?;
     let gdformat =
         find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
     let gdlint =
@@ -318,27 +329,32 @@ fn install_gdtoolkit(python: &Path, version: &str, context: &ProjectContext) -> 
     Ok(())
 }
 
-fn cargo_install(context: &ProjectContext, source: &Path, name: &str) -> Result<PathBuf> {
+fn install_tool(context: &ProjectContext, source: &str, name: &str) -> Result<PathBuf> {
     let cargo = which::which("cargo").context("cargo is required for setup")?;
-    let source_root = context.root.join(source);
-    if !source_root.exists() {
-        return Err(anyhow!(
-            "tool source does not exist: {}",
-            source_root.display()
-        ));
-    }
-
     let root = context.gdsuite_dir.join("tools").join(name);
-    let package_root = resolve_package_root(&source_root, name)?;
+    fs::create_dir_all(&root)
+        .with_context(|| format!("failed to create tool root {}", root.display()))?;
+    let source_root = prepare_tool_source(context, source, name)?;
 
-    let args = vec![
-        "install".to_string(),
-        "--path".to_string(),
-        package_root.display().to_string(),
-        "--root".to_string(),
-        root.display().to_string(),
-    ];
-    process::run_checked(&cargo, &args, &context.root)?;
+    match source_root {
+        PreparedToolSource::CargoPath(path) => {
+            let package_root = resolve_package_root(&path, name)?;
+            let args = vec![
+                "install".to_string(),
+                "--path".to_string(),
+                package_root.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+            ];
+            process::run_checked(&cargo, &args, &context.root)?;
+        }
+        PreparedToolSource::BinaryArchive(path) => {
+            install_binary_archive(&path, &root, name)?;
+        }
+        PreparedToolSource::DirectBinary(path) => {
+            install_downloaded_binary(&path, &root, name)?;
+        }
+    }
 
     for candidate in process::candidate_paths(root.join("bin").join(name)) {
         if candidate.exists() {
@@ -347,6 +363,60 @@ fn cargo_install(context: &ProjectContext, source: &Path, name: &str) -> Result<
     }
 
     Err(anyhow!("cargo install did not produce {}", name))
+}
+
+#[derive(Debug)]
+enum PreparedToolSource {
+    CargoPath(PathBuf),
+    BinaryArchive(PathBuf),
+    DirectBinary(PathBuf),
+}
+
+fn prepare_tool_source(
+    context: &ProjectContext,
+    source: &str,
+    name: &str,
+) -> Result<PreparedToolSource> {
+    match parse_tool_source(source)? {
+        ToolSource::Path(path) => {
+            let source_root = context.root.join(path);
+            if !source_root.exists() {
+                return Err(anyhow!(
+                    "tool source does not exist: {}",
+                    source_root.display()
+                ));
+            }
+            Ok(PreparedToolSource::CargoPath(source_root))
+        }
+        ToolSource::Crate {
+            name: crate_name,
+            version,
+        } => {
+            let source_root = tool_source_cache_dir(context, name);
+            reset_dir(&source_root)?;
+            let archive_path = download_file(
+                &crate_download_url(&crate_name, &version),
+                &tool_download_cache_dir(context, name)
+                    .join(format!("{crate_name}-{version}.crate")),
+            )?;
+            unpack_archive(&archive_path, &source_root)?;
+            Ok(PreparedToolSource::CargoPath(normalize_extracted_root(
+                &source_root,
+            )?))
+        }
+        ToolSource::GithubRelease { url } => {
+            let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
+            let archive_path = download_file(
+                &url,
+                &tool_download_cache_dir(context, name).join(download_name),
+            )?;
+            if is_archive_path(&archive_path) {
+                Ok(PreparedToolSource::BinaryArchive(archive_path))
+            } else {
+                Ok(PreparedToolSource::DirectBinary(archive_path))
+            }
+        }
+    }
 }
 
 fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
@@ -395,6 +465,270 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
         name,
         source_root.display()
     ))
+}
+
+fn parse_tool_source(source: &str) -> Result<ToolSource> {
+    if let Some(rest) = source.strip_prefix("crate:") {
+        let (name, version) = rest.split_once('@').ok_or_else(|| {
+            anyhow!("invalid crate source `{source}`; expected crate:<name>@<version>")
+        })?;
+        if name.is_empty() || version.is_empty() {
+            return Err(anyhow!(
+                "invalid crate source `{source}`; expected crate:<name>@<version>"
+            ));
+        }
+        return Ok(ToolSource::Crate {
+            name: name.to_string(),
+            version: version.to_string(),
+        });
+    }
+
+    if let Some(url) = source.strip_prefix("github:") {
+        if url.is_empty() {
+            return Err(anyhow!(
+                "invalid github source `{source}`; expected github:<url>"
+            ));
+        }
+        return Ok(ToolSource::GithubRelease {
+            url: url.to_string(),
+        });
+    }
+
+    if let Some(path) = source.strip_prefix("path:") {
+        if path.is_empty() {
+            return Err(anyhow!(
+                "invalid path source `{source}`; expected path:<local-path>"
+            ));
+        }
+        return Ok(ToolSource::Path(PathBuf::from(path)));
+    }
+
+    Ok(ToolSource::Path(PathBuf::from(source)))
+}
+
+fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> Result<PathBuf> {
+    match parse_tool_source(source)? {
+        ToolSource::Path(path) => Ok(context.root.join(path)),
+        ToolSource::Crate { .. } | ToolSource::GithubRelease { .. } => {
+            let source_root = tool_source_cache_dir(context, name);
+            if !source_root.exists() {
+                return Err(anyhow!(
+                    "tool source cache missing for {}; run `gdsuite setup` to install the toolchain",
+                    name
+                ));
+            }
+            normalize_extracted_root(&source_root)
+        }
+    }
+}
+
+fn tool_source_cache_dir(context: &ProjectContext, name: &str) -> PathBuf {
+    context.gdsuite_dir.join("tools").join(name).join("source")
+}
+
+fn tool_download_cache_dir(context: &ProjectContext, name: &str) -> PathBuf {
+    context
+        .gdsuite_dir
+        .join("tools")
+        .join(name)
+        .join("downloads")
+}
+
+fn crate_download_url(name: &str, version: &str) -> String {
+    if let Ok(base) = env::var("GDSUITE_CRATES_DOWNLOAD_BASE_URL") {
+        let base = base.trim_end_matches('/');
+        return format!("{base}/{name}/{version}/download");
+    }
+
+    format!("https://crates.io/api/v1/crates/{name}/{version}/download")
+}
+
+fn download_file(url: &str, destination: &Path) -> Result<PathBuf> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create download dir {}", parent.display()))?;
+    }
+
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .context("failed to initialize HTTP client")?;
+    let mut response = client
+        .get(url)
+        .send()
+        .with_context(|| format!("failed to download {url}"))?
+        .error_for_status()
+        .with_context(|| format!("failed to download {url}"))?;
+    let mut file = fs::File::create(destination)
+        .with_context(|| format!("failed to create {}", destination.display()))?;
+    io::copy(&mut response, &mut file)
+        .with_context(|| format!("failed to write {}", destination.display()))?;
+    Ok(destination.to_path_buf())
+}
+
+fn install_binary_archive(archive_path: &Path, root: &Path, name: &str) -> Result<()> {
+    let source_root = root.join("source");
+    reset_dir(&source_root)?;
+    unpack_archive(archive_path, &source_root)?;
+    let extracted_root = normalize_extracted_root(&source_root)?;
+
+    if extracted_root.join("Cargo.toml").exists() {
+        let package_root = resolve_package_root(&extracted_root, name)?;
+        let cargo = which::which("cargo").context("cargo is required for setup")?;
+        let args = vec![
+            "install".to_string(),
+            "--path".to_string(),
+            package_root.display().to_string(),
+            "--root".to_string(),
+            root.display().to_string(),
+        ];
+        process::run_checked(&cargo, &args, root.parent().unwrap_or(root))?;
+        return Ok(());
+    }
+
+    let binary = find_extracted_binary(&extracted_root, name)?;
+    install_binary_at_path(&binary, root, name)
+}
+
+fn install_downloaded_binary(path: &Path, root: &Path, name: &str) -> Result<()> {
+    install_binary_at_path(path, root, name)
+}
+
+fn install_binary_at_path(path: &Path, root: &Path, name: &str) -> Result<()> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+    let target = root.join("bin").join(format!("{name}{extension}"));
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::copy(path, &target)
+        .with_context(|| format!("failed to copy {} to {}", path.display(), target.display()))?;
+    make_executable(&target)?;
+    Ok(())
+}
+
+fn unpack_archive(archive_path: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)
+        .with_context(|| format!("failed to create {}", destination.display()))?;
+    let file = fs::File::open(archive_path)
+        .with_context(|| format!("failed to open {}", archive_path.display()))?;
+    let file_name = archive_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+
+    if file_name.ends_with(".zip") {
+        let mut archive = ZipArchive::new(file)
+            .with_context(|| format!("failed to read zip archive {}", archive_path.display()))?;
+        archive
+            .extract(destination)
+            .with_context(|| format!("failed to extract {}", archive_path.display()))?;
+        return Ok(());
+    }
+
+    if file_name.ends_with(".tar.gz")
+        || file_name.ends_with(".tgz")
+        || file_name.ends_with(".crate")
+    {
+        let reader = GzDecoder::new(file);
+        let mut archive = Archive::new(reader);
+        archive
+            .unpack(destination)
+            .with_context(|| format!("failed to extract {}", archive_path.display()))?;
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "unsupported archive format for {}",
+        archive_path.display()
+    ))
+}
+
+fn normalize_extracted_root(source_root: &Path) -> Result<PathBuf> {
+    let children = fs::read_dir(source_root)
+        .with_context(|| format!("failed to read {}", source_root.display()))?
+        .filter_map(|entry| entry.ok())
+        .collect::<Vec<_>>();
+    if children.len() == 1 {
+        let child = children[0].path();
+        if child.is_dir() {
+            return Ok(child);
+        }
+    }
+    Ok(source_root.to_path_buf())
+}
+
+fn find_extracted_binary(root: &Path, name: &str) -> Result<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+
+            let stem = path.file_stem().and_then(|value| value.to_str());
+            let extension = path.extension().and_then(|value| value.to_str());
+            let is_binary_name =
+                matches!(extension, Some("exe" | "cmd" | "bat")) || extension.is_none();
+            if stem == Some(name) && is_binary_name {
+                return Ok(path);
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "archive did not contain an executable or cargo package for {}",
+        name
+    ))
+}
+
+fn is_archive_path(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    name.ends_with(".zip")
+        || name.ends_with(".tar.gz")
+        || name.ends_with(".tgz")
+        || name.ends_with(".crate")
+}
+
+fn file_name_from_url(url: &str) -> Option<String> {
+    let clean = url.split('?').next().unwrap_or(url).trim_end_matches('/');
+    clean.rsplit('/').next().map(ToString::to_string)
+}
+
+fn reset_dir(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    Ok(())
+}
+
+fn make_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+    }
+
+    #[cfg(not(unix))]
+    let _ = path;
+
+    Ok(())
 }
 
 pub fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
@@ -1090,7 +1424,7 @@ pub fn install_gdtest_addons(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<AddonInstallReport> {
-    let source_root = context.root.join(&config.tools.gdtest_source);
+    let source_root = resolved_source_root(context, &config.tools.gdtest_source, "gdtest")?;
     let runtime_source = source_root.join("addons").join("gdtest");
     if !runtime_source.exists() {
         return Err(anyhow!(

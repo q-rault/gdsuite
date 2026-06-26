@@ -1,10 +1,17 @@
 use std::{
+    collections::HashMap,
     fs,
+    io::{Read, Write},
+    net::TcpListener,
     path::{Path, PathBuf},
+    sync::Arc,
+    thread,
 };
 
 use assert_cmd::Command;
+use flate2::{Compression, write::GzEncoder};
 use predicates::prelude::*;
+use tar::Builder;
 use tempfile::TempDir;
 
 #[test]
@@ -84,6 +91,160 @@ fn init_accepts_godot_exe_as_command_name_from_env() {
         .stdout(predicate::str::contains("init complete"));
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
+}
+
+#[test]
+fn setup_supports_crate_sources() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_path_tools();
+
+    let server = TestHttpServer::new(HashMap::from([
+        (
+            "/gdtest/0.4.0/download".to_string(),
+            build_tar_gz(&[
+                (
+                    "gdtest-0.4.0/addons/gdtest/gdtest_worker.gd",
+                    "load(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                ),
+                ("gdtest-0.4.0/addons/gdtest/gdunit4_chain.gd", ""),
+                (
+                    "gdtest-0.4.0/addons/gdtest_editor/plugin.gd",
+                    "_panel = null\n",
+                ),
+            ]),
+        ),
+        (
+            "/gdhealth/0.7.1/download".to_string(),
+            build_tar_gz(&[("gdhealth-0.7.1/README.md", "gdhealth\n")]),
+        ),
+    ]));
+
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.remote_gdsuite_config("crate:gdtest@0.4.0", "crate:gdhealth@0.7.1"),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .env("GDSUITE_CRATES_DOWNLOAD_BASE_URL", server.url())
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("setup complete"));
+
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+    assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
+    let versions = fs::read_to_string(fixture.root.join(".gdsuite/state/versions.json")).unwrap();
+    assert!(versions.contains("crate:gdtest@0.4.0"));
+    assert!(versions.contains("crate:gdhealth@0.7.1"));
+}
+
+#[test]
+fn setup_supports_github_release_archives() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_path_tools();
+
+    let server = TestHttpServer::new(HashMap::from([
+        (
+            "/gdtest.tar.gz".to_string(),
+            build_tar_gz(&[
+                (
+                    "gdtest-release/gdtest.cmd",
+                    "@echo off\n@if \"%1\"==\"--version\" echo gdtest 0.4.0\n",
+                ),
+                (
+                    "gdtest-release/addons/gdtest/gdtest_worker.gd",
+                    "load(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                ),
+                ("gdtest-release/addons/gdtest/gdunit4_chain.gd", ""),
+                (
+                    "gdtest-release/addons/gdtest_editor/plugin.gd",
+                    "_panel = null\n",
+                ),
+            ]),
+        ),
+        (
+            "/gdhealth.tar.gz".to_string(),
+            build_tar_gz(&[(
+                "gdhealth-release/gdhealth.cmd",
+                "@echo off\n@if \"%1\"==\"--help\" echo gdhealth help\n",
+            )]),
+        ),
+    ]));
+
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.remote_gdsuite_config(
+            &format!("github:{}/gdtest.tar.gz", server.url()),
+            &format!("github:{}/gdhealth.tar.gz", server.url()),
+        ),
+    )
+    .unwrap();
+
+    fixture.cmd().arg("setup").assert().success();
+
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdtest/bin/gdtest.cmd")
+            .exists()
+    );
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdhealth/bin/gdhealth.cmd")
+            .exists()
+    );
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+}
+
+#[test]
+fn setup_supports_non_sibling_local_paths() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_path_tools();
+
+    let gdtest_root = fixture.root.join("vendor").join("tools").join("gdtest-src");
+    let gdhealth_root = fixture
+        .root
+        .join("external")
+        .join("delegates")
+        .join("gdhealth-src");
+    fixture.seed_tool_sources_at(&gdtest_root, &gdhealth_root);
+
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.remote_gdsuite_config(
+            "path:vendor/tools/gdtest-src",
+            "external/delegates/gdhealth-src",
+        ),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("setup complete"));
+
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdtest/bin/gdtest.cmd")
+            .exists()
+    );
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdhealth/bin/gdhealth.cmd")
+            .exists()
+    );
+    assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
+    assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 }
 
 #[test]
@@ -1134,6 +1295,11 @@ impl Fixture {
 
     fn seed_tool_sources(&self) {
         let gdtest_root = self.root.join("../gdtest");
+        let gdhealth_root = self.root.join("../gdhealth/tools/gdhealth");
+        self.seed_tool_sources_at(&gdtest_root, &gdhealth_root);
+    }
+
+    fn seed_tool_sources_at(&self, gdtest_root: &Path, gdhealth_root: &Path) {
         fs::create_dir_all(gdtest_root.join("addons/gdtest")).unwrap();
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
@@ -1173,7 +1339,7 @@ impl Fixture {
             "license\n",
         )
         .unwrap();
-        fs::create_dir_all(self.root.join("../gdhealth/tools/gdhealth")).unwrap();
+        fs::create_dir_all(gdhealth_root).unwrap();
     }
 
     fn seed_path_tools(&self) {
@@ -1399,6 +1565,92 @@ root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
     fn read_gdsuite_config(&self) -> String {
         fs::read_to_string(self.root.join("gdsuite.toml")).unwrap()
     }
+
+    fn remote_gdsuite_config(&self, gdtest_source: &str, gdhealth_source: &str) -> String {
+        self.default_gdsuite_config()
+            .replace(
+                "gdtest_source = \"../gdtest\"",
+                &format!("gdtest_source = \"{gdtest_source}\""),
+            )
+            .replace(
+                "gdhealth_source = \"../gdhealth/tools/gdhealth\"",
+                &format!("gdhealth_source = \"{gdhealth_source}\""),
+            )
+    }
+}
+
+struct TestHttpServer {
+    url: String,
+    _handle: thread::JoinHandle<()>,
+}
+
+impl TestHttpServer {
+    fn new(routes: HashMap<String, Vec<u8>>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let routes = Arc::new(routes);
+        let handle = thread::spawn(move || {
+            for stream in listener.incoming().take(8) {
+                let mut stream = match stream {
+                    Ok(stream) => stream,
+                    Err(_) => continue,
+                };
+                let mut buffer = [0_u8; 4096];
+                let bytes = match stream.read(&mut buffer) {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                };
+                let request = String::from_utf8_lossy(&buffer[..bytes]);
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/");
+                if let Some(body) = routes.get(path) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes());
+                    let _ = stream.write_all(body);
+                } else {
+                    let body = b"not found";
+                    let header = format!(
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes());
+                    let _ = stream.write_all(body);
+                }
+            }
+        });
+
+        Self {
+            url: format!("http://{}", address),
+            _handle: handle,
+        }
+    }
+
+    fn url(&self) -> String {
+        self.url.clone()
+    }
+}
+
+fn build_tar_gz(entries: &[(&str, &str)]) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    {
+        let mut archive = Builder::new(&mut encoder);
+        for (path, contents) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_mode(0o644);
+            header.set_size(contents.len() as u64);
+            header.set_cksum();
+            archive.append(&header, contents.as_bytes()).unwrap();
+        }
+        archive.finish().unwrap();
+    }
+    encoder.finish().unwrap()
 }
 
 fn write_cmd(path: &Path, body: &str) {

@@ -45,9 +45,9 @@ pub struct ToolsConfig {
     #[serde(default = "default_gdtoolkit_version")]
     pub gdtoolkit: String,
     #[serde(default = "default_gdtest_source")]
-    pub gdtest_source: PathBuf,
+    pub gdtest_source: String,
     #[serde(default = "default_gdhealth_source")]
-    pub gdhealth_source: PathBuf,
+    pub gdhealth_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,8 +210,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Versions {
     pub gdtoolkit: String,
-    pub gdtest_source: PathBuf,
-    pub gdhealth_source: PathBuf,
+    pub gdtest_source: String,
+    pub gdhealth_source: String,
 }
 
 impl Default for ProjectConfig {
@@ -407,12 +407,12 @@ fn default_gdtoolkit_version() -> String {
     "4.*".to_string()
 }
 
-fn default_gdtest_source() -> PathBuf {
-    PathBuf::from("../gdtest")
+fn default_gdtest_source() -> String {
+    "../gdtest".to_string()
 }
 
-fn default_gdhealth_source() -> PathBuf {
-    PathBuf::from("../gdhealth/tools/gdhealth")
+fn default_gdhealth_source() -> String {
+    "../gdhealth/tools/gdhealth".to_string()
 }
 
 fn default_scripts() -> Vec<String> {
@@ -714,8 +714,8 @@ exclude = {}
 "#,
         escape_string(&config.project.root),
         escape_string(&config.tools.gdtoolkit),
-        escape_path(&config.tools.gdtest_source),
-        escape_path(&config.tools.gdhealth_source),
+        escape_string(&config.tools.gdtest_source),
+        escape_string(&config.tools.gdhealth_source),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
         render_string_array(&config.fix.safe_rules),
