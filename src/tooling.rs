@@ -397,7 +397,11 @@ fn ensure_venv(context: &ProjectContext) -> Result<PathBuf> {
     find_python_in_venv(context).ok_or_else(|| anyhow!("venv bootstrap did not produce python"))
 }
 
-fn install_gdtoolkit(python: &Path, requested: &ToolAcquireSpec, context: &ProjectContext) -> Result<()> {
+fn install_gdtoolkit(
+    python: &Path,
+    requested: &ToolAcquireSpec,
+    context: &ProjectContext,
+) -> Result<()> {
     let ToolAcquireSpec::Pip { package, spec } = requested else {
         return Err(anyhow!("gdtoolkit must use a pip acquisition spec"));
     };
@@ -412,7 +416,11 @@ fn install_gdtoolkit(python: &Path, requested: &ToolAcquireSpec, context: &Proje
     Ok(())
 }
 
-fn install_tool(context: &ProjectContext, requested: &ToolAcquireSpec, name: &str) -> Result<PathBuf> {
+fn install_tool(
+    context: &ProjectContext,
+    requested: &ToolAcquireSpec,
+    name: &str,
+) -> Result<PathBuf> {
     let cargo = which::which("cargo").context("cargo is required for setup")?;
     let root = context.gdsuite_dir.join("tools").join(name);
     fs::create_dir_all(&root)
@@ -437,7 +445,8 @@ fn install_tool(context: &ProjectContext, requested: &ToolAcquireSpec, name: &st
             reset_dir(&source_root)?;
             let archive_path = download_file(
                 &crate_download_url(crate_name, version),
-                &tool_download_cache_dir(context, name).join(format!("{crate_name}-{version}.crate")),
+                &tool_download_cache_dir(context, name)
+                    .join(format!("{crate_name}-{version}.crate")),
             )?;
             unpack_archive(&archive_path, &source_root)?;
 
@@ -554,24 +563,23 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
 }
 
 fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
-    if let Some(rest) = source.strip_prefix("crate:") {
-        if let Some((name, version)) = rest.split_once('@')
-            && !name.is_empty()
-            && !version.is_empty()
-        {
-            return ToolAcquireSpec::Crate {
-                crate_name: name.to_string(),
-                version: version.to_string(),
-            };
-        }
+    if let Some(rest) = source.strip_prefix("crate:")
+        && let Some((name, version)) = rest.split_once('@')
+        && !name.is_empty()
+        && !version.is_empty()
+    {
+        return ToolAcquireSpec::Crate {
+            crate_name: name.to_string(),
+            version: version.to_string(),
+        };
     }
 
-    if let Some(url) = source.strip_prefix("github:") {
-        if !url.is_empty() {
-            return ToolAcquireSpec::GithubRelease {
-                url: url.to_string(),
-            };
-        }
+    if let Some(url) = source.strip_prefix("github:")
+        && !url.is_empty()
+    {
+        return ToolAcquireSpec::GithubRelease {
+            url: url.to_string(),
+        };
     }
 
     if let Some(rest) = source.strip_prefix("git:") {
@@ -587,21 +595,23 @@ fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
                 }
             }
         }
-        if !url.is_empty() && rev.is_some() {
+        if !url.is_empty()
+            && let Some(rev) = rev
+        {
             return ToolAcquireSpec::Git {
                 url: url.to_string(),
-                rev: rev.expect("checked above"),
+                rev,
                 subdir,
             };
         }
     }
 
-    if let Some(path) = source.strip_prefix("path:") {
-        if !path.is_empty() {
-            return ToolAcquireSpec::Path {
-                path: path.to_string(),
-            };
-        }
+    if let Some(path) = source.strip_prefix("path:")
+        && !path.is_empty()
+    {
+        return ToolAcquireSpec::Path {
+            path: path.to_string(),
+        };
     }
 
     if source.contains("://") {
@@ -978,7 +988,9 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
         &state.tools.gdtest.resolved_version,
         &state.contracts.gdtest_harness_version,
     ) {
-        (Some(version), Some(harness)) if normalize_version(version) == normalize_version(harness) => {
+        (Some(version), Some(harness))
+            if normalize_version(version) == normalize_version(harness) =>
+        {
             let mut report = evaluate_versioned_tool(
                 "gdtest",
                 &state.tools.gdtest.requested,
@@ -1078,8 +1090,15 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
 }
 
 pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
-    let verdicts = [&report.gdtoolkit.verdict, &report.gdtest.verdict, &report.gdhealth.verdict];
-    if verdicts.iter().any(|verdict| **verdict == CompatibilityVerdict::Error) {
+    let verdicts = [
+        &report.gdtoolkit.verdict,
+        &report.gdtest.verdict,
+        &report.gdhealth.verdict,
+    ];
+    if verdicts
+        .iter()
+        .any(|verdict| **verdict == CompatibilityVerdict::Error)
+    {
         CompatibilityVerdict::Error
     } else if verdicts
         .iter()
@@ -1151,7 +1170,11 @@ fn probe_toolchain(
     })
 }
 
-fn probe_pip_package_version(python: &Path, package: &str, context: &ProjectContext) -> Option<String> {
+fn probe_pip_package_version(
+    python: &Path,
+    package: &str,
+    context: &ProjectContext,
+) -> Option<String> {
     let args = vec![
         "-m".to_string(),
         "pip".to_string(),
@@ -1169,7 +1192,10 @@ fn probe_pip_package_version(python: &Path, package: &str, context: &ProjectCont
 }
 
 fn probe_command_version(path: &Path, args: &[&str], context: &ProjectContext) -> Option<String> {
-    let args = args.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+    let args = args
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
     let output = process::run(path, &args, &context.root).ok()?;
     if !output.status.success() {
         return None;
@@ -1191,7 +1217,10 @@ fn extract_version_token(line: &str) -> Option<String> {
         })
 }
 
-fn probe_gdtest_harness_version(context: &ProjectContext, config: &GdsuiteConfig) -> Option<String> {
+fn probe_gdtest_harness_version(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Option<String> {
     let harness_path = context.root.join(&config.gdtest.harness);
     let body = fs::read_to_string(harness_path).ok()?;
     extract_quoted_assignment(&body, "HARNESS_VERSION")
@@ -1199,7 +1228,10 @@ fn probe_gdtest_harness_version(context: &ProjectContext, config: &GdsuiteConfig
 
 fn probe_gdhealth_schema_version(path: &Path, context: &ProjectContext) -> Option<u32> {
     for args in [["--schema-version"], ["schema-version"]] {
-        let args = args.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+        let args = args
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
         let output = process::run(path, &args, &context.root).ok()?;
         if !output.status.success() {
             continue;

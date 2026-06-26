@@ -1,31 +1,81 @@
 ---
 title: gdsuite.toml
-description: The suite-owned top-level config file for workflow, profiles, reports, and tool resolution.
+description: The optional suite-owned config file for tool resolution, command defaults, reports, and health settings.
 ---
 
-`gdsuite.toml` is the canonical workflow file. It is where the suite decides which pipeline runs, where reports are written, and which tool paths or defaults should be used before delegated products take over.
+`gdsuite.toml` is the canonical customization file. It is where you override tool sources, default targets, report settings, and health configuration. It is not required for basic runtime use.
+
+For `gdsuite check`, `gdsuite test`, and `gdsuite health`, the file is optional. If it is missing, those commands run with the built-in defaults below. The local toolchain still has to exist under `.gdsuite/state/manifest.json`, so missing config is allowed but missing setup is not.
 
 ## Typical concerns in this file
 
 - tool source locations
 - command defaults
-- profile pipelines
 - report defaults and artifact directory
-- health enablement and suite-level fail threshold defaults
+- health suite-level fail threshold and bundle directory
 
-## Minimal examples
+## Built-in defaults
+
+If `gdsuite.toml` is absent, runtime commands use these defaults:
+
+```toml
+[tools]
+gdtoolkit = "==4.5.0"
+gdtest_source = "crate:gdtest@0.1.0"
+gdhealth_source = "crate:gdhealth@0.1.0"
+
+[commands]
+default_test_target = "test/"
+default_health_subcommand = "health"
+
+[lint]
+line_length = 100
+include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[typecheck]
+include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[reports]
+default = "text"
+artifacts_dir = "reports/gdsuite"
+
+[health]
+command = "health"
+fail_on = "critical"
+bundle_dir = "reports/code-health"
+
+[gdtest]
+display_mode = "headless"
+harness = "addons/gdtest/gdtest_worker.gd"
+editor_plugin_dir = "addons/gdtest_editor"
+install_editor = true
+patterns = ["test/**/*.gd", "**/*.test.gd"]
+coverage_exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
+
+[gdtest.profile.ci]
+reporter = "junit"
+fail_fast = true
+
+[gdhealth.project]
+root = "."
+
+[gdhealth.discovery]
+include = ["**/*.gd"]
+exclude = ["addons/**", ".godot/**", "reports/**"]
+
+[gdhealth.groups]
+client = ["client/**/*.gd", "client/**"]
+server = ["server/**/*.gd", "server/**"]
+test = ["test/**/*.gd", "test/**"]
+root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
+```
+
+## Minimal example
 
 ```toml
 [reports]
 default = "json"
 artifacts_dir = "reports/gdsuite"
 ```
-
-```toml
-[profiles.local]
-pipeline = ["fmt", "lint", "typecheck"]
-```
-
-## Next step
-
-Next step: read [Profiles](/config/profiles) for the part of `gdsuite.toml` most teams customize first.

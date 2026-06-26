@@ -58,9 +58,6 @@ fn init_generates_project_local_toolchain_and_configs() {
     assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    assert!(config.contains("[profiles.local]"));
-    assert!(config.contains("[profiles.ci]"));
-    assert!(config.contains("[profiles.strict]"));
     assert!(config.contains("[reports]"));
     assert!(config.contains("[health]"));
 
@@ -537,6 +534,34 @@ fn delegated_health_uses_default_subcommand_without_forwarded_args() {
 }
 
 #[test]
+fn test_uses_built_in_defaults_when_gdsuite_config_is_missing() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::remove_file(fixture.root.join("gdsuite.toml")).unwrap();
+
+    fixture.cmd().arg("test").assert().success();
+
+    let gdtest_args = fs::read_to_string(fixture.root.join("logs/gdtest-args.txt")).unwrap();
+    assert!(gdtest_args.contains("test/"));
+}
+
+#[test]
+fn health_uses_built_in_defaults_when_gdsuite_config_is_missing() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::remove_file(fixture.root.join("gdsuite.toml")).unwrap();
+
+    fixture.cmd().arg("health").assert().success();
+
+    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
+    assert!(gdhealth_args.contains("health"));
+    assert!(gdhealth_args.contains("--fail-on"));
+    assert!(gdhealth_args.contains("critical"));
+}
+
+#[test]
 fn health_uses_overlay_config_that_enforces_suite_excludes() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -597,41 +622,13 @@ fn check_report_json_emits_suite_envelope_and_writes_artifact() {
 }
 
 #[test]
-fn check_strict_profile_runs_test_and_health() {
+fn check_uses_built_in_defaults_when_gdsuite_config_is_missing() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
+    fs::remove_file(fixture.root.join("gdsuite.toml")).unwrap();
 
-    fixture
-        .cmd()
-        .args(["check", "--profile", "strict"])
-        .assert()
-        .success();
-
-    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
-    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
-    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
-    assert!(gdhealth_args.contains("--fail-on"));
-    assert!(gdhealth_args.contains("warning"));
-}
-
-#[test]
-fn check_ci_profile_runs_test_and_health() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "ci"])
-        .assert()
-        .success();
-
-    assert!(fixture.root.join("logs/gdtest-args.txt").exists());
-    assert!(fixture.root.join("logs/gdhealth-args.txt").exists());
-    let gdhealth_args = fs::read_to_string(fixture.root.join("logs/gdhealth-args.txt")).unwrap();
-    assert!(gdhealth_args.contains("--fail-on"));
-    assert!(gdhealth_args.contains("critical"));
+    fixture.cmd().arg("check").assert().success();
 }
 
 #[test]
@@ -713,59 +710,6 @@ fn check_includes_typecheck_in_failure_summary() {
         .failure()
         .stdout(predicate::str::contains("typecheck:"))
         .stderr(predicate::str::contains("one or more checks failed"));
-}
-
-#[test]
-fn check_ci_profile_reports_aggregate_failure() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-    fs::write(fixture.root.join("mock-state/lint-fail.flag"), "").unwrap();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "ci"])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("lint:"))
-        .stderr(predicate::str::contains("one or more checks failed"));
-}
-
-#[test]
-fn check_ci_profile_report_json_includes_health_step() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "ci", "--report", "json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"command\": \"check\""))
-        .stdout(predicate::str::contains("\"name\": \"health\""));
-}
-
-#[test]
-fn check_local_profile_skips_test_and_health() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "local"])
-        .assert()
-        .success();
-
-    assert!(
-        !fixture.root.join("logs/gdtest-args.txt").exists(),
-        "local profile should not invoke gdtest"
-    );
-    assert!(
-        !fixture.root.join("logs/gdhealth-args.txt").exists(),
-        "local profile should not invoke gdhealth"
-    );
 }
 
 #[test]
@@ -1015,44 +959,6 @@ fn commands_fail_with_invalid_report_mode_in_config() {
 }
 
 #[test]
-fn commands_fail_with_unknown_profile() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "missing"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown profile `missing`"));
-}
-
-#[test]
-fn commands_fail_with_unsupported_pipeline_step_in_profile() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-    fs::write(
-        fixture.root.join("gdsuite.toml"),
-        format!(
-            "{}\n[profiles.broken]\npipeline = [\"fmt\", \"deploy\"]\n",
-            fixture.read_gdsuite_config().trim_end()
-        ),
-    )
-    .unwrap();
-
-    fixture
-        .cmd()
-        .args(["check", "--profile", "broken"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "unsupported pipeline step `deploy`",
-        ));
-}
-
-#[test]
 fn commands_fail_with_init_guidance_when_project_is_not_bootstrapped() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -1062,7 +968,9 @@ fn commands_fail_with_init_guidance_when_project_is_not_bootstrapped() {
         .arg("check")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("run `gdsuite init` first"));
+        .stderr(predicate::str::contains(
+            "run `gdsuite init` or `gdsuite setup`",
+        ));
 }
 
 #[test]
@@ -1074,7 +982,7 @@ fn commands_fail_with_setup_guidance_when_manifest_is_missing() {
 
     fixture
         .cmd()
-        .args(["check", "--profile", "ci"])
+        .arg("check")
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -1229,7 +1137,7 @@ fn migrate_syncs_suite_configs_and_rewrites_obvious_entrypoints() {
     fixture.cmd().arg("migrate").assert().success();
 
     let gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    assert!(gdsuite.contains("[profiles.local]"));
+    assert!(gdsuite.contains("[reports]"));
 
     let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
     assert!(gdtest.contains("patterns = [\"spec/**/*.gd\"]"));
@@ -1361,7 +1269,10 @@ impl Fixture {
                     ),
                     ("gdtest-0.1.0/addons/gdtest_editor/test_panel.gd", ""),
                     ("gdtest-0.1.0/addons/gdtest_editor/plugin.cfg", ""),
-                    ("gdtest-0.1.0/addons/gdtest_editor/README.md", "editor readme\n"),
+                    (
+                        "gdtest-0.1.0/addons/gdtest_editor/README.md",
+                        "editor readme\n",
+                    ),
                     ("gdtest-0.1.0/addons/gdtest_editor/LICENSE", "license\n"),
                 ]),
             ),
@@ -1672,22 +1583,11 @@ exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
 exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 
-[profiles.local]
-pipeline = ["fmt", "lint", "typecheck"]
-
-[profiles.ci]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-
-[profiles.strict]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-health_fail_on = "warning"
-
 [reports]
 default = "text"
 artifacts_dir = "reports/gdsuite"
 
 [health]
-enabled = true
 command = "health"
 fail_on = "critical"
 bundle_dir = "reports/code-health"

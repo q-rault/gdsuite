@@ -23,8 +23,6 @@ pub struct GdsuiteConfig {
     #[serde(default)]
     pub typecheck: TypecheckConfig,
     #[serde(default)]
-    pub profiles: ProfilesConfig,
-    #[serde(default)]
     pub reports: ReportsConfig,
     #[serde(default)]
     pub health: HealthConfig,
@@ -86,19 +84,6 @@ pub struct TypecheckConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfilesConfig {
-    #[serde(flatten, default = "default_profiles")]
-    pub entries: BTreeMap<String, ProfileConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProfileConfig {
-    #[serde(default)]
-    pub pipeline: Vec<String>,
-    pub health_fail_on: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportsConfig {
     #[serde(default = "default_report_format")]
     pub default: String,
@@ -108,8 +93,6 @@ pub struct ReportsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthConfig {
-    #[serde(default = "default_health_enabled")]
-    pub enabled: bool,
     #[serde(default = "default_health_command")]
     pub command: String,
     #[serde(default = "default_health_fail_on")]
@@ -381,18 +364,9 @@ impl Default for ReportsConfig {
     }
 }
 
-impl Default for ProfilesConfig {
-    fn default() -> Self {
-        Self {
-            entries: default_profiles(),
-        }
-    }
-}
-
 impl Default for HealthConfig {
     fn default() -> Self {
         Self {
-            enabled: default_health_enabled(),
             command: default_health_command(),
             fail_on: default_health_fail_on(),
             bundle_dir: default_health_bundle_dir(),
@@ -449,7 +423,7 @@ impl GdsuiteConfig {
             .with_context(|| format!("failed to read config {}", path.display()))?;
         let mut config: Self = toml::from_str(&text)
             .with_context(|| format!("failed to parse config {}", path.display()))?;
-        config.ensure_profile_defaults();
+        config.ensure_gdtest_profile_defaults();
         Ok(config)
     }
 
@@ -467,7 +441,7 @@ impl GdsuiteConfig {
             .with_context(|| format!("failed to write config {}", path.display()))
     }
 
-    fn ensure_profile_defaults(&mut self) {
+    fn ensure_gdtest_profile_defaults(&mut self) {
         for (name, defaults) in default_gdtest_profiles() {
             let profile = self.gdtest.profile.entry(name).or_default();
             if profile.reporter.is_none() {
@@ -627,58 +601,12 @@ fn default_line_length() -> usize {
     100
 }
 
-fn default_profiles() -> BTreeMap<String, ProfileConfig> {
-    BTreeMap::from([
-        (
-            "local".to_string(),
-            ProfileConfig {
-                pipeline: vec![
-                    "fmt".to_string(),
-                    "lint".to_string(),
-                    "typecheck".to_string(),
-                ],
-                health_fail_on: None,
-            },
-        ),
-        (
-            "ci".to_string(),
-            ProfileConfig {
-                pipeline: vec![
-                    "fmt".to_string(),
-                    "lint".to_string(),
-                    "typecheck".to_string(),
-                    "test".to_string(),
-                    "health".to_string(),
-                ],
-                health_fail_on: None,
-            },
-        ),
-        (
-            "strict".to_string(),
-            ProfileConfig {
-                pipeline: vec![
-                    "fmt".to_string(),
-                    "lint".to_string(),
-                    "typecheck".to_string(),
-                    "test".to_string(),
-                    "health".to_string(),
-                ],
-                health_fail_on: Some("warning".to_string()),
-            },
-        ),
-    ])
-}
-
 fn default_report_format() -> String {
     "text".to_string()
 }
 
 fn default_artifacts_dir() -> PathBuf {
     PathBuf::from("reports/gdsuite")
-}
-
-fn default_health_enabled() -> bool {
-    true
 }
 
 fn default_health_command() -> String {
@@ -789,22 +717,11 @@ exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
 exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
 
-[profiles.local]
-pipeline = ["fmt", "lint", "typecheck"]
-
-[profiles.ci]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-
-[profiles.strict]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-health_fail_on = "warning"
-
 [reports]
 default = "text"
 artifacts_dir = "reports/gdsuite"
 
 [health]
-enabled = true
 command = "health"
 fail_on = "critical"
 bundle_dir = "reports/code-health"
@@ -898,19 +815,6 @@ exclude = {}
         render_string_array(&config.typecheck.exclude),
     );
 
-    for (name, profile) in &config.profiles.entries {
-        body.push_str(&format!(
-            r#"
-[profiles.{name}]
-pipeline = {}
-"#,
-            render_string_array(&profile.pipeline)
-        ));
-        if let Some(value) = &profile.health_fail_on {
-            body.push_str(&format!("health_fail_on = \"{}\"\n", escape_string(value)));
-        }
-    }
-
     body.push_str(&format!(
         r#"
 [reports]
@@ -918,7 +822,6 @@ default = "{}"
 artifacts_dir = "{}"
 
 [health]
-enabled = {}
 command = "{}"
 fail_on = "{}"
 bundle_dir = "{}"
@@ -933,7 +836,6 @@ coverage_exclude = {}
 "#,
         escape_string(&config.reports.default),
         escape_path(&config.reports.artifacts_dir),
-        config.health.enabled,
         escape_string(&config.health.command),
         escape_string(&config.health.fail_on),
         escape_path(&config.health.bundle_dir),

@@ -84,8 +84,6 @@ pub struct ForwardReportArgs {
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
-    #[arg(long)]
-    pub profile: Option<String>,
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
 }

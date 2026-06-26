@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs, SetupArgs},
-    config::{CompatibilityVerdict, GdsuiteConfig, Manifest, ProfileConfig},
+    config::{CompatibilityVerdict, GdsuiteConfig, Manifest},
     fixers, migrate, process,
     tooling::{self, ProjectContext},
 };
@@ -105,26 +105,32 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    let installation = tooling::probe_installation_state(context, &config, &install.manifest, &install.requested)
-        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let installation =
+        tooling::probe_installation_state(context, &config, &install.manifest, &install.requested)
+            .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::save_installation_state(context, &installation)
         .map_err(|error| command_error(EXIT_INTERNAL_ERROR, error.to_string()))?;
     let compatibility = tooling::compatibility_report(&installation);
-    for tool in [&compatibility.gdtoolkit, &compatibility.gdtest, &compatibility.gdhealth] {
+    for tool in [
+        &compatibility.gdtoolkit,
+        &compatibility.gdtest,
+        &compatibility.gdhealth,
+    ] {
         if tool.verdict == CompatibilityVerdict::Warning {
             println!("warning={}", tool.reason);
         }
     }
     if tooling::report_status(&compatibility) == CompatibilityVerdict::Error {
-        let errors = [&compatibility.gdtoolkit, &compatibility.gdtest, &compatibility.gdhealth]
-            .into_iter()
-            .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
-            .map(|tool| tool.reason.clone())
-            .collect::<Vec<_>>();
-        return Err(command_error(
-            EXIT_TOOLCHAIN_ERROR,
-            errors.join("; "),
-        ));
+        let errors = [
+            &compatibility.gdtoolkit,
+            &compatibility.gdtest,
+            &compatibility.gdhealth,
+        ]
+        .into_iter()
+        .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
+        .map(|tool| tool.reason.clone())
+        .collect::<Vec<_>>();
+        return Err(command_error(EXIT_TOOLCHAIN_ERROR, errors.join("; ")));
     }
     Ok(())
 }
@@ -262,8 +268,12 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
             print_tool_compatibility(&compatibility.gdtest);
             print_tool_compatibility(&compatibility.gdhealth);
             status = match (status, tooling::report_status(&compatibility)) {
-                (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => CompatibilityVerdict::Error,
-                (CompatibilityVerdict::Warning, _) | (_, CompatibilityVerdict::Warning) => CompatibilityVerdict::Warning,
+                (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => {
+                    CompatibilityVerdict::Error
+                }
+                (CompatibilityVerdict::Warning, _) | (_, CompatibilityVerdict::Warning) => {
+                    CompatibilityVerdict::Warning
+                }
                 _ => CompatibilityVerdict::Ok,
             };
         }
@@ -304,8 +314,12 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
 
 fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
     let config = load_config_or_error(context)?;
+    fmt_with_config(context, &config, args)
+}
+
+fn fmt_with_config(context: &ProjectContext, config: &GdsuiteConfig, args: FmtArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_typecheck_files(context, &config)?;
+    let files = fixers::discover_typecheck_files(context, config)?;
 
     let mut cmd_args = Vec::new();
     if args.check {
@@ -348,7 +362,7 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
 }
 
 fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     if report_mode == "json" {
         let step = run_test_step_with_args(context, args.args)?;
@@ -378,7 +392,7 @@ fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
 }
 
 fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     if report_mode == "json" {
         let step = run_health_step(context, &config, None, args.args)?;
@@ -407,8 +421,12 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
 
 fn typecheck(context: &ProjectContext) -> Result<()> {
     let config = load_config_or_error(context)?;
+    typecheck_with_config(context, &config)
+}
+
+fn typecheck_with_config(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_script_files(context, &config)?;
+    let files = fixers::discover_script_files(context, config)?;
     let checker_path = context.state_dir.join(TYPECHECK_SCRIPT_NAME);
     write_typecheck_script(&checker_path, &files)?;
     let args = vec![
@@ -451,10 +469,13 @@ fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
 }
 
 fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let profile = resolve_profile(&config, args.profile.as_deref(), "local")?;
-    let steps = run_profile_pipeline(context, &config, profile)?;
+    let steps = vec![
+        run_fmt_step(context, &config, true)?,
+        run_lint_step(context, &config)?,
+        run_typecheck_step(context, &config)?,
+    ];
     finish_pipeline(context, &config, "check", report_mode, steps)
 }
 
@@ -537,6 +558,15 @@ fn load_saved_suite_report(
     })
 }
 
+fn load_runtime_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
+    if context.config_path.exists() {
+        tooling::load_config(context)
+            .map_err(|error| command_error(EXIT_USAGE_ERROR, error.to_string()))
+    } else {
+        Ok(GdsuiteConfig::default())
+    }
+}
+
 fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
     if !context.config_path.exists() {
         return Err(command_error(
@@ -597,76 +627,6 @@ fn resolve_report_mode(config: &GdsuiteConfig, cli_report: Option<&str>) -> Resu
             EXIT_USAGE_ERROR,
             format!(
                 "unsupported report mode `{other}` in gdsuite config; expected `text` or `json`"
-            ),
-        )),
-    }
-}
-
-fn resolve_profile<'a>(
-    config: &'a GdsuiteConfig,
-    cli_profile: Option<&str>,
-    default_profile: &str,
-) -> Result<&'a ProfileConfig> {
-    let profile_name = cli_profile.unwrap_or(default_profile);
-    config.profiles.entries.get(profile_name).ok_or_else(|| {
-        command_error(
-            EXIT_USAGE_ERROR,
-            format!(
-                "unknown profile `{profile_name}`; available profiles: {}",
-                config
-                    .profiles
-                    .entries
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        )
-    })
-}
-
-fn run_profile_pipeline(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    profile: &ProfileConfig,
-) -> Result<Vec<StepReport>> {
-    let mut steps = Vec::new();
-    for step in &profile.pipeline {
-        steps.push(run_pipeline_step(context, config, profile, step)?);
-    }
-    Ok(steps)
-}
-
-fn run_pipeline_step(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    profile: &ProfileConfig,
-    step: &str,
-) -> Result<StepReport> {
-    match step {
-        "fmt" => run_fmt_step(context, true),
-        "lint" => run_lint_step(context, config),
-        "typecheck" => run_typecheck_step(context),
-        "test" => run_test_step(context),
-        "health" => {
-            if config.health.enabled {
-                run_health_step(
-                    context,
-                    config,
-                    profile.health_fail_on.as_deref(),
-                    Vec::new(),
-                )
-            } else {
-                Ok(StepReport::skipped(
-                    "health",
-                    "health disabled in gdsuite config",
-                ))
-            }
-        }
-        other => Err(command_error(
-            EXIT_USAGE_ERROR,
-            format!(
-                "unsupported pipeline step `{other}`; expected one of `fmt`, `lint`, `typecheck`, `test`, `health`"
             ),
         )),
     }
@@ -828,9 +788,13 @@ fn display_error(error: &anyhow::Error) -> String {
         .unwrap_or_else(|| error.to_string())
 }
 
-fn run_fmt_step(context: &ProjectContext, check: bool) -> Result<StepReport> {
+fn run_fmt_step(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    check: bool,
+) -> Result<StepReport> {
     let started = Instant::now();
-    match fmt(context, FmtArgs { check }) {
+    match fmt_with_config(context, config, FmtArgs { check }) {
         Ok(()) => Ok(StepReport::ok(
             "fmt",
             started.elapsed().as_millis(),
@@ -873,9 +837,9 @@ fn run_lint_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<Ste
     })
 }
 
-fn run_typecheck_step(context: &ProjectContext) -> Result<StepReport> {
+fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<StepReport> {
     let started = Instant::now();
-    match typecheck(context) {
+    match typecheck_with_config(context, config) {
         Ok(()) => Ok(StepReport::ok(
             "typecheck",
             started.elapsed().as_millis(),
@@ -887,10 +851,6 @@ fn run_typecheck_step(context: &ProjectContext) -> Result<StepReport> {
             display_error(&error),
         )),
     }
-}
-
-fn run_test_step(context: &ProjectContext) -> Result<StepReport> {
-    run_test_step_with_args(context, Vec::new())
 }
 
 fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
@@ -1135,17 +1095,6 @@ impl StepReport {
             name: name.to_string(),
             status: "failed".to_string(),
             duration_ms,
-            summary: summary.into(),
-            findings: Vec::new(),
-            artifacts: Vec::new(),
-        }
-    }
-
-    fn skipped(name: &str, summary: impl Into<String>) -> Self {
-        Self {
-            name: name.to_string(),
-            status: "skipped".to_string(),
-            duration_ms: 0,
             summary: summary.into(),
             findings: Vec::new(),
             artifacts: Vec::new(),

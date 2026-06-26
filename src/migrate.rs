@@ -121,9 +121,6 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
         }
     }
     if let Some(health) = value.get("health").and_then(|value| value.as_table()) {
-        if let Some(enabled) = health.get("enabled").and_then(|value| value.as_bool()) {
-            config.health.enabled = enabled;
-        }
         if let Some(command) = health.get("command").and_then(|value| value.as_str()) {
             config.health.command = command.to_string();
         }
@@ -134,27 +131,6 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
             config.health.bundle_dir = bundle_dir.into();
         }
     }
-    if let Some(profiles) = value.get("profiles").and_then(|value| value.as_table()) {
-        config.profiles.entries.clear();
-        for (name, profile) in profiles {
-            let Some(table) = profile.as_table() else {
-                continue;
-            };
-            let pipeline = string_array(table.get("pipeline")).unwrap_or_default();
-            let health_fail_on = table
-                .get("health_fail_on")
-                .and_then(|value| value.as_str())
-                .map(ToString::to_string);
-            config.profiles.entries.insert(
-                name.clone(),
-                crate::config::ProfileConfig {
-                    pipeline,
-                    health_fail_on,
-                },
-            );
-        }
-    }
-
     if let Some(paths) = value.get("paths").and_then(|value| value.as_table()) {
         let scripts =
             string_array(paths.get("scripts")).unwrap_or_else(|| config.lint.include.clone());
