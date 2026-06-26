@@ -69,6 +69,24 @@ fn init_generates_project_local_toolchain_and_configs() {
 }
 
 #[test]
+fn init_accepts_godot_exe_as_command_name_from_env() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture
+        .cmd()
+        .env("GODOT_EXE", "godot")
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("init complete"));
+
+    assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
+}
+
+#[test]
 fn doctor_reports_resolved_paths() {
     let fixture = Fixture::new();
     fixture.seed_project();

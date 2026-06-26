@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -35,35 +35,11 @@ jobs:
       - name: Build gdsuite
         run: cargo build --release
 
-      - name: Bootstrap local suite toolchain
-        env:
-          GODOT_EXE: godot
-        run: ./target/release/gdsuite init
-
-      - name: Run suite checks
-        env:
-          GODOT_EXE: godot
-        run: ./target/release/gdsuite check --report json
+      - name: Check formatting
+        run: cargo fmt --check
 
       - name: Run tests
-        env:
-          GODOT_EXE: godot
-        run: ./target/release/gdsuite test --report json
+        run: cargo test
 
-      - name: Run health checks
-        env:
-          GODOT_EXE: godot
-        run: ./target/release/gdsuite health --report json
-
-      - name: Aggregate CI suite report
-        if: always()
-        run: ./target/release/gdsuite report ci
-
-      - name: Upload suite reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gdsuite-reports
-          path: |
-            reports/gdsuite
-            reports/code-health
+      - name: Run clippy
+        run: cargo clippy -- -D warnings

@@ -118,6 +118,9 @@ pub fn resolve_godot(
     candidates.push(PathBuf::from(r"C:\Program Files\Godot_v4\Godot.exe"));
 
     for candidate in candidates {
+        if let Some(path) = resolve_command_candidate(&candidate) {
+            return Ok(path);
+        }
         for path in process::candidate_paths(candidate) {
             if path.exists() {
                 return Ok(path);
@@ -129,6 +132,15 @@ pub fn resolve_godot(
         "could not resolve Godot executable for {}",
         context.root.display()
     ))
+}
+
+fn resolve_command_candidate(candidate: &Path) -> Option<PathBuf> {
+    if candidate.is_absolute() || candidate.parent().is_some() {
+        return None;
+    }
+
+    let command = candidate.to_str()?;
+    which::which(command).ok()
 }
 
 pub fn resolve_toolchain(
