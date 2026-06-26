@@ -11,8 +11,9 @@ use zip::ZipArchive;
 
 use crate::{
     config::{
-        GdhealthConfig, GdhealthPolicyConfig, GdhealthProjectConfig, GdhealthThresholdsConfig,
-        GdsuiteConfig, GdtestConfig, Manifest, Versions,
+        CompatibilityVerdict, GdhealthConfig, GdhealthPolicyConfig, GdhealthProjectConfig,
+        GdhealthThresholdsConfig, GdsuiteConfig, GdtestConfig, InstalledContractsState,
+        InstalledState, InstalledToolState, Manifest, ReleaseManifest, ToolAcquireSpec,
     },
     process,
 };
@@ -28,6 +29,7 @@ pub struct ProjectContext {
     pub gdtest_config_path: PathBuf,
     pub gdhealth_config_path: PathBuf,
     pub manifest_path: PathBuf,
+    pub installation_path: PathBuf,
     pub versions_path: PathBuf,
 }
 
@@ -41,17 +43,49 @@ pub struct Toolchain {
     pub gdhealth: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct InstallPlan {
+    pub gdtoolkit: ToolAcquireSpec,
+    pub gdtest: ToolAcquireSpec,
+    pub gdhealth: ToolAcquireSpec,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstallOutcome {
+    pub manifest: Manifest,
+    pub requested: InstallPlan,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompatibilityReport {
+    pub gdtoolkit: ToolCompatibility,
+    pub gdtest: ToolCompatibility,
+    pub gdhealth: ToolCompatibility,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolCompatibility {
+    pub name: &'static str,
+    pub requested: String,
+    pub resolved_version: Option<String>,
+    pub verdict: CompatibilityVerdict,
+    pub reason: String,
+    pub extra: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+struct ProbedToolchain {
+    gdtoolkit_version: Option<String>,
+    gdtest_version: Option<String>,
+    gdtest_harness_version: Option<String>,
+    gdhealth_version: Option<String>,
+    gdhealth_schema_version: Option<u32>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct AddonInstallReport {
     pub installed_files: usize,
     pub skipped_modified: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ToolSource {
-    Path(PathBuf),
-    Crate { name: String, version: String },
-    GithubRelease { url: String },
 }
 
 impl ProjectContext {
@@ -64,6 +98,7 @@ impl ProjectContext {
             gdtest_config_path: root.join("gdtest.toml"),
             gdhealth_config_path: root.join("gdhealth.toml"),
             manifest_path: state_dir.join("manifest.json"),
+            installation_path: state_dir.join("installation.json"),
             versions_path: state_dir.join("versions.json"),
             root,
             gdsuite_dir,
@@ -92,13 +127,54 @@ pub fn save_manifest(context: &ProjectContext, manifest: &Manifest) -> Result<()
     manifest.write(&context.manifest_path)
 }
 
-pub fn save_versions(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
-    Versions {
-        gdtoolkit: config.tools.gdtoolkit.clone(),
-        gdtest_source: config.tools.gdtest_source.clone(),
-        gdhealth_source: config.tools.gdhealth_source.clone(),
+pub fn save_installation_state(context: &ProjectContext, state: &InstalledState) -> Result<()> {
+    state.write(&context.installation_path)
+}
+
+pub fn release_manifest() -> &'static ReleaseManifest {
+    ReleaseManifest::bundled()
+}
+
+pub fn install_plan(config: &GdsuiteConfig) -> InstallPlan {
+    let release = release_manifest();
+    InstallPlan {
+        gdtoolkit: if config.tools.gdtoolkit == default_gdtoolkit_requested() {
+            release.tools.gdtoolkit.acquire.clone()
+        } else {
+            ToolAcquireSpec::Pip {
+                package: "gdtoolkit".to_string(),
+                spec: config.tools.gdtoolkit.clone(),
+            }
+        },
+        gdtest: if config.tools.gdtest_source == default_gdtest_requested() {
+            release.tools.gdtest.acquire.clone()
+        } else {
+            parse_tool_source_spec(&config.tools.gdtest_source, "gdtest")
+        },
+        gdhealth: if config.tools.gdhealth_source == default_gdhealth_requested() {
+            release.tools.gdhealth.acquire.clone()
+        } else {
+            parse_tool_source_spec(&config.tools.gdhealth_source, "gdhealth")
+        },
     }
-    .write(&context.versions_path)
+}
+
+fn default_gdtoolkit_requested() -> String {
+    release_manifest()
+        .tools
+        .gdtoolkit
+        .acquire
+        .gdtoolkit_spec()
+        .expect("gdtoolkit release manifest must use pip")
+        .to_string()
+}
+
+fn default_gdtest_requested() -> String {
+    release_manifest().tools.gdtest.acquire.render_requested()
+}
+
+fn default_gdhealth_requested() -> String {
+    release_manifest().tools.gdhealth.acquire.render_requested()
 }
 
 pub fn resolve_godot(
@@ -191,23 +267,27 @@ pub fn install_toolchain(
     context: &ProjectContext,
     config: &GdsuiteConfig,
     godot_exe: &Path,
-) -> Result<Manifest> {
+) -> Result<InstallOutcome> {
+    let requested = install_plan(config);
     let python = ensure_venv(context)?;
-    install_gdtoolkit(&python, &config.tools.gdtoolkit, context)?;
-    let gdtest = install_tool(context, &config.tools.gdtest_source, "gdtest")?;
-    let gdhealth = install_tool(context, &config.tools.gdhealth_source, "gdhealth")?;
+    install_gdtoolkit(&python, &requested.gdtoolkit, context)?;
+    let gdtest = install_tool(context, &requested.gdtest, "gdtest")?;
+    let gdhealth = install_tool(context, &requested.gdhealth, "gdhealth")?;
     let gdformat =
         find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
     let gdlint =
         find_binary(context, &["gdlint"]).ok_or_else(|| anyhow!("gdlint install missing"))?;
 
-    Ok(Manifest {
-        godot_exe: Some(godot_exe.to_path_buf()),
-        python: Some(python),
-        gdformat: Some(gdformat),
-        gdlint: Some(gdlint),
-        gdtest: Some(gdtest),
-        gdhealth: Some(gdhealth),
+    Ok(InstallOutcome {
+        manifest: Manifest {
+            godot_exe: Some(godot_exe.to_path_buf()),
+            python: Some(python),
+            gdformat: Some(gdformat),
+            gdlint: Some(gdlint),
+            gdtest: Some(gdtest),
+            gdhealth: Some(gdhealth),
+        },
+        requested,
     })
 }
 
@@ -317,8 +397,11 @@ fn ensure_venv(context: &ProjectContext) -> Result<PathBuf> {
     find_python_in_venv(context).ok_or_else(|| anyhow!("venv bootstrap did not produce python"))
 }
 
-fn install_gdtoolkit(python: &Path, version: &str, context: &ProjectContext) -> Result<()> {
-    let package = format!("gdtoolkit=={version}");
+fn install_gdtoolkit(python: &Path, requested: &ToolAcquireSpec, context: &ProjectContext) -> Result<()> {
+    let ToolAcquireSpec::Pip { package, spec } = requested else {
+        return Err(anyhow!("gdtoolkit must use a pip acquisition spec"));
+    };
+    let package = format!("{package}{spec}");
     let args = vec![
         "-m".to_string(),
         "pip".to_string(),
@@ -329,16 +412,14 @@ fn install_gdtoolkit(python: &Path, version: &str, context: &ProjectContext) -> 
     Ok(())
 }
 
-fn install_tool(context: &ProjectContext, source: &str, name: &str) -> Result<PathBuf> {
+fn install_tool(context: &ProjectContext, requested: &ToolAcquireSpec, name: &str) -> Result<PathBuf> {
     let cargo = which::which("cargo").context("cargo is required for setup")?;
     let root = context.gdsuite_dir.join("tools").join(name);
     fs::create_dir_all(&root)
         .with_context(|| format!("failed to create tool root {}", root.display()))?;
-    let source_root = prepare_tool_source(context, source, name)?;
-
-    match source_root {
-        PreparedToolSource::CargoPath(path) => {
-            let package_root = resolve_package_root(&path, name)?;
+    match requested {
+        ToolAcquireSpec::Path { path } => {
+            let package_root = resolve_package_root(&context.root.join(path), name)?;
             let args = vec![
                 "install".to_string(),
                 "--path".to_string(),
@@ -348,11 +429,70 @@ fn install_tool(context: &ProjectContext, source: &str, name: &str) -> Result<Pa
             ];
             process::run_checked(&cargo, &args, &context.root)?;
         }
-        PreparedToolSource::BinaryArchive(path) => {
-            install_binary_archive(&path, &root, name)?;
+        ToolAcquireSpec::Crate {
+            crate_name,
+            version,
+        } => {
+            let source_root = tool_source_cache_dir(context, name);
+            reset_dir(&source_root)?;
+            let archive_path = download_file(
+                &crate_download_url(crate_name, version),
+                &tool_download_cache_dir(context, name).join(format!("{crate_name}-{version}.crate")),
+            )?;
+            unpack_archive(&archive_path, &source_root)?;
+
+            let args = vec![
+                "install".to_string(),
+                crate_name.clone(),
+                "--version".to_string(),
+                version.clone(),
+                "--root".to_string(),
+                root.display().to_string(),
+            ];
+            process::run_checked(&cargo, &args, &context.root)?;
         }
-        PreparedToolSource::DirectBinary(path) => {
-            install_downloaded_binary(&path, &root, name)?;
+        ToolAcquireSpec::Git { url, rev, subdir } => {
+            let source_root = tool_source_cache_dir(context, name);
+            if source_root.exists() {
+                fs::remove_dir_all(&source_root)
+                    .with_context(|| format!("failed to remove {}", source_root.display()))?;
+            }
+            clone_git_source(url, rev, &source_root)?;
+            let package_root = subdir
+                .as_ref()
+                .map(|value| source_root.join(value))
+                .unwrap_or_else(|| source_root.clone());
+            if !package_root.exists() {
+                return Err(anyhow!(
+                    "git source subdir does not exist for {}: {}",
+                    name,
+                    package_root.display()
+                ));
+            }
+            let package_root = resolve_package_root(&package_root, name)?;
+            let args = vec![
+                "install".to_string(),
+                "--path".to_string(),
+                package_root.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+            ];
+            process::run_checked(&cargo, &args, &context.root)?;
+        }
+        ToolAcquireSpec::GithubRelease { url } => {
+            let download_name = file_name_from_url(url).unwrap_or_else(|| name.to_string());
+            let archive_path = download_file(
+                url,
+                &tool_download_cache_dir(context, name).join(download_name),
+            )?;
+            if is_archive_path(&archive_path) {
+                install_binary_archive(&archive_path, &root, name)?;
+            } else {
+                install_downloaded_binary(&archive_path, &root, name)?;
+            }
+        }
+        ToolAcquireSpec::Pip { .. } => {
+            return Err(anyhow!("{name} cannot use a pip acquisition spec"));
         }
     }
 
@@ -363,60 +503,6 @@ fn install_tool(context: &ProjectContext, source: &str, name: &str) -> Result<Pa
     }
 
     Err(anyhow!("cargo install did not produce {}", name))
-}
-
-#[derive(Debug)]
-enum PreparedToolSource {
-    CargoPath(PathBuf),
-    BinaryArchive(PathBuf),
-    DirectBinary(PathBuf),
-}
-
-fn prepare_tool_source(
-    context: &ProjectContext,
-    source: &str,
-    name: &str,
-) -> Result<PreparedToolSource> {
-    match parse_tool_source(source)? {
-        ToolSource::Path(path) => {
-            let source_root = context.root.join(path);
-            if !source_root.exists() {
-                return Err(anyhow!(
-                    "tool source does not exist: {}",
-                    source_root.display()
-                ));
-            }
-            Ok(PreparedToolSource::CargoPath(source_root))
-        }
-        ToolSource::Crate {
-            name: crate_name,
-            version,
-        } => {
-            let source_root = tool_source_cache_dir(context, name);
-            reset_dir(&source_root)?;
-            let archive_path = download_file(
-                &crate_download_url(&crate_name, &version),
-                &tool_download_cache_dir(context, name)
-                    .join(format!("{crate_name}-{version}.crate")),
-            )?;
-            unpack_archive(&archive_path, &source_root)?;
-            Ok(PreparedToolSource::CargoPath(normalize_extracted_root(
-                &source_root,
-            )?))
-        }
-        ToolSource::GithubRelease { url } => {
-            let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
-            let archive_path = download_file(
-                &url,
-                &tool_download_cache_dir(context, name).join(download_name),
-            )?;
-            if is_archive_path(&archive_path) {
-                Ok(PreparedToolSource::BinaryArchive(archive_path))
-            } else {
-                Ok(PreparedToolSource::DirectBinary(archive_path))
-            }
-        }
-    }
 }
 
 fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
@@ -467,49 +553,76 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
     ))
 }
 
-fn parse_tool_source(source: &str) -> Result<ToolSource> {
+fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
     if let Some(rest) = source.strip_prefix("crate:") {
-        let (name, version) = rest.split_once('@').ok_or_else(|| {
-            anyhow!("invalid crate source `{source}`; expected crate:<name>@<version>")
-        })?;
-        if name.is_empty() || version.is_empty() {
-            return Err(anyhow!(
-                "invalid crate source `{source}`; expected crate:<name>@<version>"
-            ));
+        if let Some((name, version)) = rest.split_once('@')
+            && !name.is_empty()
+            && !version.is_empty()
+        {
+            return ToolAcquireSpec::Crate {
+                crate_name: name.to_string(),
+                version: version.to_string(),
+            };
         }
-        return Ok(ToolSource::Crate {
-            name: name.to_string(),
-            version: version.to_string(),
-        });
     }
 
     if let Some(url) = source.strip_prefix("github:") {
-        if url.is_empty() {
-            return Err(anyhow!(
-                "invalid github source `{source}`; expected github:<url>"
-            ));
+        if !url.is_empty() {
+            return ToolAcquireSpec::GithubRelease {
+                url: url.to_string(),
+            };
         }
-        return Ok(ToolSource::GithubRelease {
-            url: url.to_string(),
-        });
+    }
+
+    if let Some(rest) = source.strip_prefix("git:") {
+        let (url, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let mut rev = None;
+        let mut subdir = None;
+        for pair in query.split('&').filter(|segment| !segment.is_empty()) {
+            if let Some((key, value)) = pair.split_once('=') {
+                match key {
+                    "rev" => rev = Some(value.to_string()),
+                    "subdir" => subdir = Some(value.to_string()),
+                    _ => {}
+                }
+            }
+        }
+        if !url.is_empty() && rev.is_some() {
+            return ToolAcquireSpec::Git {
+                url: url.to_string(),
+                rev: rev.expect("checked above"),
+                subdir,
+            };
+        }
     }
 
     if let Some(path) = source.strip_prefix("path:") {
-        if path.is_empty() {
-            return Err(anyhow!(
-                "invalid path source `{source}`; expected path:<local-path>"
-            ));
+        if !path.is_empty() {
+            return ToolAcquireSpec::Path {
+                path: path.to_string(),
+            };
         }
-        return Ok(ToolSource::Path(PathBuf::from(path)));
     }
 
-    Ok(ToolSource::Path(PathBuf::from(source)))
+    if source.contains("://") {
+        return ToolAcquireSpec::Git {
+            url: source.to_string(),
+            rev: "HEAD".to_string(),
+            subdir: Some(default_name.to_string()),
+        };
+    }
+
+    ToolAcquireSpec::Path {
+        path: source.to_string(),
+    }
 }
 
 fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> Result<PathBuf> {
-    match parse_tool_source(source)? {
-        ToolSource::Path(path) => Ok(context.root.join(path)),
-        ToolSource::Crate { .. } | ToolSource::GithubRelease { .. } => {
+    match parse_tool_source_spec(source, name) {
+        ToolAcquireSpec::Path { path } => Ok(context.root.join(path)),
+        ToolAcquireSpec::Crate { .. }
+        | ToolAcquireSpec::GithubRelease { .. }
+        | ToolAcquireSpec::Git { .. } => {
             let source_root = tool_source_cache_dir(context, name);
             if !source_root.exists() {
                 return Err(anyhow!(
@@ -519,6 +632,7 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
             }
             normalize_extracted_root(&source_root)
         }
+        ToolAcquireSpec::Pip { .. } => Err(anyhow!("pip source is not valid for {}", name)),
     }
 }
 
@@ -564,6 +678,42 @@ fn download_file(url: &str, destination: &Path) -> Result<PathBuf> {
     io::copy(&mut response, &mut file)
         .with_context(|| format!("failed to write {}", destination.display()))?;
     Ok(destination.to_path_buf())
+}
+
+fn clone_git_source(url: &str, rev: &str, destination: &Path) -> Result<()> {
+    let git = which::which("git").context("git is required for git-based setup sources")?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let clone_args = vec![
+        "clone".to_string(),
+        url.to_string(),
+        command_path(destination),
+    ];
+    process::run_checked(&git, &clone_args, Path::new("."))?;
+
+    let fetch_args = vec![
+        "-C".to_string(),
+        command_path(destination),
+        "fetch".to_string(),
+        "--depth".to_string(),
+        "1".to_string(),
+        "origin".to_string(),
+        rev.to_string(),
+    ];
+    process::run_checked(&git, &fetch_args, Path::new("."))?;
+
+    let checkout_args = vec![
+        "-C".to_string(),
+        command_path(destination),
+        "checkout".to_string(),
+        "FETCH_HEAD".to_string(),
+    ];
+    process::run_checked(&git, &checkout_args, Path::new("."))?;
+
+    Ok(())
 }
 
 fn install_binary_archive(archive_path: &Path, root: &Path, name: &str) -> Result<()> {
@@ -707,6 +857,19 @@ fn file_name_from_url(url: &str) -> Option<String> {
     clean.rsplit('/').next().map(ToString::to_string)
 }
 
+fn command_path(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        let text = path.display().to_string();
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.display().to_string()
+    }
+}
+
 fn reset_dir(path: &Path) -> Result<()> {
     if path.exists() {
         fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
@@ -754,6 +917,323 @@ pub fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
     }
 
     None
+}
+
+pub fn probe_installation_state(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    manifest: &Manifest,
+    requested: &InstallPlan,
+) -> Result<InstalledState> {
+    let toolchain = resolve_toolchain(context, Some(manifest))?;
+    let probed = probe_toolchain(context, config, &toolchain)?;
+
+    Ok(InstalledState {
+        suite_version: release_manifest().suite.version.clone(),
+        manifest_version: release_manifest().suite.manifest_version,
+        tools: crate::config::InstalledToolsState {
+            gdtoolkit: InstalledToolState {
+                requested: requested.gdtoolkit.clone(),
+                resolved_version: probed.gdtoolkit_version.clone(),
+            },
+            gdtest: InstalledToolState {
+                requested: requested.gdtest.clone(),
+                resolved_version: probed.gdtest_version.clone(),
+            },
+            gdhealth: InstalledToolState {
+                requested: requested.gdhealth.clone(),
+                resolved_version: probed.gdhealth_version.clone(),
+            },
+        },
+        contracts: InstalledContractsState {
+            gdtest_harness_version: probed.gdtest_harness_version,
+            gdhealth_schema_version: probed.gdhealth_schema_version,
+        },
+    })
+}
+
+pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
+    let release = release_manifest();
+
+    let gdtoolkit = match &state.tools.gdtoolkit.resolved_version {
+        Some(version) => evaluate_versioned_tool(
+            "gdtoolkit",
+            &state.tools.gdtoolkit.requested,
+            version,
+            &release.tools.gdtoolkit.acquire,
+            &release.tools.gdtoolkit.tested,
+            Vec::new(),
+        ),
+        None => ToolCompatibility {
+            name: "gdtoolkit",
+            requested: state.tools.gdtoolkit.requested.render_requested(),
+            resolved_version: None,
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdtoolkit is not installed in the project venv".to_string(),
+            extra: Vec::new(),
+        },
+    };
+
+    let gdtest = match (
+        &state.tools.gdtest.resolved_version,
+        &state.contracts.gdtest_harness_version,
+    ) {
+        (Some(version), Some(harness)) if normalize_version(version) == normalize_version(harness) => {
+            let mut report = evaluate_versioned_tool(
+                "gdtest",
+                &state.tools.gdtest.requested,
+                version,
+                &release.tools.gdtest.acquire,
+                &release.tools.gdtest.tested,
+                vec![("gdtest_harness".to_string(), harness.clone())],
+            );
+            if normalize_version(harness)
+                != normalize_spec(&release.contracts.gdtest.required_harness)
+            {
+                report.verdict = CompatibilityVerdict::Warning;
+                report.reason = format!(
+                    "gdtest harness {} is outside the suite-tested harness {}",
+                    harness,
+                    normalize_spec(&release.contracts.gdtest.required_harness)
+                );
+            }
+            report
+        }
+        (Some(version), Some(harness)) => ToolCompatibility {
+            name: "gdtest",
+            requested: state.tools.gdtest.requested.render_requested(),
+            resolved_version: Some(version.clone()),
+            verdict: CompatibilityVerdict::Error,
+            reason: format!("gdtest CLI {version} is incompatible with harness {harness}"),
+            extra: vec![("gdtest_harness".to_string(), harness.clone())],
+        },
+        (Some(version), None) => ToolCompatibility {
+            name: "gdtest",
+            requested: state.tools.gdtest.requested.render_requested(),
+            resolved_version: Some(version.clone()),
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdtest harness version could not be determined".to_string(),
+            extra: Vec::new(),
+        },
+        (None, _) => ToolCompatibility {
+            name: "gdtest",
+            requested: state.tools.gdtest.requested.render_requested(),
+            resolved_version: None,
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdtest version probe failed".to_string(),
+            extra: Vec::new(),
+        },
+    };
+
+    let gdhealth = match (
+        &state.tools.gdhealth.resolved_version,
+        state.contracts.gdhealth_schema_version,
+    ) {
+        (Some(version), Some(schema))
+            if schema == release.contracts.gdhealth.required_schema_version =>
+        {
+            evaluate_versioned_tool(
+                "gdhealth",
+                &state.tools.gdhealth.requested,
+                version,
+                &release.tools.gdhealth.acquire,
+                &release.tools.gdhealth.tested,
+                vec![("gdhealth_schema".to_string(), schema.to_string())],
+            )
+        }
+        (Some(version), Some(schema)) => ToolCompatibility {
+            name: "gdhealth",
+            requested: state.tools.gdhealth.requested.render_requested(),
+            resolved_version: Some(version.clone()),
+            verdict: CompatibilityVerdict::Error,
+            reason: format!(
+                "gdhealth schema {} is incompatible with required schema {}",
+                schema, release.contracts.gdhealth.required_schema_version
+            ),
+            extra: vec![("gdhealth_schema".to_string(), schema.to_string())],
+        },
+        (Some(version), None) => ToolCompatibility {
+            name: "gdhealth",
+            requested: state.tools.gdhealth.requested.render_requested(),
+            resolved_version: Some(version.clone()),
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdhealth schema version could not be determined".to_string(),
+            extra: Vec::new(),
+        },
+        (None, _) => ToolCompatibility {
+            name: "gdhealth",
+            requested: state.tools.gdhealth.requested.render_requested(),
+            resolved_version: None,
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdhealth version probe failed".to_string(),
+            extra: Vec::new(),
+        },
+    };
+
+    CompatibilityReport {
+        gdtoolkit,
+        gdtest,
+        gdhealth,
+    }
+}
+
+pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
+    let verdicts = [&report.gdtoolkit.verdict, &report.gdtest.verdict, &report.gdhealth.verdict];
+    if verdicts.iter().any(|verdict| **verdict == CompatibilityVerdict::Error) {
+        CompatibilityVerdict::Error
+    } else if verdicts
+        .iter()
+        .any(|verdict| **verdict == CompatibilityVerdict::Warning)
+    {
+        CompatibilityVerdict::Warning
+    } else {
+        CompatibilityVerdict::Ok
+    }
+}
+
+fn evaluate_versioned_tool(
+    name: &'static str,
+    requested: &ToolAcquireSpec,
+    version: &str,
+    release_requested: &ToolAcquireSpec,
+    tested_spec: &str,
+    extra: Vec<(String, String)>,
+) -> ToolCompatibility {
+    let requested_rendered = requested.render_requested();
+    let tested_version = normalize_spec(tested_spec);
+    let is_override = requested_rendered != release_requested.render_requested();
+    let version_matches = normalize_version(version) == tested_version;
+
+    let (verdict, reason) = if is_override {
+        (
+            CompatibilityVerdict::Warning,
+            format!(
+                "{name} was installed from `{}` and is outside the suite-tested set",
+                requested_rendered
+            ),
+        )
+    } else if !version_matches {
+        (
+            CompatibilityVerdict::Warning,
+            format!(
+                "{name} {} is outside the suite-tested version {}",
+                version, tested_version
+            ),
+        )
+    } else {
+        (
+            CompatibilityVerdict::Ok,
+            format!("{name} matches the suite-tested contract"),
+        )
+    };
+
+    ToolCompatibility {
+        name,
+        requested: requested_rendered,
+        resolved_version: Some(version.to_string()),
+        verdict,
+        reason,
+        extra,
+    }
+}
+
+fn probe_toolchain(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    toolchain: &Toolchain,
+) -> Result<ProbedToolchain> {
+    Ok(ProbedToolchain {
+        gdtoolkit_version: probe_pip_package_version(&toolchain.python, "gdtoolkit", context),
+        gdtest_version: probe_command_version(&toolchain.gdtest, &["--version"], context),
+        gdtest_harness_version: probe_gdtest_harness_version(context, config),
+        gdhealth_version: probe_command_version(&toolchain.gdhealth, &["--version"], context),
+        gdhealth_schema_version: probe_gdhealth_schema_version(&toolchain.gdhealth, context),
+    })
+}
+
+fn probe_pip_package_version(python: &Path, package: &str, context: &ProjectContext) -> Option<String> {
+    let args = vec![
+        "-m".to_string(),
+        "pip".to_string(),
+        "show".to_string(),
+        package.to_string(),
+    ];
+    let output = process::run(python, &args, &context.root).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    output.stdout.lines().find_map(|line| {
+        line.strip_prefix("Version:")
+            .map(|value| value.trim().to_string())
+    })
+}
+
+fn probe_command_version(path: &Path, args: &[&str], context: &ProjectContext) -> Option<String> {
+    let args = args.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+    let output = process::run(path, &args, &context.root).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    output
+        .stdout
+        .lines()
+        .find_map(|line| extract_version_token(line.trim()))
+}
+
+fn extract_version_token(line: &str) -> Option<String> {
+    line.split_whitespace()
+        .find(|token| token.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|value| value.trim_start_matches('v').to_string())
+        .or_else(|| {
+            line.split_whitespace()
+                .last()
+                .map(|value| value.trim_start_matches('v').to_string())
+        })
+}
+
+fn probe_gdtest_harness_version(context: &ProjectContext, config: &GdsuiteConfig) -> Option<String> {
+    let harness_path = context.root.join(&config.gdtest.harness);
+    let body = fs::read_to_string(harness_path).ok()?;
+    extract_quoted_assignment(&body, "HARNESS_VERSION")
+}
+
+fn probe_gdhealth_schema_version(path: &Path, context: &ProjectContext) -> Option<u32> {
+    for args in [["--schema-version"], ["schema-version"]] {
+        let args = args.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+        let output = process::run(path, &args, &context.root).ok()?;
+        if !output.status.success() {
+            continue;
+        }
+        if let Some(value) = output
+            .stdout
+            .lines()
+            .find_map(|line| line.trim().parse::<u32>().ok())
+        {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn extract_quoted_assignment(body: &str, name: &str) -> Option<String> {
+    for line in body.lines() {
+        let line = line.trim();
+        if !line.contains(name) {
+            continue;
+        }
+        let start = line.find('"')?;
+        let end = line[start + 1..].find('"')?;
+        return Some(line[start + 1..start + 1 + end].to_string());
+    }
+    None
+}
+
+fn normalize_spec(spec: &str) -> String {
+    spec.trim_start_matches('=').trim().to_string()
+}
+
+fn normalize_version(version: &str) -> String {
+    version.trim().trim_start_matches('v').to_string()
 }
 
 fn write_if_missing(path: &Path, contents: &str) -> Result<()> {

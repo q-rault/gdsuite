@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use anyhow::{Context, Result};
@@ -208,10 +209,111 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Versions {
-    pub gdtoolkit: String,
-    pub gdtest_source: String,
-    pub gdhealth_source: String,
+pub struct ReleaseManifest {
+    pub suite: ReleaseSuite,
+    pub tools: ReleaseTools,
+    pub contracts: ReleaseContracts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseSuite {
+    pub version: String,
+    pub manifest_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseTools {
+    pub gdtoolkit: ReleaseTool,
+    pub gdtest: ReleaseTool,
+    pub gdhealth: ReleaseTool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseTool {
+    pub acquire: ToolAcquireSpec,
+    pub tested: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseContracts {
+    pub gdtest: GdtestContract,
+    pub gdhealth: GdhealthContract,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdtestContract {
+    pub required_harness: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdhealthContract {
+    pub required_schema_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolAcquireSpec {
+    Pip {
+        package: String,
+        spec: String,
+    },
+    Crate {
+        #[serde(rename = "crate")]
+        crate_name: String,
+        version: String,
+    },
+    Path {
+        path: String,
+    },
+    Git {
+        url: String,
+        rev: String,
+        subdir: Option<String>,
+    },
+    GithubRelease {
+        url: String,
+    },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolPolicy {
+    pub tested: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledState {
+    pub suite_version: String,
+    pub manifest_version: u32,
+    pub tools: InstalledToolsState,
+    pub contracts: InstalledContractsState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledToolsState {
+    pub gdtoolkit: InstalledToolState,
+    pub gdtest: InstalledToolState,
+    pub gdhealth: InstalledToolState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledToolState {
+    pub requested: ToolAcquireSpec,
+    pub resolved_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InstalledContractsState {
+    pub gdtest_harness_version: Option<String>,
+    pub gdhealth_schema_version: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CompatibilityVerdict {
+    Ok,
+    Warning,
+    Error,
 }
 
 impl Default for ProjectConfig {
@@ -392,10 +494,56 @@ impl Manifest {
     }
 }
 
-impl Versions {
+impl ReleaseManifest {
+    pub fn bundled() -> &'static Self {
+        static RELEASE_MANIFEST: OnceLock<ReleaseManifest> = OnceLock::new();
+        RELEASE_MANIFEST.get_or_init(|| {
+            toml::from_str(include_str!("../.gdsuite-release.toml"))
+                .expect("bundled release manifest must parse")
+        })
+    }
+}
+
+impl InstalledState {
+    #[allow(dead_code)]
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = fs::read_to_string(path)
+            .with_context(|| format!("failed to read installation state {}", path.display()))?;
+        serde_json::from_str(&text)
+            .with_context(|| format!("failed to parse installation state {}", path.display()))
+    }
+
     pub fn write(&self, path: &Path) -> Result<()> {
         fs::write(path, serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("failed to write versions {}", path.display()))
+            .with_context(|| format!("failed to write installation state {}", path.display()))
+    }
+}
+
+impl ToolAcquireSpec {
+    pub fn gdtoolkit_spec(&self) -> Option<&str> {
+        match self {
+            Self::Pip { spec, .. } => Some(spec),
+            _ => None,
+        }
+    }
+
+    pub fn render_requested(&self) -> String {
+        match self {
+            Self::Pip { spec, .. } => spec.clone(),
+            Self::Crate {
+                crate_name,
+                version,
+            } => format!("crate:{crate_name}@{version}"),
+            Self::Path { path } => format!("path:{path}"),
+            Self::Git { url, rev, subdir } => {
+                if let Some(subdir) = subdir {
+                    format!("git:{url}?rev={rev}&subdir={subdir}")
+                } else {
+                    format!("git:{url}?rev={rev}")
+                }
+            }
+            Self::GithubRelease { url } => format!("github:{url}"),
+        }
     }
 }
 
@@ -404,15 +552,29 @@ fn default_root() -> String {
 }
 
 fn default_gdtoolkit_version() -> String {
-    "4.*".to_string()
+    ReleaseManifest::bundled()
+        .tools
+        .gdtoolkit
+        .acquire
+        .gdtoolkit_spec()
+        .expect("gdtoolkit release manifest must use pip")
+        .to_string()
 }
 
 fn default_gdtest_source() -> String {
-    "../gdtest".to_string()
+    ReleaseManifest::bundled()
+        .tools
+        .gdtest
+        .acquire
+        .render_requested()
 }
 
 fn default_gdhealth_source() -> String {
-    "../gdhealth/tools/gdhealth".to_string()
+    ReleaseManifest::bundled()
+        .tools
+        .gdhealth
+        .acquire
+        .render_requested()
 }
 
 fn default_scripts() -> Vec<String> {
@@ -592,6 +754,7 @@ fn default_gdhealth_groups() -> BTreeMap<String, Vec<String>> {
 }
 
 fn default_config_template(godot_exe: Option<&Path>) -> String {
+    let release = ReleaseManifest::bundled();
     let godot_exe = godot_exe
         .map(|path| {
             format!(
@@ -605,9 +768,9 @@ fn default_config_template(godot_exe: Option<&Path>) -> String {
         r#"[project]
 root = "."
 {godot_exe}[tools]
-gdtoolkit = "4.*"
-gdtest_source = "../gdtest"
-gdhealth_source = "../gdhealth/tools/gdhealth"
+gdtoolkit = "{}"
+gdtest_source = "{}"
+gdhealth_source = "{}"
 
 [commands]
 default_test_target = "test/"
@@ -670,7 +833,15 @@ client = ["client/**/*.gd", "client/**"]
 server = ["server/**/*.gd", "server/**"]
 test = ["test/**/*.gd", "test/**"]
 root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
-"#
+"#,
+        release
+            .tools
+            .gdtoolkit
+            .acquire
+            .gdtoolkit_spec()
+            .expect("gdtoolkit release manifest must use pip"),
+        release.tools.gdtest.acquire.render_requested(),
+        release.tools.gdhealth.acquire.render_requested(),
     )
 }
 

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs, SetupArgs},
-    config::{GdsuiteConfig, Manifest, ProfileConfig},
+    config::{CompatibilityVerdict, GdsuiteConfig, Manifest, ProfileConfig},
     fixers, migrate, process,
     tooling::{self, ProjectContext},
 };
@@ -90,10 +90,9 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
     if args.sync_product_configs {
         tooling::sync_product_configs(context, &config)?;
     }
-    let manifest = tooling::install_toolchain(context, &config, &godot_path)
+    let install = tooling::install_toolchain(context, &config, &godot_path)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
-    tooling::save_manifest(context, &manifest)?;
-    tooling::save_versions(context, &config)?;
+    tooling::save_manifest(context, &install.manifest)?;
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     for skipped in addon_report.skipped_modified {
@@ -102,10 +101,31 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
             skipped.display()
         );
     }
-    let toolchain = tooling::resolve_toolchain(context, Some(&manifest))
+    let toolchain = tooling::resolve_toolchain(context, Some(&install.manifest))
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let installation = tooling::probe_installation_state(context, &config, &install.manifest, &install.requested)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    tooling::save_installation_state(context, &installation)
+        .map_err(|error| command_error(EXIT_INTERNAL_ERROR, error.to_string()))?;
+    let compatibility = tooling::compatibility_report(&installation);
+    for tool in [&compatibility.gdtoolkit, &compatibility.gdtest, &compatibility.gdhealth] {
+        if tool.verdict == CompatibilityVerdict::Warning {
+            println!("warning={}", tool.reason);
+        }
+    }
+    if tooling::report_status(&compatibility) == CompatibilityVerdict::Error {
+        let errors = [&compatibility.gdtoolkit, &compatibility.gdtest, &compatibility.gdhealth]
+            .into_iter()
+            .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
+            .map(|tool| tool.reason.clone())
+            .collect::<Vec<_>>();
+        return Err(command_error(
+            EXIT_TOOLCHAIN_ERROR,
+            errors.join("; "),
+        ));
+    }
     Ok(())
 }
 
@@ -122,6 +142,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     println!("gdtest_config={}", context.gdtest_config_path.display());
     println!("gdhealth_config={}", context.gdhealth_config_path.display());
     println!("manifest={}", context.manifest_path.display());
+    println!("installation={}", context.installation_path.display());
 
     let mut missing: Vec<String> = Vec::new();
 
@@ -213,21 +234,71 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         }
     }
 
-    if missing.is_empty() {
-        for warning in tooling::product_config_warnings(context, &config)? {
-            println!("warning={warning}");
-        }
-        println!("status=ok");
-        Ok(())
+    let mut status = if missing.is_empty() {
+        CompatibilityVerdict::Ok
     } else {
-        println!("status=error");
-        Err(command_error(
-            EXIT_TOOLCHAIN_ERROR,
-            format!(
-                "missing tools: {}; run `gdsuite setup` to install the local toolchain",
-                missing.join(", ")
-            ),
-        ))
+        CompatibilityVerdict::Error
+    };
+
+    if context.versions_path.exists() && !context.installation_path.exists() {
+        println!(
+            "warning=legacy state file {} is stale; run `gdsuite setup` to regenerate installation.json",
+            context.versions_path.display()
+        );
+        if status == CompatibilityVerdict::Ok {
+            status = CompatibilityVerdict::Warning;
+        }
+    }
+
+    if let Some(manifest) = manifest.as_ref()
+        && missing.is_empty()
+    {
+        let requested = tooling::install_plan(&config);
+        if let Ok(installation) =
+            tooling::probe_installation_state(context, &config, manifest, &requested)
+        {
+            let compatibility = tooling::compatibility_report(&installation);
+            print_tool_compatibility(&compatibility.gdtoolkit);
+            print_tool_compatibility(&compatibility.gdtest);
+            print_tool_compatibility(&compatibility.gdhealth);
+            status = match (status, tooling::report_status(&compatibility)) {
+                (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => CompatibilityVerdict::Error,
+                (CompatibilityVerdict::Warning, _) | (_, CompatibilityVerdict::Warning) => CompatibilityVerdict::Warning,
+                _ => CompatibilityVerdict::Ok,
+            };
+        }
+    }
+
+    for warning in tooling::product_config_warnings(context, &config)? {
+        println!("warning={warning}");
+        if status == CompatibilityVerdict::Ok {
+            status = CompatibilityVerdict::Warning;
+        }
+    }
+
+    match status {
+        CompatibilityVerdict::Ok => {
+            println!("status=ok");
+            Ok(())
+        }
+        CompatibilityVerdict::Warning => {
+            println!("status=warning");
+            Ok(())
+        }
+        CompatibilityVerdict::Error => {
+            println!("status=error");
+            Err(command_error(
+                EXIT_TOOLCHAIN_ERROR,
+                if missing.is_empty() {
+                    "toolchain compatibility check failed".to_string()
+                } else {
+                    format!(
+                        "missing tools: {}; run `gdsuite setup` to install the local toolchain",
+                        missing.join(", ")
+                    )
+                },
+            ))
+        }
     }
 }
 
@@ -725,6 +796,25 @@ fn print_version_or_warn(name: &str, path: &Path, args: &[&str]) {
         }
         Err(_) => println!("{name}_version=unavailable"),
     }
+}
+
+fn print_tool_compatibility(tool: &tooling::ToolCompatibility) {
+    println!("{}_requested={}", tool.name, tool.requested);
+    println!(
+        "{}_installed={}",
+        tool.name,
+        tool.resolved_version.as_deref().unwrap_or("unknown")
+    );
+    for (key, value) in &tool.extra {
+        println!("{key}={value}");
+    }
+    let verdict = match tool.verdict {
+        CompatibilityVerdict::Ok => "ok",
+        CompatibilityVerdict::Warning => "warning",
+        CompatibilityVerdict::Error => "error",
+    };
+    println!("{}_compat={}", tool.name, verdict);
+    println!("{}={}", verdict, tool.reason);
 }
 
 fn command_error(code: u8, message: String) -> anyhow::Error {

@@ -1,0 +1,21 @@
+[suite]
+version = "0.1.0"
+manifest_version = 1
+
+[tools.gdtoolkit]
+acquire = { kind = "pip", package = "gdtoolkit", spec = "==4.5.0" }
+tested = "==4.5.0"
+
+[tools.gdtest]
+acquire = { kind = "crate", crate = "gdtest", version = "0.1.0" }
+tested = "==0.1.0"
+
+[tools.gdhealth]
+acquire = { kind = "crate", crate = "gdhealth", version = "0.1.0" }
+tested = "==0.1.0"
+
+[contracts.gdtest]
+required_harness = "==0.1.0"
+
+[contracts.gdhealth]
+required_schema_version = 1
