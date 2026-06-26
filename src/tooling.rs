@@ -872,35 +872,37 @@ fn replace_gdhealth_owned_sections(
         table.insert("thresholds".to_string(), toml::Value::Table(thresholds));
     }
 
-    let mut policy = toml::map::Map::new();
-    policy.insert(
-        "allow_cycles".to_string(),
-        string_array_value(&config.policy.allow_cycles),
-    );
-    if config.policy.forbidden_dependencies.is_empty() {
-        policy.remove("forbidden_dependencies");
+    if config.policy.allow_cycles.is_empty() && config.policy.forbidden_dependencies.is_empty() {
+        table.remove("policy");
     } else {
-        let rules = config
-            .policy
-            .forbidden_dependencies
-            .iter()
-            .map(|rule| {
-                let mut doc = toml::map::Map::new();
-                doc.insert("from".to_string(), toml::Value::String(rule.from.clone()));
-                doc.insert("to".to_string(), toml::Value::String(rule.to.clone()));
-                doc.insert(
-                    "severity".to_string(),
-                    toml::Value::String(rule.severity.clone()),
-                );
-                toml::Value::Table(doc)
-            })
-            .collect::<Vec<_>>();
+        let mut policy = toml::map::Map::new();
         policy.insert(
-            "forbidden_dependencies".to_string(),
-            toml::Value::Array(rules),
+            "allow_cycles".to_string(),
+            string_array_value(&config.policy.allow_cycles),
         );
+        if !config.policy.forbidden_dependencies.is_empty() {
+            let rules = config
+                .policy
+                .forbidden_dependencies
+                .iter()
+                .map(|rule| {
+                    let mut doc = toml::map::Map::new();
+                    doc.insert("from".to_string(), toml::Value::String(rule.from.clone()));
+                    doc.insert("to".to_string(), toml::Value::String(rule.to.clone()));
+                    doc.insert(
+                        "severity".to_string(),
+                        toml::Value::String(rule.severity.clone()),
+                    );
+                    toml::Value::Table(doc)
+                })
+                .collect::<Vec<_>>();
+            policy.insert(
+                "forbidden_dependencies".to_string(),
+                toml::Value::Array(rules),
+            );
+        }
+        table.insert("policy".to_string(), toml::Value::Table(policy));
     }
-    table.insert("policy".to_string(), toml::Value::Table(policy));
 }
 
 fn insert_optional_usize(

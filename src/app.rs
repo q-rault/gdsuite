@@ -131,12 +131,16 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
             print_version_or_warn("godot", &path, &["--version"]);
         }
         Err(_) => {
-            println!("godot=not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml");
+            println!(
+                "godot=not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml"
+            );
             missing.push("godot".to_string());
         }
     }
 
-    let python = manifest.as_ref().and_then(|m| m.python.clone())
+    let python = manifest
+        .as_ref()
+        .and_then(|m| m.python.clone())
         .or_else(|| tooling::find_python_in_venv(context));
     match python {
         Some(path) => {
@@ -149,7 +153,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         }
     }
 
-    let gdformat = manifest.as_ref().and_then(|m| m.gdformat.clone())
+    let gdformat = manifest
+        .as_ref()
+        .and_then(|m| m.gdformat.clone())
         .or_else(|| tooling::find_binary(context, &["gdformat"]));
     match gdformat {
         Some(path) => {
@@ -162,7 +168,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         }
     }
 
-    let gdlint = manifest.as_ref().and_then(|m| m.gdlint.clone())
+    let gdlint = manifest
+        .as_ref()
+        .and_then(|m| m.gdlint.clone())
         .or_else(|| tooling::find_binary(context, &["gdlint"]));
     match gdlint {
         Some(path) => {
@@ -175,7 +183,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         }
     }
 
-    let gdtest = manifest.as_ref().and_then(|m| m.gdtest.clone())
+    let gdtest = manifest
+        .as_ref()
+        .and_then(|m| m.gdtest.clone())
         .or_else(|| tooling::find_binary(context, &["gdtest"]));
     match gdtest {
         Some(path) => {
@@ -188,7 +198,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         }
     }
 
-    let gdhealth = manifest.as_ref().and_then(|m| m.gdhealth.clone())
+    let gdhealth = manifest
+        .as_ref()
+        .and_then(|m| m.gdhealth.clone())
         .or_else(|| tooling::find_binary(context, &["gdhealth"]));
     match gdhealth {
         Some(path) => {

@@ -708,7 +708,7 @@ fn check_does_not_run_test_or_health() {
 }
 
 #[test]
-fn doctor_fails_with_corrupted_manifest() {
+fn doctor_succeeds_with_corrupted_manifest() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
@@ -718,7 +718,14 @@ fn doctor_fails_with_corrupted_manifest() {
     )
     .unwrap();
 
-    fixture.cmd().arg("doctor").assert().failure();
+    // Doctor is resilient to a corrupted manifest: it falls back to path-based
+    // tool discovery and exits 0 so the user can still read the diagnosis.
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status=ok"));
 }
 
 #[test]
@@ -1010,6 +1017,37 @@ fn migrate_is_idempotent() {
     assert_eq!(first_gdsuite, second_gdsuite);
     assert_eq!(first_gdtest, second_gdtest);
     assert_eq!(first_gdhealth, second_gdhealth);
+}
+
+#[test]
+fn migrate_then_setup_sync_produces_no_doctor_drift_warnings() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join("gdtest.toml"),
+        "patterns = [\"spec/**/*.gd\"]\n[profile.ci]\nreporter = \"text\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[project]\nroot = \".\"\n\n[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("migrate").assert().success();
+    fixture
+        .cmd()
+        .args(["setup", "--sync-product-configs"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("drift from gdsuite.toml").not());
 }
 
 #[test]
