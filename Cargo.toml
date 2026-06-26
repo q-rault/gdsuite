@@ -2,6 +2,22 @@
 name = "gdsuite"
 version = "0.1.0"
 edition = "2024"
+description = "Suite-owned CLI dispatcher for Godot projects — coordinates gdtoolkit, gdtest, and gdhealth"
+license = "MIT"
+repository = "https://github.com/q-rault/gdsuite"
+readme = "README.md"
+keywords = ["godot", "gamedev", "cli", "tooling"]
+categories = ["development-tools", "command-line-utilities"]
+exclude = [
+    ".ai/",
+    ".codex/",
+    "docs/",
+    "scripts/",
+    ".gdsuite-release.toml",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "gdsuite-*.md",
+]
 
 [dependencies]
 anyhow = "1.0"
