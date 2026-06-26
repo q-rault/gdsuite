@@ -8,7 +8,9 @@ description: Understand which config belongs to the suite, which belongs to each
 ## Ownership split
 
 - Suite-owned: the workflow contract in `gdsuite.toml`, suite report paths, local toolchain state, and the product config invariants required for suite correctness
-- Product-owned: direct `gdtest` harness and runtime knobs, direct `gdhealth` groups and policy thresholds, and deeper product-only behavior
+- Product-owned: direct `gdtest` harness and runtime knobs, direct `gdhealth` groups and dependency policy, and deeper product-only behavior
+
+`gdlint` owns per-file and per-function maintainability metrics. `gdhealth` stays focused on architecture and policy.
 
 ## What changes the suite writes
 
