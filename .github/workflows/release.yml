@@ -16,18 +16,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            archive: tar.gz
+          # - target: x86_64-unknown-linux-musl
+          #   os: ubuntu-latest
+          #   archive: tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          - target: x86_64-apple-darwin
-            os: macos-26-intel
-            archive: tar.gz
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
+          # - target: x86_64-apple-darwin
+          #   os: macos-26-intel
+          #   archive: tar.gz
+          # - target: aarch64-apple-darwin
+          #   os: macos-latest
+          #   archive: tar.gz
 
     steps:
       - uses: actions/checkout@v5
@@ -37,9 +37,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get install -y musl-tools
+      # - name: Install musl tools
+      #   if: matrix.target == 'x86_64-unknown-linux-musl'
+      #   run: sudo apt-get install -y musl-tools
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -54,17 +54,16 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package (Unix)
-        if: matrix.archive == 'tar.gz'
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          ARCHIVE="gdsuite-${VERSION}-${{ matrix.target }}.tar.gz"
-          tar czf "${ARCHIVE}" -C "target/${{ matrix.target }}/release" gdsuite
-          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+      # - name: Package (Unix)
+      #   if: matrix.archive == 'tar.gz'
+      #   shell: bash
+      #   run: |
+      #     VERSION="${GITHUB_REF_NAME}"
+      #     ARCHIVE="gdsuite-${VERSION}-${{ matrix.target }}.tar.gz"
+      #     tar czf "${ARCHIVE}" -C "target/${{ matrix.target }}/release" gdsuite
+      #     echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
 
       - name: Package (Windows)
-        if: matrix.archive == 'zip'
         shell: pwsh
         run: |
           $VERSION = $env:GITHUB_REF_NAME
