@@ -500,6 +500,15 @@ fn install_tool(
                 install_downloaded_binary(&archive_path, &root, name)?;
             }
         }
+        ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } => {
+            let url = github_release_asset_url(owner, repo, tag, name)?;
+            let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
+            let archive_path = download_file(
+                &url,
+                &tool_download_cache_dir(context, name).join(download_name),
+            )?;
+            install_binary_archive(&archive_path, &root, name)?;
+        }
         ToolAcquireSpec::Pip { .. } => {
             return Err(anyhow!("{name} cannot use a pip acquisition spec"));
         }
@@ -577,6 +586,21 @@ fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
     if let Some(url) = source.strip_prefix("github:")
         && !url.is_empty()
     {
+        if !url.starts_with("http://")
+            && !url.starts_with("https://")
+            && let Some((repo_path, tag)) = url.rsplit_once('@')
+            && let Some((owner, repo)) = repo_path.split_once('/')
+            && !owner.is_empty()
+            && !repo.is_empty()
+            && !tag.is_empty()
+        {
+            return ToolAcquireSpec::GithubReleaseRepo {
+                owner: owner.to_string(),
+                repo: repo.to_string(),
+                tag: tag.to_string(),
+            };
+        }
+
         return ToolAcquireSpec::GithubRelease {
             url: url.to_string(),
         };
@@ -632,6 +656,7 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
         ToolAcquireSpec::Path { path } => Ok(context.root.join(path)),
         ToolAcquireSpec::Crate { .. }
         | ToolAcquireSpec::GithubRelease { .. }
+        | ToolAcquireSpec::GithubReleaseRepo { .. }
         | ToolAcquireSpec::Git { .. } => {
             let source_root = tool_source_cache_dir(context, name);
             if !source_root.exists() {
@@ -865,6 +890,38 @@ fn is_archive_path(path: &Path) -> bool {
 fn file_name_from_url(url: &str) -> Option<String> {
     let clean = url.split('?').next().unwrap_or(url).trim_end_matches('/');
     clean.rsplit('/').next().map(ToString::to_string)
+}
+
+fn github_release_asset_url(
+    owner: &str,
+    repo: &str,
+    tag: &str,
+    binary_name: &str,
+) -> Result<String> {
+    let (target, extension) = current_release_asset_target()?;
+    let base = github_release_base_url();
+    Ok(format!(
+        "{base}/{owner}/{repo}/releases/download/{tag}/{binary_name}-{tag}-{target}.{extension}"
+    ))
+}
+
+fn github_release_base_url() -> String {
+    env::var("GDSUITE_GITHUB_RELEASE_BASE_URL")
+        .unwrap_or_else(|_| "https://github.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn current_release_asset_target() -> Result<(&'static str, &'static str)> {
+    match (env::consts::OS, env::consts::ARCH) {
+        ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zip")),
+        ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "tar.gz")),
+        ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "tar.gz")),
+        ("linux", "x86_64") => Ok(("x86_64-unknown-linux-musl", "tar.gz")),
+        (os, arch) => Err(anyhow!(
+            "unsupported platform for GitHub release installs: {arch}-{os}"
+        )),
+    }
 }
 
 fn command_path(path: &Path) -> String {
@@ -2068,5 +2125,67 @@ fn join_res_path(base: &str, file: &str) -> String {
         format!("{base}{file}")
     } else {
         format!("{base}/{file}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ToolAcquireSpec;
+
+    #[test]
+    fn test_parse_github_release_repo_spec() {
+        let spec = parse_tool_source_spec("github:q-rault/gdtest@v0.1.0", "gdtest");
+        assert!(
+            matches!(spec, ToolAcquireSpec::GithubReleaseRepo { ref owner, ref repo, ref tag }
+                if owner == "q-rault" && repo == "gdtest" && tag == "v0.1.0")
+        );
+    }
+
+    #[test]
+    fn test_parse_github_release_url_still_works() {
+        let spec = parse_tool_source_spec("github:https://example.com/asset.tar.gz", "gdtest");
+        assert!(matches!(spec, ToolAcquireSpec::GithubRelease { ref url }
+                if url == "https://example.com/asset.tar.gz"));
+    }
+
+    #[test]
+    fn test_current_target_is_known_platform() {
+        let known = [
+            ("x86_64-pc-windows-msvc", "zip"),
+            ("x86_64-apple-darwin", "tar.gz"),
+            ("aarch64-apple-darwin", "tar.gz"),
+            ("x86_64-unknown-linux-musl", "tar.gz"),
+        ];
+        let result = current_release_asset_target();
+        assert!(
+            result.is_ok(),
+            "current platform is not supported: {}-{}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+        let (target, ext) = result.unwrap();
+        assert!(
+            known.contains(&(target, ext)),
+            "unexpected target/ext pair: {target}/{ext}"
+        );
+    }
+
+    #[test]
+    fn test_github_release_asset_url_format() {
+        // Use a known base to avoid flakiness from GDSUITE_GITHUB_RELEASE_BASE_URL env var
+        // SAFETY: test-only, single-threaded context
+        unsafe { std::env::remove_var("GDSUITE_GITHUB_RELEASE_BASE_URL") };
+        let url = github_release_asset_url("q-rault", "gdtest", "v0.1.0", "gdtest").unwrap();
+        assert!(
+            url.starts_with(
+                "https://github.com/q-rault/gdtest/releases/download/v0.1.0/gdtest-v0.1.0-"
+            ),
+            "unexpected URL prefix: {url}"
+        );
+        assert!(
+            url.ends_with(".zip") || url.ends_with(".tar.gz"),
+            "unexpected URL suffix: {url}"
+        );
     }
 }

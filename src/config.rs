@@ -256,6 +256,11 @@ pub enum ToolAcquireSpec {
     GithubRelease {
         url: String,
     },
+    GithubReleaseRepo {
+        owner: String,
+        repo: String,
+        tag: String,
+    },
 }
 
 #[allow(dead_code)]
@@ -517,6 +522,9 @@ impl ToolAcquireSpec {
                 }
             }
             Self::GithubRelease { url } => format!("github:{url}"),
+            Self::GithubReleaseRepo { owner, repo, tag } => {
+                format!("github:{owner}/{repo}@{tag}")
+            }
         }
     }
 }
@@ -980,4 +988,19 @@ fn escape_string(value: &str) -> String {
 
 fn escape_path(path: &Path) -> String {
     escape_string(&path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_github_release_repo_render_requested() {
+        let spec = ToolAcquireSpec::GithubReleaseRepo {
+            owner: "q-rault".to_string(),
+            repo: "gdtest".to_string(),
+            tag: "v0.1.0".to_string(),
+        };
+        assert_eq!(spec.render_requested(), "github:q-rault/gdtest@v0.1.0");
+    }
 }

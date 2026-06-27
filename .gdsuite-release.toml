@@ -7,11 +7,11 @@ acquire = { kind = "pip", package = "gdtoolkit", spec = "==4.5.0" }
 tested = "==4.5.0"
 
 [tools.gdtest]
-acquire = { kind = "crate", crate = "gdtest", version = "0.1.0" }
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.1.0" }
 tested = "==0.1.0"
 
 [tools.gdhealth]
-acquire = { kind = "crate", crate = "gdhealth", version = "0.1.0" }
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.1.0" }
 tested = "==0.1.0"
 
 [contracts.gdtest]

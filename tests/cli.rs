@@ -13,6 +13,7 @@ use flate2::{Compression, write::GzEncoder};
 use predicates::prelude::*;
 use tar::Builder;
 use tempfile::TempDir;
+use zip::{ZipWriter, write::SimpleFileOptions};
 
 #[test]
 fn setup_generates_project_local_toolchain_and_configs() {
@@ -1280,6 +1281,73 @@ impl Fixture {
                 "/gdhealth/0.1.0/download".to_string(),
                 build_tar_gz(&[("gdhealth-0.1.0/README.md", "gdhealth\n")]),
             ),
+            (
+                "/q-rault/gdtest/releases/download/v0.1.0/gdtest-v0.1.0-x86_64-pc-windows-msvc.zip"
+                    .to_string(),
+                build_zip(&[
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_compat.gd",
+                        "const GDUNIT4_CHAIN := preload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "",
+                    ),
+                    ("gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd", ""),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gd_test.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/scene_runner.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/README.md",
+                        "runtime readme\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/LICENSE",
+                        "license\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "_panel = preload(\"res://addons/gdtest_editor/test_panel.gd\").new()\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/test_panel.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.cfg",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/README.md",
+                        "editor readme\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/LICENSE",
+                        "license\n",
+                    ),
+                ]),
+            ),
+            (
+                "/q-rault/gdhealth/releases/download/v0.1.0/gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip"
+                    .to_string(),
+                build_zip(&[(
+                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                )]),
+            ),
         ]));
         Self {
             _tempdir: tempdir,
@@ -1296,7 +1364,8 @@ impl Fixture {
             .env(
                 "GDSUITE_CRATES_DOWNLOAD_BASE_URL",
                 self.release_server.url(),
-            );
+            )
+            .env("GDSUITE_GITHUB_RELEASE_BASE_URL", self.release_server.url());
         command
     }
 
@@ -1563,8 +1632,8 @@ root = "."
 
 [tools]
 gdtoolkit = "==4.5.0"
-gdtest_source = "crate:gdtest@0.1.0"
-gdhealth_source = "crate:gdhealth@0.1.0"
+gdtest_source = "github:q-rault/gdtest@v0.1.0"
+gdhealth_source = "github:q-rault/gdhealth@v0.1.0"
 
 [commands]
 default_test_target = "test/"
@@ -1626,11 +1695,11 @@ root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
     fn remote_gdsuite_config(&self, gdtest_source: &str, gdhealth_source: &str) -> String {
         self.default_gdsuite_config()
             .replace(
-                "gdtest_source = \"crate:gdtest@0.1.0\"",
+                "gdtest_source = \"github:q-rault/gdtest@v0.1.0\"",
                 &format!("gdtest_source = \"{gdtest_source}\""),
             )
             .replace(
-                "gdhealth_source = \"crate:gdhealth@0.1.0\"",
+                "gdhealth_source = \"github:q-rault/gdhealth@v0.1.0\"",
                 &format!("gdhealth_source = \"{gdhealth_source}\""),
             )
     }
@@ -1708,6 +1777,20 @@ fn build_tar_gz(entries: &[(&str, &str)]) -> Vec<u8> {
         archive.finish().unwrap();
     }
     encoder.finish().unwrap()
+}
+
+fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    {
+        let mut archive = ZipWriter::new(&mut buffer);
+        let options = SimpleFileOptions::default();
+        for (path, contents) in entries {
+            archive.start_file(path, options).unwrap();
+            archive.write_all(contents.as_bytes()).unwrap();
+        }
+        archive.finish().unwrap();
+    }
+    buffer.into_inner()
 }
 
 fn write_cmd(path: &Path, body: &str) {
