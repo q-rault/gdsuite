@@ -74,6 +74,26 @@ fn init_generates_project_local_toolchain_and_configs() {
 }
 
 #[test]
+fn init_builds_godot_class_cache_after_installing_gdtest_addon() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture.cmd().arg("init").assert().success();
+
+    assert!(
+        fixture
+            .root
+            .join(".godot/global_script_class_cache.cfg")
+            .exists()
+    );
+    let godot_args =
+        fs::read_to_string(fixture.root.join("mock-state/godot-args.txt")).unwrap();
+    assert!(godot_args.contains("--import"));
+}
+
+#[test]
 fn init_accepts_godot_exe_as_command_name_from_env() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -1619,6 +1639,12 @@ exit /b 0
 echo Godot 4.4.1
 exit /b 0
 :headless
+echo %*> "%CD%\mock-state\godot-args.txt"
+echo %* | findstr /C:"--import" >nul
+if not errorlevel 1 (
+  mkdir ".godot" 2>nul
+  > ".godot\global_script_class_cache.cfg" echo imported
+)
 if exist "mock-state\typecheck-fail" exit /b 1
 echo typecheck: ok
 exit /b 0

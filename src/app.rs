@@ -96,12 +96,14 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
     tooling::save_manifest(context, &install.manifest)?;
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
-    for skipped in addon_report.skipped_modified {
+    for skipped in &addon_report.skipped_modified {
         println!(
             "warning=gdtest addon install skipped modified file {}",
             skipped.display()
         );
     }
+    tooling::ensure_gdtest_class_cache(context, &config, &godot_path, &addon_report)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     let toolchain = tooling::resolve_toolchain(context, Some(&install.manifest))
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)

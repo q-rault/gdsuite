@@ -436,6 +436,40 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     Ok(())
 }
 
+pub fn ensure_gdtest_class_cache(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    godot_exe: &Path,
+    addon_report: &AddonInstallReport,
+) -> Result<()> {
+    let runtime_dir = harness_parent_dir(&config.gdtest.harness);
+    let runtime_res_dir = res_dir_from_rel_path(&runtime_dir);
+    let gdt_res_path = join_res_path(&runtime_res_dir, "gdt.gd");
+    let cache_path = context.root.join(".godot").join("global_script_class_cache.cfg");
+
+    let cache_has_gdt = fs::read_to_string(&cache_path)
+        .map(|body| body.contains(&format!("\"path\": \"{gdt_res_path}\"")))
+        .unwrap_or(false);
+
+    if addon_report.installed_files == 0 && cache_has_gdt {
+        return Ok(());
+    }
+
+    let args = vec![
+        "--headless".to_string(),
+        "--path".to_string(),
+        context.root.display().to_string(),
+        "--import".to_string(),
+    ];
+    process::run_checked(godot_exe, &args, &context.root).with_context(|| {
+        format!(
+            "failed to build Godot class cache for gdtest runtime at {}",
+            gdt_res_path
+        )
+    })?;
+    Ok(())
+}
+
 pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> {
     let roots = [
         context.gdsuite_dir.join("python").join("Scripts"),
