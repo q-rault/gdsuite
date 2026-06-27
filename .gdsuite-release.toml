@@ -7,15 +7,15 @@ acquire = { kind = "pip", package = "gdtoolkit", spec = "==4.5.0" }
 tested = "==4.5.0"
 
 [tools.gdtest]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.1.0" }
-tested = "==0.1.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.1.1" }
+tested = "==0.1.1"
 
 [tools.gdhealth]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.1.0" }
-tested = "==0.1.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.1.1" }
+tested = "==0.1.1"
 
 [contracts.gdtest]
-required_harness = "==0.1.0"
+required_harness = "==0.1.1"
 
 [contracts.gdhealth]
 required_schema_version = 1
