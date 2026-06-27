@@ -6,6 +6,8 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use serde::Deserialize;
 use tar::Archive;
 use zip::ZipArchive;
 
@@ -88,6 +90,17 @@ pub struct AddonInstallReport {
     pub skipped_modified: Vec<PathBuf>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GithubReleaseResponse {
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    url: String,
+}
+
 impl ProjectContext {
     pub fn new(root: PathBuf) -> Self {
         let gdsuite_dir = root.join(GD_DIR);
@@ -113,6 +126,79 @@ impl ProjectContext {
         fs::create_dir_all(&self.state_dir)?;
         Ok(())
     }
+}
+
+pub fn load_dotenv_if_present(context: &ProjectContext) -> Result<()> {
+    let path = context.root.join(".env");
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let body =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    for (index, raw_line) in body.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let line = line.strip_prefix("export ").unwrap_or(line).trim();
+        let Some((key, raw_value)) = line.split_once('=') else {
+            return Err(anyhow!(
+                "invalid .env entry at {}:{}",
+                path.display(),
+                index + 1
+            ));
+        };
+
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(anyhow!(
+                "invalid .env entry at {}:{}",
+                path.display(),
+                index + 1
+            ));
+        }
+        if env::var_os(key).is_some() {
+            continue;
+        }
+
+        let value = parse_dotenv_value(raw_value.trim()).ok_or_else(|| {
+            anyhow!("invalid .env value at {}:{}", path.display(), index + 1)
+        })?;
+        // Safe here because keys/values come from a user-controlled env file in the project root.
+        unsafe {
+            env::set_var(key, value);
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_dotenv_value(raw: &str) -> Option<String> {
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        let inner = &raw[1..raw.len() - 1];
+        return Some(
+            inner
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\"),
+        );
+    }
+
+    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
+        return Some(raw[1..raw.len() - 1].to_string());
+    }
+
+    let value = raw
+        .split_once('#')
+        .map(|(head, _)| head)
+        .unwrap_or(raw)
+        .trim()
+        .to_string();
+    Some(value)
 }
 
 pub fn load_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
@@ -501,12 +587,21 @@ fn install_tool(
             }
         }
         ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } => {
-            let url = github_release_asset_url(owner, repo, tag, name)?;
-            let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
-            let archive_path = download_file(
-                &url,
-                &tool_download_cache_dir(context, name).join(download_name),
-            )?;
+            let (target, extension) = current_release_asset_target()?;
+            let asset_name = format!("{name}-{tag}-{target}.{extension}");
+            let archive_path = if github_token().is_some() {
+                download_github_release_asset(
+                    owner,
+                    repo,
+                    tag,
+                    &asset_name,
+                    &tool_download_cache_dir(context, name).join(&asset_name),
+                )?
+            } else {
+                let url = github_release_asset_url(owner, repo, tag, name)?;
+                let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
+                download_file(&url, &tool_download_cache_dir(context, name).join(download_name))?
+            };
             install_binary_archive(&archive_path, &root, name)?;
         }
         ToolAcquireSpec::Pip { .. } => {
@@ -698,10 +793,7 @@ fn download_file(url: &str, destination: &Path) -> Result<PathBuf> {
             .with_context(|| format!("failed to create download dir {}", parent.display()))?;
     }
 
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .context("failed to initialize HTTP client")?;
+    let client = http_client()?;
     let mut response = client
         .get(url)
         .send()
@@ -713,6 +805,88 @@ fn download_file(url: &str, destination: &Path) -> Result<PathBuf> {
     io::copy(&mut response, &mut file)
         .with_context(|| format!("failed to write {}", destination.display()))?;
     Ok(destination.to_path_buf())
+}
+
+fn download_github_release_asset(
+    owner: &str,
+    repo: &str,
+    tag: &str,
+    asset_name: &str,
+    destination: &Path,
+) -> Result<PathBuf> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create download dir {}", parent.display()))?;
+    }
+
+    let client = http_client()?;
+    let release_url = format!(
+        "{}/repos/{owner}/{repo}/releases/tags/{tag}",
+        github_api_base_url()
+    );
+    let release_body = client
+        .get(&release_url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .with_context(|| format!("failed to query GitHub release metadata at {release_url}"))?
+        .error_for_status()
+        .with_context(|| format!("failed to query GitHub release metadata at {release_url}"))?
+        .text()
+        .with_context(|| format!("failed to read GitHub release metadata from {release_url}"))?;
+    let release: GithubReleaseResponse = serde_json::from_str(&release_body)
+        .with_context(|| format!("failed to parse GitHub release metadata from {release_url}"))?;
+
+    let asset = release
+        .assets
+        .into_iter()
+        .find(|asset| asset.name == asset_name)
+        .ok_or_else(|| {
+            anyhow!(
+                "GitHub release {owner}/{repo}@{tag} did not contain expected asset {asset_name}"
+            )
+        })?;
+
+    let mut response = client
+        .get(&asset.url)
+        .header("Accept", "application/octet-stream")
+        .send()
+        .with_context(|| format!("failed to download GitHub release asset {}", asset.name))?
+        .error_for_status()
+        .with_context(|| format!("failed to download GitHub release asset {}", asset.name))?;
+    let mut file = fs::File::create(destination)
+        .with_context(|| format!("failed to create {}", destination.display()))?;
+    io::copy(&mut response, &mut file)
+        .with_context(|| format!("failed to write {}", destination.display()))?;
+    Ok(destination.to_path_buf())
+}
+
+fn http_client() -> Result<Client> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_static(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))),
+    );
+    if let Some(token) = github_token() {
+        let value = HeaderValue::from_str(&format!("Bearer {token}"))
+            .context("GDSUITE_GITHUB_TOKEN contains invalid header characters")?;
+        headers.insert(AUTHORIZATION, value);
+    }
+
+    Client::builder()
+        .default_headers(headers)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .context("failed to initialize HTTP client")
+}
+
+fn github_token() -> Option<String> {
+    let token = env::var("GDSUITE_GITHUB_TOKEN").ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
 }
 
 fn clone_git_source(url: &str, rev: &str, destination: &Path) -> Result<()> {
@@ -908,6 +1082,13 @@ fn github_release_asset_url(
 fn github_release_base_url() -> String {
     env::var("GDSUITE_GITHUB_RELEASE_BASE_URL")
         .unwrap_or_else(|_| "https://github.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn github_api_base_url() -> String {
+    env::var("GDSUITE_GITHUB_API_BASE_URL")
+        .unwrap_or_else(|_| "https://api.github.com".to_string())
         .trim_end_matches('/')
         .to_string()
 }

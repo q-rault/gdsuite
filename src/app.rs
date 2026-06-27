@@ -35,6 +35,7 @@ pub fn run() -> Result<()> {
     let root = fs::canonicalize(&cli.project_root)
         .with_context(|| format!("invalid project root {}", cli.project_root.display()))?;
     let context = ProjectContext::new(root);
+    tooling::load_dotenv_if_present(&context)?;
 
     match cli.command {
         Commands::Init => init(&context, cli.godot_exe.as_deref()),

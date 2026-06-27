@@ -203,6 +203,166 @@ fn setup_supports_github_release_archives() {
 }
 
 #[test]
+fn setup_supports_github_release_repo_with_auth_token() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_path_tools();
+
+    let server = TestHttpServer::new(HashMap::from([
+        (
+            "/repos/q-rault/gdtest/releases/tags/v0.1.0".to_string(),
+            TestRoute::auth(
+                br#"{"assets":[{"name":"gdtest-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/repos/q-rault/gdhealth/releases/tags/v0.1.0".to_string(),
+            TestRoute::auth(
+                br#"{"assets":[{"name":"gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/api/assets/gdtest".to_string(),
+            TestRoute::auth(
+                build_zip(&[
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "_panel = null\n",
+                    ),
+                ]),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/api/assets/gdhealth".to_string(),
+            TestRoute::auth(
+                build_zip(&[(
+                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                )]),
+                "Bearer secret-token",
+            ),
+        ),
+    ]));
+
+    fixture
+        .cmd()
+        .env("GDSUITE_GITHUB_API_BASE_URL", server.url())
+        .env("GDSUITE_GITHUB_TOKEN", "secret-token")
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("setup complete"));
+
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdtest/bin/gdtest.cmd")
+            .exists()
+    );
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdhealth/bin/gdhealth.cmd")
+            .exists()
+    );
+}
+
+#[test]
+fn setup_loads_github_token_from_dotenv() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_path_tools();
+
+    let server = TestHttpServer::new(HashMap::from([
+        (
+            "/repos/q-rault/gdtest/releases/tags/v0.1.0".to_string(),
+            TestRoute::auth(
+                br#"{"assets":[{"name":"gdtest-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/repos/q-rault/gdhealth/releases/tags/v0.1.0".to_string(),
+            TestRoute::auth(
+                br#"{"assets":[{"name":"gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/api/assets/gdtest".to_string(),
+            TestRoute::auth(
+                build_zip(&[
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "_panel = null\n",
+                    ),
+                ]),
+                "Bearer secret-token",
+            ),
+        ),
+        (
+            "/api/assets/gdhealth".to_string(),
+            TestRoute::auth(
+                build_zip(&[(
+                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                )]),
+                "Bearer secret-token",
+            ),
+        ),
+    ]));
+
+    fs::write(
+        fixture.root.join(".env"),
+        "GDSUITE_GITHUB_TOKEN=secret-token\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .env_remove("GDSUITE_GITHUB_TOKEN")
+        .env("GDSUITE_GITHUB_API_BASE_URL", server.url())
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("setup complete"));
+
+    assert!(
+        fixture
+            .root
+            .join(".gdsuite/tools/gdtest/bin/gdtest.cmd")
+            .exists()
+    );
+}
+
+#[test]
 fn setup_supports_non_sibling_local_paths() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -1235,6 +1395,12 @@ fn existing_product_configs_are_not_overwritten() {
     assert_eq!(gdhealth, "[groups]\ncustom = [\"mods/**/*.gd\"]\n");
 }
 
+#[derive(Clone)]
+struct TestRoute {
+    body: Vec<u8>,
+    expected_auth: Option<String>,
+}
+
 struct Fixture {
     _tempdir: TempDir,
     root: PathBuf,
@@ -1711,10 +1877,16 @@ struct TestHttpServer {
 }
 
 impl TestHttpServer {
-    fn new(routes: HashMap<String, Vec<u8>>) -> Self {
+    fn new<T: Into<TestRoute>>(routes: HashMap<String, T>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let routes = Arc::new(routes);
+        let base_url = format!("http://{}", address);
+        let routes = Arc::new(
+            routes
+                .into_iter()
+                .map(|(path, route)| (path, route.into()))
+                .collect::<HashMap<_, _>>(),
+        );
         let handle = thread::spawn(move || {
             for stream in listener.incoming().take(8) {
                 let mut stream = match stream {
@@ -1732,13 +1904,39 @@ impl TestHttpServer {
                     .next()
                     .and_then(|line| line.split_whitespace().nth(1))
                     .unwrap_or("/");
-                if let Some(body) = routes.get(path) {
+                if let Some(route) = routes.get(path) {
+                    let auth = request.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.eq_ignore_ascii_case("authorization") {
+                            Some(value.trim())
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(expected_auth) = route.expected_auth.as_deref()
+                        && auth != Some(expected_auth)
+                    {
+                        let body = b"unauthorized";
+                        let header = format!(
+                            "HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(body);
+                        continue;
+                    }
+
+                    let body = if let Ok(text) = String::from_utf8(route.body.clone()) {
+                        text.replace("__BASE_URL__", &base_url).into_bytes()
+                    } else {
+                        route.body.clone()
+                    };
                     let header = format!(
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         body.len()
                     );
                     let _ = stream.write_all(header.as_bytes());
-                    let _ = stream.write_all(body);
+                    let _ = stream.write_all(&body);
                 } else {
                     let body = b"not found";
                     let header = format!(
@@ -1759,6 +1957,24 @@ impl TestHttpServer {
 
     fn url(&self) -> String {
         self.url.clone()
+    }
+}
+
+impl TestRoute {
+    fn auth(body: Vec<u8>, expected_auth: &str) -> Self {
+        Self {
+            body,
+            expected_auth: Some(expected_auth.to_string()),
+        }
+    }
+}
+
+impl From<Vec<u8>> for TestRoute {
+    fn from(body: Vec<u8>) -> Self {
+        Self {
+            body,
+            expected_auth: None,
+        }
     }
 }
 
