@@ -27,7 +27,10 @@ fn setup_generates_project_local_toolchain_and_configs() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] step  installing local toolchain",
+        ))
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
     assert!(fixture.root.join("gdsuite.toml").exists());
@@ -49,7 +52,15 @@ fn init_generates_project_local_toolchain_and_configs() {
         .arg("init")
         .assert()
         .success()
-        .stdout(predicate::str::contains("init complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] step  installing local toolchain",
+        ))
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] step  refreshing Godot class cache",
+        ))
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] ok    initialization complete",
+        ));
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
     assert!(fixture.root.join("gdsuite.toml").exists());
@@ -88,8 +99,7 @@ fn init_builds_godot_class_cache_after_installing_gdtest_addon() {
             .join(".godot/global_script_class_cache.cfg")
             .exists()
     );
-    let godot_args =
-        fs::read_to_string(fixture.root.join("mock-state/godot-args.txt")).unwrap();
+    let godot_args = fs::read_to_string(fixture.root.join("mock-state/godot-args.txt")).unwrap();
     assert!(godot_args.contains("--import"));
 }
 
@@ -106,7 +116,12 @@ fn init_accepts_godot_exe_as_command_name_from_env() {
         .arg("init")
         .assert()
         .success()
-        .stdout(predicate::str::contains("init complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] step  installing local toolchain",
+        ))
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] ok    initialization complete",
+        ));
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
 }
@@ -150,7 +165,7 @@ fn setup_supports_crate_sources() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
     assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
@@ -230,16 +245,16 @@ fn setup_supports_github_release_repo_with_auth_token() {
 
     let server = TestHttpServer::new(HashMap::from([
         (
-            "/repos/q-rault/gdtest/releases/tags/v0.1.0".to_string(),
+            "/repos/q-rault/gdtest/releases/tags/v0.1.1".to_string(),
             TestRoute::auth(
-                br#"{"assets":[{"name":"gdtest-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
+                br#"{"assets":[{"name":"gdtest-v0.1.1-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
                 "Bearer secret-token",
             ),
         ),
         (
-            "/repos/q-rault/gdhealth/releases/tags/v0.1.0".to_string(),
+            "/repos/q-rault/gdhealth/releases/tags/v0.1.1".to_string(),
             TestRoute::auth(
-                br#"{"assets":[{"name":"gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
+                br#"{"assets":[{"name":"gdhealth-v0.1.1-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
                 "Bearer secret-token",
             ),
         ),
@@ -248,19 +263,19 @@ fn setup_supports_github_release_repo_with_auth_token() {
             TestRoute::auth(
                 build_zip(&[
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.1\r\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
@@ -271,8 +286,8 @@ fn setup_supports_github_release_repo_with_auth_token() {
             "/api/assets/gdhealth".to_string(),
             TestRoute::auth(
                 build_zip(&[(
-                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.1.1-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
                 "Bearer secret-token",
             ),
@@ -286,7 +301,7 @@ fn setup_supports_github_release_repo_with_auth_token() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     assert!(
         fixture
@@ -310,16 +325,16 @@ fn setup_loads_github_token_from_dotenv() {
 
     let server = TestHttpServer::new(HashMap::from([
         (
-            "/repos/q-rault/gdtest/releases/tags/v0.1.0".to_string(),
+            "/repos/q-rault/gdtest/releases/tags/v0.1.1".to_string(),
             TestRoute::auth(
-                br#"{"assets":[{"name":"gdtest-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
+                br#"{"assets":[{"name":"gdtest-v0.1.1-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdtest"}]}"#.to_vec(),
                 "Bearer secret-token",
             ),
         ),
         (
-            "/repos/q-rault/gdhealth/releases/tags/v0.1.0".to_string(),
+            "/repos/q-rault/gdhealth/releases/tags/v0.1.1".to_string(),
             TestRoute::auth(
-                br#"{"assets":[{"name":"gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
+                br#"{"assets":[{"name":"gdhealth-v0.1.1-x86_64-pc-windows-msvc.zip","url":"__BASE_URL__/api/assets/gdhealth"}]}"#.to_vec(),
                 "Bearer secret-token",
             ),
         ),
@@ -328,19 +343,19 @@ fn setup_loads_github_token_from_dotenv() {
             TestRoute::auth(
                 build_zip(&[
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.1\r\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
@@ -351,8 +366,8 @@ fn setup_loads_github_token_from_dotenv() {
             "/api/assets/gdhealth".to_string(),
             TestRoute::auth(
                 build_zip(&[(
-                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.1.1-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
                 "Bearer secret-token",
             ),
@@ -372,7 +387,7 @@ fn setup_loads_github_token_from_dotenv() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     assert!(
         fixture
@@ -410,7 +425,7 @@ fn setup_supports_non_sibling_local_paths() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     assert!(
         fixture
@@ -512,9 +527,9 @@ fn doctor_reports_resolved_paths() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("status=ok"))
-        .stdout(predicate::str::contains("gdformat="))
-        .stdout(predicate::str::contains("gdhealth="));
+        .stdout(predicate::str::contains("[gdsuite:doctor] status ok"))
+        .stdout(predicate::str::contains("[gdsuite:doctor] info  gdformat"))
+        .stdout(predicate::str::contains("[gdsuite:doctor] info  gdhealth"));
 }
 
 #[test]
@@ -534,10 +549,10 @@ fn doctor_warns_when_gdhealth_config_drifts_from_canonical_sections() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "warning=gdhealth config drift from gdsuite.toml:",
+            "[gdsuite:doctor] warn  gdhealth config drift from gdsuite.toml:",
         ))
         .stdout(predicate::str::contains("project.root"))
-        .stdout(predicate::str::contains("status=warning"));
+        .stdout(predicate::str::contains("[gdsuite:doctor] status warning"));
 }
 
 #[test]
@@ -557,10 +572,63 @@ fn doctor_warns_when_gdtest_config_misses_suite_defaults() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "warning=gdtest config drift from gdsuite.toml:",
+            "[gdsuite:doctor] warn  gdtest config drift from gdsuite.toml:",
         ))
         .stdout(predicate::str::contains("profile.ci.reporter"))
-        .stdout(predicate::str::contains("status=warning"));
+        .stdout(predicate::str::contains("[gdsuite:doctor] status warning"));
+}
+
+#[test]
+fn init_plain_output_uses_stable_prefixed_steps() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture
+        .cmd()
+        .args(["init", "--output", "plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] step=installing local toolchain",
+        ))
+        .stdout(predicate::str::contains("[gdsuite:init] status=ok"))
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] summary=initialization complete",
+        ));
+}
+
+#[test]
+fn doctor_plain_output_keeps_prefixed_key_value_lines() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["doctor", "--output", "plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[gdsuite:doctor] project_root="))
+        .stdout(predicate::str::contains("[gdsuite:doctor] gdtest_compat=ok"))
+        .stdout(predicate::str::contains("[gdsuite:doctor] status=ok"));
+}
+
+#[test]
+fn doctor_json_output_emits_structured_report() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["doctor", "--output", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"doctor\""))
+        .stdout(predicate::str::contains("\"status\": \"ok\""))
+        .stdout(predicate::str::contains("\"compatibility\""));
 }
 
 #[test]
@@ -1105,7 +1173,7 @@ fn doctor_succeeds_with_corrupted_manifest() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("status=ok"));
+        .stdout(predicate::str::contains("[gdsuite:doctor] status ok"));
 }
 
 #[test]
@@ -1184,7 +1252,7 @@ fn setup_is_rerunnable_with_partial_state() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 }
 
 #[test]
@@ -1206,7 +1274,7 @@ fn init_is_safe_when_existing_gdtest_addon_files_are_modified() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "warning=gdtest addon install skipped modified file",
+            "[gdsuite:init] warn  gdtest addon install skipped modified file",
         ));
 
     assert_eq!(
@@ -1257,7 +1325,7 @@ fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_con
         .args(["setup", "--sync-product-configs"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("setup complete"));
+        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
 
     let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
     assert!(!gdhealth.contains("\".gdsuite/**\""));
@@ -1434,104 +1502,104 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/gdtest/0.1.0/download".to_string(),
+                "/gdtest/0.1.1/download".to_string(),
                 build_tar_gz(&[
                     (
-                        "gdtest-0.1.0/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+                        "gdtest-0.1.1/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
                     ),
                     (
-                        "gdtest-0.1.0/addons/gdtest/gdunit4_compat.gd",
+                        "gdtest-0.1.1/addons/gdtest/gdunit4_compat.gd",
                         "const GDUNIT4_CHAIN := preload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
-                    ("gdtest-0.1.0/addons/gdtest/gdunit4_chain.gd", ""),
-                    ("gdtest-0.1.0/addons/gdtest/gdt.gd", ""),
-                    ("gdtest-0.1.0/addons/gdtest/gd_test.gd", ""),
-                    ("gdtest-0.1.0/addons/gdtest/scene_runner.gd", ""),
-                    ("gdtest-0.1.0/addons/gdtest/README.md", "runtime readme\n"),
-                    ("gdtest-0.1.0/addons/gdtest/LICENSE", "license\n"),
+                    ("gdtest-0.1.1/addons/gdtest/gdunit4_chain.gd", ""),
+                    ("gdtest-0.1.1/addons/gdtest/gdt.gd", ""),
+                    ("gdtest-0.1.1/addons/gdtest/gd_test.gd", ""),
+                    ("gdtest-0.1.1/addons/gdtest/scene_runner.gd", ""),
+                    ("gdtest-0.1.1/addons/gdtest/README.md", "runtime readme\n"),
+                    ("gdtest-0.1.1/addons/gdtest/LICENSE", "license\n"),
                     (
-                        "gdtest-0.1.0/addons/gdtest_editor/plugin.gd",
+                        "gdtest-0.1.1/addons/gdtest_editor/plugin.gd",
                         "_panel = preload(\"res://addons/gdtest_editor/test_panel.gd\").new()\n",
                     ),
-                    ("gdtest-0.1.0/addons/gdtest_editor/test_panel.gd", ""),
-                    ("gdtest-0.1.0/addons/gdtest_editor/plugin.cfg", ""),
+                    ("gdtest-0.1.1/addons/gdtest_editor/test_panel.gd", ""),
+                    ("gdtest-0.1.1/addons/gdtest_editor/plugin.cfg", ""),
                     (
-                        "gdtest-0.1.0/addons/gdtest_editor/README.md",
+                        "gdtest-0.1.1/addons/gdtest_editor/README.md",
                         "editor readme\n",
                     ),
-                    ("gdtest-0.1.0/addons/gdtest_editor/LICENSE", "license\n"),
+                    ("gdtest-0.1.1/addons/gdtest_editor/LICENSE", "license\n"),
                 ]),
             ),
             (
-                "/gdhealth/0.1.0/download".to_string(),
-                build_tar_gz(&[("gdhealth-0.1.0/README.md", "gdhealth\n")]),
+                "/gdhealth/0.1.1/download".to_string(),
+                build_tar_gz(&[("gdhealth-0.1.1/README.md", "gdhealth\n")]),
             ),
             (
-                "/q-rault/gdtest/releases/download/v0.1.0/gdtest-v0.1.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtest/releases/download/v0.1.1/gdtest-v0.1.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.0\r\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.1\r\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_compat.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_compat.gd",
                         "const GDUNIT4_CHAIN := preload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
-                    ("gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd", ""),
+                    ("gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd", ""),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/gd_test.gd",
-                        "",
-                    ),
-                    (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/scene_runner.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gd_test.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/README.md",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/scene_runner.gd",
+                        "",
+                    ),
+                    (
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/README.md",
                         "runtime readme\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest/LICENSE",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/LICENSE",
                         "license\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = preload(\"res://addons/gdtest_editor/test_panel.gd\").new()\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/test_panel.gd",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/test_panel.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.cfg",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.cfg",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/README.md",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/README.md",
                         "editor readme\n",
                     ),
                     (
-                        "gdtest-v0.1.0-x86_64-pc-windows-msvc/addons/gdtest_editor/LICENSE",
+                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/LICENSE",
                         "license\n",
                     ),
                 ]),
             ),
             (
-                "/q-rault/gdhealth/releases/download/v0.1.0/gdhealth-v0.1.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdhealth/releases/download/v0.1.1/gdhealth-v0.1.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdhealth-v0.1.0-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.1.1-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
             ),
         ]));
@@ -1587,7 +1655,7 @@ impl Fixture {
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.1.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+            "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
         )
         .unwrap();
         fs::write(
@@ -1677,7 +1745,7 @@ if "%1"=="-m" if "%2"=="pip" (
             &bin.join("cargo.cmd"),
             r#"@echo off
 set ROOT=
-set VERSION=0.1.0
+set VERSION=0.1.1
 :scan
 if "%1"=="" goto found
 if "%1"=="--version" (
@@ -1739,7 +1807,7 @@ echo Success: no problems found
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtest 0.1.0
+  echo gdtest 0.1.1
   exit /b 0
 )
 if "%1"=="init" (
@@ -1753,7 +1821,7 @@ echo %*> "%CD%\logs\gdtest-args.txt"
             &gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdhealth 0.1.0
+  echo gdhealth 0.1.1
   exit /b 0
 )
 if "%1"=="--schema-version" (
@@ -1812,7 +1880,7 @@ if exist "%CD%\mock-state\health-fail.flag" (
         fs::create_dir_all(self.root.join("addons/gdtest")).unwrap();
         fs::write(
             self.root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.1.0\"\n",
+            "const HARNESS_VERSION = \"0.1.1\"\n",
         )
         .unwrap();
         self.seed_path_tools();
@@ -1824,8 +1892,8 @@ root = "."
 
 [tools]
 gdtoolkit = "==4.5.0"
-gdtest_source = "github:q-rault/gdtest@v0.1.0"
-gdhealth_source = "github:q-rault/gdhealth@v0.1.0"
+gdtest_source = "github:q-rault/gdtest@v0.1.1"
+gdhealth_source = "github:q-rault/gdhealth@v0.1.1"
 
 [commands]
 default_test_target = "test/"
@@ -1887,11 +1955,11 @@ root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
     fn remote_gdsuite_config(&self, gdtest_source: &str, gdhealth_source: &str) -> String {
         self.default_gdsuite_config()
             .replace(
-                "gdtest_source = \"github:q-rault/gdtest@v0.1.0\"",
+                "gdtest_source = \"github:q-rault/gdtest@v0.1.1\"",
                 &format!("gdtest_source = \"{gdtest_source}\""),
             )
             .replace(
-                "gdhealth_source = \"github:q-rault/gdhealth@v0.1.0\"",
+                "gdhealth_source = \"github:q-rault/gdhealth@v0.1.1\"",
                 &format!("gdhealth_source = \"{gdhealth_source}\""),
             )
     }

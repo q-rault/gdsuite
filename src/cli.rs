@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -20,13 +20,13 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     #[command(about = "Bootstrap the local gdsuite toolchain and product configs")]
-    Init,
+    Init(OutputArgs),
     #[command(about = "Migrate an existing project to the suite-first config model")]
     Migrate,
     #[command(about = "Install or repair the local gdsuite toolchain and product configs")]
     Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
-    Doctor,
+    Doctor(DoctorArgs),
     #[command(about = "Run gdformat on discovered GDScript files")]
     Fmt(FmtArgs),
     #[command(about = "Run gdlint and optional suite-owned fixers")]
@@ -57,11 +57,32 @@ pub struct FmtArgs {
 
 #[derive(Debug, Args)]
 pub struct SetupArgs {
+    #[command(flatten)]
+    pub output: OutputArgs,
     #[arg(
         long,
         help = "Merge safe suite-owned defaults into existing product configs"
     )]
     pub sync_product_configs: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct OutputArgs {
+    #[arg(long, value_enum, default_value = "pretty")]
+    pub output: OutputModeArg,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DoctorArgs {
+    #[command(flatten)]
+    pub output: OutputArgs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum OutputModeArg {
+    Pretty,
+    Plain,
+    Json,
 }
 
 #[derive(Debug, Args)]

@@ -39,6 +39,13 @@ cd path/to/your-project
 gdsuite init
 ```
 
+That now defaults to readable scoped logs such as:
+
+```text
+[gdsuite:init] step  installing local toolchain
+[gdsuite:init] ok    initialization complete
+```
+
 4. Verify what the suite resolved.
 
 ```bash
@@ -46,6 +53,7 @@ gdsuite doctor
 ```
 
 If Godot is in a non-standard location, set `GODOT_EXE` or configure it in `gdsuite.toml` before rerunning `doctor`.
+Use `gdsuite doctor --output plain` for stable shell parsing or `gdsuite doctor --output json` for structured integrations.
 
 ## What success looks like
 
@@ -54,7 +62,7 @@ Success means:
 - `.gdsuite/` exists in the project
 - `gdsuite.toml` exists
 - `gdtest.toml` and `gdhealth.toml` exist if they were missing before
-- `gdsuite doctor` prints resolved paths for `gdtest` and `gdhealth`
+- `gdsuite doctor` prints resolved paths and ends with `[gdsuite:doctor] status ok`
 
 ## Common mistakes
 

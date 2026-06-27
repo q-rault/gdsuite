@@ -13,42 +13,32 @@ gdsuite doctor
 
 That prints resolved paths, config locations, setup state, and warnings about product config drift.
 
-When all tools are installed, output ends with `status=ok`:
+When all tools are installed, pretty output ends with `[gdsuite:doctor] status ok`:
 
 ```
-project_root=/your/project
-config=/your/project/gdsuite.toml
-manifest=/your/project/.gdsuite/state/manifest.json
-godot=/usr/local/bin/godot
-godot_version=4.7.stable.official
-python=/your/project/.gdsuite/python/bin/python
-python_version=Python 3.12.3
-gdformat=/your/project/.gdsuite/python/bin/gdformat
-gdformat_version=gdformat 4.5.0
-gdlint=/your/project/.gdsuite/python/bin/gdlint
-gdlint_version=gdlint 4.5.0
-gdtest=/your/project/.gdsuite/tools/gdtest/bin/gdtest
-gdtest_version=gdtest 0.1.0
-gdhealth=/your/project/.gdsuite/tools/gdhealth/bin/gdhealth
-gdhealth_version=gdhealth 0.1.0
-status=ok
+[gdsuite:doctor] info  project root  /your/project
+[gdsuite:doctor] info  config        /your/project/gdsuite.toml
+[gdsuite:doctor] info  godot         /usr/local/bin/godot
+[gdsuite:doctor] info  version       4.7.stable.official
+[gdsuite:doctor] info  python        /your/project/.gdsuite/python/bin/python
+[gdsuite:doctor] info  version       Python 3.12.3
+[gdsuite:doctor] status ok
 ```
 
-When tools are missing, each missing entry says exactly what to run to fix it, and `status=error` appears at the end:
+When tools are missing, each missing entry says exactly what to run to fix it, and `[gdsuite:doctor] status error` appears at the end:
 
 ```
-project_root=/your/project
-config=/your/project/gdsuite.toml
-manifest=/your/project/.gdsuite/state/manifest.json
-godot=not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml
-python=not found; run `gdsuite setup` to install the toolchain
-gdformat=not found; run `gdsuite setup` to install the toolchain
-gdlint=not found; run `gdsuite setup` to install the toolchain
-gdtest=not found; run `gdsuite setup` to install the toolchain
-gdhealth=not found; run `gdsuite setup` to install the toolchain
-status=error
+[gdsuite:doctor] warn  godot not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml
+[gdsuite:doctor] warn  python not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] warn  gdformat not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] warn  gdlint not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] warn  gdtest not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] warn  gdhealth not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] status error
 error: missing tools: godot, python, gdformat, gdlint, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
 ```
+
+Use `gdsuite doctor --output plain` when you want stable `key=value` lines for shell scripts, or `gdsuite doctor --output json` for a structured report.
 
 ## Common failure modes
 

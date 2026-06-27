@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     time::Instant,
@@ -9,9 +10,13 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cli::{Cli, Commands, FmtArgs, ForwardReportArgs, LintArgs, ReportArgs, RunArgs, SetupArgs},
+    cli::{
+        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs,
+        OutputModeArg, ReportArgs, RunArgs, SetupArgs,
+    },
     config::{CompatibilityVerdict, GdsuiteConfig, Manifest},
     fixers, migrate, process,
+    output::{CommandScope, OutputContext, OutputMode},
     tooling::{self, ProjectContext},
 };
 
@@ -38,10 +43,10 @@ pub fn run() -> Result<()> {
     tooling::load_dotenv_if_present(&context)?;
 
     match cli.command {
-        Commands::Init => init(&context, cli.godot_exe.as_deref()),
+        Commands::Init(args) => init(&context, cli.godot_exe.as_deref(), args),
         Commands::Migrate => migrate_project(&context, cli.godot_exe.as_deref()),
         Commands::Setup(args) => setup(&context, cli.godot_exe.as_deref(), args),
-        Commands::Doctor => doctor(&context, cli.godot_exe.as_deref()),
+        Commands::Doctor(args) => doctor(&context, cli.godot_exe.as_deref(), args),
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
         Commands::Typecheck => typecheck(&context),
@@ -52,15 +57,18 @@ pub fn run() -> Result<()> {
     }
 }
 
-fn init(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+fn init(context: &ProjectContext, cli_godot: Option<&Path>, args: OutputArgs) -> Result<()> {
+    let output = OutputContext::new(resolve_output_mode(args.output), CommandScope::Init);
     setup_impl(
         context,
         cli_godot,
         SetupArgs {
+            output: args,
             sync_product_configs: false,
         },
+        &output,
     )?;
-    println!("init complete");
+    finish_mutating_command(&output, "initialization complete");
     Ok(())
 }
 
@@ -71,13 +79,21 @@ fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result
 }
 
 fn setup(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
-    setup_impl(context, cli_godot, args)?;
-    println!("setup complete");
+    let output = OutputContext::new(resolve_output_mode(args.output.output), CommandScope::Setup);
+    setup_impl(context, cli_godot, args, &output)?;
+    finish_mutating_command(&output, "setup complete");
     Ok(())
 }
 
-fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
+fn setup_impl(
+    context: &ProjectContext,
+    cli_godot: Option<&Path>,
+    args: SetupArgs,
+    output: &OutputContext,
+) -> Result<()> {
+    output.step("resolving project setup");
     context.ensure_dirs()?;
+    output.step("resolving Godot executable");
     let godot_path = if context.config_path.exists() {
         let existing = tooling::load_config(context)?;
         tooling::resolve_godot(context, cli_godot, Some(&existing))?
@@ -85,29 +101,38 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
         tooling::resolve_godot(context, cli_godot, None)?
     };
 
+    output.step("writing gdsuite config");
     GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
     let config = tooling::load_config(context)?;
+    output.step("writing product configs");
     tooling::generate_external_configs(context, &config)?;
     if args.sync_product_configs {
+        output.step("syncing product configs");
         tooling::sync_product_configs(context, &config)?;
     }
+    output.step("installing local toolchain");
     let install = tooling::install_toolchain(context, &config, &godot_path)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    output.step("saving tool manifest");
     tooling::save_manifest(context, &install.manifest)?;
+    output.step("installing gdtest addons");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     for skipped in &addon_report.skipped_modified {
-        println!(
-            "warning=gdtest addon install skipped modified file {}",
+        output.warn(format!(
+            "gdtest addon install skipped modified file {}",
             skipped.display()
-        );
+        ));
     }
+    output.step("refreshing Godot class cache");
     tooling::ensure_gdtest_class_cache(context, &config, &godot_path, &addon_report)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    output.step("verifying installed tools");
     let toolchain = tooling::resolve_toolchain(context, Some(&install.manifest))
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    output.step("recording installation state");
     let installation =
         tooling::probe_installation_state(context, &config, &install.manifest, &install.requested)
             .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
@@ -120,7 +145,7 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
         &compatibility.gdhealth,
     ] {
         if tool.verdict == CompatibilityVerdict::Warning {
-            println!("warning={}", tool.reason);
+            output.warn(&tool.reason);
         }
     }
     if tooling::report_status(&compatibility) == CompatibilityVerdict::Error {
@@ -133,12 +158,19 @@ fn setup_impl(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArg
         .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
         .map(|tool| tool.reason.clone())
         .collect::<Vec<_>>();
+        if output.mode() != OutputMode::Json {
+            output.status("error");
+        }
         return Err(command_error(EXIT_TOOLCHAIN_ERROR, errors.join("; ")));
     }
     Ok(())
 }
 
-fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
+fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) -> Result<()> {
+    let output = OutputContext::new(
+        resolve_output_mode(args.output.output),
+        CommandScope::Doctor,
+    );
     let config = load_config_or_error(context)?;
     let manifest = if context.manifest_path.exists() {
         tooling::load_manifest(context).ok()
@@ -146,102 +178,120 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
         None
     };
 
-    println!("project_root={}", context.root.display());
-    println!("config={}", context.config_path.display());
-    println!("gdtest_config={}", context.gdtest_config_path.display());
-    println!("gdhealth_config={}", context.gdhealth_config_path.display());
-    println!("manifest={}", context.manifest_path.display());
-    println!("installation={}", context.installation_path.display());
-
     let mut missing: Vec<String> = Vec::new();
+    let mut warnings = Vec::new();
+    let mut tool_reports = BTreeMap::new();
 
-    match tooling::resolve_godot(context, cli_godot, Some(&config)) {
+    let godot = match tooling::resolve_godot(context, cli_godot, Some(&config)) {
         Ok(path) => {
-            println!("godot={}", path.display());
-            print_version_or_warn("godot", &path, &["--version"]);
+            let version = probe_version(&path, &["--version"]);
+            DoctorToolReport::ok(Some(path), version)
         }
         Err(_) => {
-            println!(
-                "godot=not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml"
-            );
             missing.push("godot".to_string());
+            DoctorToolReport::error(
+                None,
+                None,
+                "not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml",
+            )
         }
-    }
+    };
+    tool_reports.insert("godot".to_string(), godot);
 
     let python = manifest
         .as_ref()
         .and_then(|m| m.python.clone())
         .or_else(|| tooling::find_python_in_venv(context));
-    match python {
-        Some(path) => {
-            println!("python={}", path.display());
-            print_version_or_warn("python", &path, &["--version"]);
-        }
-        None => {
-            println!("python=not found; run `gdsuite setup` to install the toolchain");
-            missing.push("python".to_string());
-        }
-    }
+    tool_reports.insert(
+        "python".to_string(),
+        match python {
+            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            None => {
+                missing.push("python".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
 
     let gdformat = manifest
         .as_ref()
         .and_then(|m| m.gdformat.clone())
         .or_else(|| tooling::find_binary(context, &["gdformat"]));
-    match gdformat {
-        Some(path) => {
-            println!("gdformat={}", path.display());
-            print_version_or_warn("gdformat", &path, &["--version"]);
-        }
-        None => {
-            println!("gdformat=not found; run `gdsuite setup` to install the toolchain");
-            missing.push("gdformat".to_string());
-        }
-    }
+    tool_reports.insert(
+        "gdformat".to_string(),
+        match gdformat {
+            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            None => {
+                missing.push("gdformat".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
 
     let gdlint = manifest
         .as_ref()
         .and_then(|m| m.gdlint.clone())
         .or_else(|| tooling::find_binary(context, &["gdlint"]));
-    match gdlint {
-        Some(path) => {
-            println!("gdlint={}", path.display());
-            print_version_or_warn("gdlint", &path, &["--version"]);
-        }
-        None => {
-            println!("gdlint=not found; run `gdsuite setup` to install the toolchain");
-            missing.push("gdlint".to_string());
-        }
-    }
+    tool_reports.insert(
+        "gdlint".to_string(),
+        match gdlint {
+            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            None => {
+                missing.push("gdlint".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
 
     let gdtest = manifest
         .as_ref()
         .and_then(|m| m.gdtest.clone())
         .or_else(|| tooling::find_binary(context, &["gdtest"]));
-    match gdtest {
-        Some(path) => {
-            println!("gdtest={}", path.display());
-            print_version_or_warn("gdtest", &path, &["--version"]);
-        }
-        None => {
-            println!("gdtest=not found; run `gdsuite setup` to install the toolchain");
-            missing.push("gdtest".to_string());
-        }
-    }
+    tool_reports.insert(
+        "gdtest".to_string(),
+        match gdtest {
+            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            None => {
+                missing.push("gdtest".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
 
     let gdhealth = manifest
         .as_ref()
         .and_then(|m| m.gdhealth.clone())
         .or_else(|| tooling::find_binary(context, &["gdhealth"]));
-    match gdhealth {
-        Some(path) => {
-            println!("gdhealth={}", path.display());
-            print_version_or_warn("gdhealth", &path, &["--help"]);
-        }
-        None => {
-            println!("gdhealth=not found; run `gdsuite setup` to install the toolchain");
-            missing.push("gdhealth".to_string());
-        }
-    }
+    tool_reports.insert(
+        "gdhealth".to_string(),
+        match gdhealth {
+            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--help"])),
+            None => {
+                missing.push("gdhealth".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
 
     let mut status = if missing.is_empty() {
         CompatibilityVerdict::Ok
@@ -250,15 +300,16 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     };
 
     if context.versions_path.exists() && !context.installation_path.exists() {
-        println!(
-            "warning=legacy state file {} is stale; run `gdsuite setup` to regenerate installation.json",
+        warnings.push(format!(
+            "legacy state file {} is stale; run `gdsuite setup` to regenerate installation.json",
             context.versions_path.display()
-        );
+        ));
         if status == CompatibilityVerdict::Ok {
             status = CompatibilityVerdict::Warning;
         }
     }
 
+    let mut compatibility_reports = BTreeMap::new();
     if let Some(manifest) = manifest.as_ref()
         && missing.is_empty()
     {
@@ -267,9 +318,18 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
             tooling::probe_installation_state(context, &config, manifest, &requested)
         {
             let compatibility = tooling::compatibility_report(&installation);
-            print_tool_compatibility(&compatibility.gdtoolkit);
-            print_tool_compatibility(&compatibility.gdtest);
-            print_tool_compatibility(&compatibility.gdhealth);
+            compatibility_reports.insert(
+                "gdtoolkit".to_string(),
+                DoctorCompatibilityReport::from_tool(&compatibility.gdtoolkit),
+            );
+            compatibility_reports.insert(
+                "gdtest".to_string(),
+                DoctorCompatibilityReport::from_tool(&compatibility.gdtest),
+            );
+            compatibility_reports.insert(
+                "gdhealth".to_string(),
+                DoctorCompatibilityReport::from_tool(&compatibility.gdhealth),
+            );
             status = match (status, tooling::report_status(&compatibility)) {
                 (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => {
                     CompatibilityVerdict::Error
@@ -283,23 +343,31 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     }
 
     for warning in tooling::product_config_warnings(context, &config)? {
-        println!("warning={warning}");
+        warnings.push(warning);
         if status == CompatibilityVerdict::Ok {
             status = CompatibilityVerdict::Warning;
         }
     }
 
+    let report = DoctorReport {
+        command: "doctor".to_string(),
+        status: verdict_label(&status).to_string(),
+        paths: DoctorPaths::from_context(context),
+        tools: tool_reports,
+        compatibility: compatibility_reports,
+        warnings,
+        summary: doctor_summary(&status),
+    };
+
+    match output.mode() {
+        OutputMode::Pretty => render_doctor_pretty(&output, &report),
+        OutputMode::Plain => render_doctor_plain(&output, &report),
+        OutputMode::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+    }
+
     match status {
-        CompatibilityVerdict::Ok => {
-            println!("status=ok");
-            Ok(())
-        }
-        CompatibilityVerdict::Warning => {
-            println!("status=warning");
-            Ok(())
-        }
+        CompatibilityVerdict::Ok | CompatibilityVerdict::Warning => Ok(()),
         CompatibilityVerdict::Error => {
-            println!("status=error");
             Err(command_error(
                 EXIT_TOOLCHAIN_ERROR,
                 if missing.is_empty() {
@@ -312,6 +380,25 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
                 },
             ))
         }
+    }
+}
+
+fn resolve_output_mode(mode: OutputModeArg) -> OutputMode {
+    match mode {
+        OutputModeArg::Pretty => OutputMode::Pretty,
+        OutputModeArg::Plain => OutputMode::Plain,
+        OutputModeArg::Json => OutputMode::Json,
+    }
+}
+
+fn finish_mutating_command(output: &OutputContext, summary: &str) {
+    match output.mode() {
+        OutputMode::Pretty => output.ok(summary),
+        OutputMode::Plain => {
+            output.status("ok");
+            output.summary(summary);
+        }
+        OutputMode::Json => {}
     }
 }
 
@@ -750,38 +837,209 @@ fn parse_lint_finding(line: &str) -> Option<JsonLintFinding> {
     })
 }
 
-fn print_version_or_warn(name: &str, path: &Path, args: &[&str]) {
+fn probe_version(path: &Path, args: &[&str]) -> Option<String> {
     let args_owned: Vec<String> = args.iter().map(|v| v.to_string()).collect();
-    match process::run_checked(path, &args_owned, PathBuf::from(".").as_path()) {
-        Ok(output) => {
-            let version = output.stdout.trim().lines().next().unwrap_or("unknown");
-            println!("{name}_version={version}");
-        }
-        Err(_) => println!("{name}_version=unavailable"),
-    }
+    process::run_checked(path, &args_owned, PathBuf::from(".").as_path())
+        .ok()
+        .and_then(|output| output.stdout.trim().lines().next().map(ToString::to_string))
 }
 
-fn print_tool_compatibility(tool: &tooling::ToolCompatibility) {
-    println!("{}_requested={}", tool.name, tool.requested);
-    println!(
-        "{}_installed={}",
-        tool.name,
-        tool.resolved_version.as_deref().unwrap_or("unknown")
-    );
-    for (key, value) in &tool.extra {
-        println!("{key}={value}");
+fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
+    output.kv("project root", &report.paths.project_root);
+    output.kv("config", &report.paths.config);
+    output.kv("gdtest config", &report.paths.gdtest_config);
+    output.kv("gdhealth config", &report.paths.gdhealth_config);
+    output.kv("manifest", &report.paths.manifest);
+    output.kv("installation", &report.paths.installation);
+    output.blank();
+
+    for name in ["godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth"] {
+        if let Some(tool) = report.tools.get(name) {
+            match tool.status.as_str() {
+                "ok" => {
+                    output.kv(name, tool.path.as_deref().unwrap_or("unknown"));
+                    if let Some(version) = tool.version.as_deref() {
+                        output.kv("version", version);
+                    }
+                }
+                _ => output.warn(format!("{} {}", name, tool.summary.as_deref().unwrap_or("unavailable"))),
+            }
+        }
     }
-    let verdict = match tool.verdict {
+
+    if !report.compatibility.is_empty() {
+        output.blank();
+        for name in ["gdtoolkit", "gdtest", "gdhealth"] {
+            if let Some(tool) = report.compatibility.get(name) {
+                let installed = tool.installed.as_deref().unwrap_or("unknown");
+                let message = format!(
+                    "{name:<13} requested {}, installed {}",
+                    tool.requested, installed
+                );
+                match tool.status.as_str() {
+                    "ok" => output.ok(message),
+                    "warning" => output.warn(message),
+                    _ => output.error(message),
+                }
+            }
+        }
+    }
+
+    if !report.warnings.is_empty() {
+        output.blank();
+        for warning in &report.warnings {
+            output.warn(warning);
+        }
+    }
+
+    output.blank();
+    output.status(&report.status);
+}
+
+fn render_doctor_plain(output: &OutputContext, report: &DoctorReport) {
+    output.kv("project_root", &report.paths.project_root);
+    output.kv("config", &report.paths.config);
+    output.kv("gdtest_config", &report.paths.gdtest_config);
+    output.kv("gdhealth_config", &report.paths.gdhealth_config);
+    output.kv("manifest", &report.paths.manifest);
+    output.kv("installation", &report.paths.installation);
+
+    for (name, tool) in &report.tools {
+        if let Some(path) = tool.path.as_deref() {
+            output.kv(name, path);
+        } else if let Some(summary) = tool.summary.as_deref() {
+            output.kv(name, summary);
+        }
+        output.kv(
+            &format!("{name}_version"),
+            tool.version.as_deref().unwrap_or("unavailable"),
+        );
+    }
+
+    for (name, tool) in &report.compatibility {
+        output.kv(&format!("{name}_requested"), &tool.requested);
+        output.kv(
+            &format!("{name}_installed"),
+            tool.installed.as_deref().unwrap_or("unknown"),
+        );
+        output.kv(&format!("{name}_compat"), &tool.status);
+        output.kv(&format!("{name}_reason"), &tool.reason);
+        for (key, value) in &tool.extra {
+            output.kv(key, value);
+        }
+    }
+
+    for warning in &report.warnings {
+        output.warn(warning);
+    }
+
+    output.status(&report.status);
+    output.summary(&report.summary);
+}
+
+fn verdict_label(verdict: &CompatibilityVerdict) -> &'static str {
+    match verdict {
         CompatibilityVerdict::Ok => "ok",
         CompatibilityVerdict::Warning => "warning",
         CompatibilityVerdict::Error => "error",
-    };
-    println!("{}_compat={}", tool.name, verdict);
-    println!("{}={}", verdict, tool.reason);
+    }
+}
+
+fn doctor_summary(status: &CompatibilityVerdict) -> String {
+    match status {
+        CompatibilityVerdict::Ok => "toolchain healthy".to_string(),
+        CompatibilityVerdict::Warning => "toolchain healthy with warnings".to_string(),
+        CompatibilityVerdict::Error => "toolchain check failed".to_string(),
+    }
 }
 
 fn command_error(code: u8, message: String) -> anyhow::Error {
     CommandError { code, message }.into()
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    command: String,
+    status: String,
+    paths: DoctorPaths,
+    tools: BTreeMap<String, DoctorToolReport>,
+    compatibility: BTreeMap<String, DoctorCompatibilityReport>,
+    warnings: Vec<String>,
+    summary: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorPaths {
+    project_root: String,
+    config: String,
+    gdtest_config: String,
+    gdhealth_config: String,
+    manifest: String,
+    installation: String,
+}
+
+impl DoctorPaths {
+    fn from_context(context: &ProjectContext) -> Self {
+        Self {
+            project_root: context.root.display().to_string(),
+            config: context.config_path.display().to_string(),
+            gdtest_config: context.gdtest_config_path.display().to_string(),
+            gdhealth_config: context.gdhealth_config_path.display().to_string(),
+            manifest: context.manifest_path.display().to_string(),
+            installation: context.installation_path.display().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorToolReport {
+    path: Option<String>,
+    version: Option<String>,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+}
+
+impl DoctorToolReport {
+    fn ok(path: Option<PathBuf>, version: Option<String>) -> Self {
+        Self {
+            path: path.map(|value| value.display().to_string()),
+            version,
+            status: "ok".to_string(),
+            summary: None,
+        }
+    }
+
+    fn error(path: Option<PathBuf>, version: Option<String>, summary: &str) -> Self {
+        Self {
+            path: path.map(|value| value.display().to_string()),
+            version,
+            status: "error".to_string(),
+            summary: Some(summary.to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCompatibilityReport {
+    requested: String,
+    installed: Option<String>,
+    status: String,
+    reason: String,
+    #[serde(flatten)]
+    extra: BTreeMap<String, String>,
+}
+
+impl DoctorCompatibilityReport {
+    fn from_tool(tool: &tooling::ToolCompatibility) -> Self {
+        Self {
+            requested: tool.requested.clone(),
+            installed: tool.resolved_version.clone(),
+            status: verdict_label(&tool.verdict).to_string(),
+            reason: tool.reason.clone(),
+            extra: tool.extra.iter().cloned().collect(),
+        }
+    }
 }
 
 fn display_error(error: &anyhow::Error) -> String {

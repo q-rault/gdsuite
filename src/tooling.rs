@@ -163,9 +163,8 @@ pub fn load_dotenv_if_present(context: &ProjectContext) -> Result<()> {
             continue;
         }
 
-        let value = parse_dotenv_value(raw_value.trim()).ok_or_else(|| {
-            anyhow!("invalid .env value at {}:{}", path.display(), index + 1)
-        })?;
+        let value = parse_dotenv_value(raw_value.trim())
+            .ok_or_else(|| anyhow!("invalid .env value at {}:{}", path.display(), index + 1))?;
         // Safe here because keys/values come from a user-controlled env file in the project root.
         unsafe {
             env::set_var(key, value);
@@ -445,7 +444,10 @@ pub fn ensure_gdtest_class_cache(
     let runtime_dir = harness_parent_dir(&config.gdtest.harness);
     let runtime_res_dir = res_dir_from_rel_path(&runtime_dir);
     let gdt_res_path = join_res_path(&runtime_res_dir, "gdt.gd");
-    let cache_path = context.root.join(".godot").join("global_script_class_cache.cfg");
+    let cache_path = context
+        .root
+        .join(".godot")
+        .join("global_script_class_cache.cfg");
 
     let cache_has_gdt = fs::read_to_string(&cache_path)
         .map(|body| body.contains(&format!("\"path\": \"{gdt_res_path}\"")))
@@ -634,7 +636,10 @@ fn install_tool(
             } else {
                 let url = github_release_asset_url(owner, repo, tag, name)?;
                 let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
-                download_file(&url, &tool_download_cache_dir(context, name).join(download_name))?
+                download_file(
+                    &url,
+                    &tool_download_cache_dir(context, name).join(download_name),
+                )?
             };
             install_binary_archive(&archive_path, &root, name)?;
         }
@@ -898,7 +903,11 @@ fn http_client() -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))),
+        HeaderValue::from_static(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        )),
     );
     if let Some(token) = github_token() {
         let value = HeaderValue::from_str(&format!("Bearer {token}"))

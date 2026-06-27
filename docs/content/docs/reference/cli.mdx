@@ -5,10 +5,10 @@ description: The current implemented gdsuite command surface as of June 23, 2026
 
 ## Core commands
 
-- `gdsuite init`
+- `gdsuite init [--output pretty|plain]`
 - `gdsuite migrate`
-- `gdsuite setup [--sync-product-configs]`
-- `gdsuite doctor`
+- `gdsuite setup [--sync-product-configs] [--output pretty|plain]`
+- `gdsuite doctor [--output pretty|plain|json]`
 - `gdsuite fmt [--check]`
 - `gdsuite lint [--fix] [--unsafe-fixes] [--report text|json]`
 - `gdsuite typecheck`
@@ -20,11 +20,18 @@ description: The current implemented gdsuite command surface as of June 23, 2026
 ## Common CI commands
 
 ```bash
+gdsuite doctor --output json
 gdsuite check --report json
 gdsuite test --report json
 gdsuite health --report json
 gdsuite report ci
 ```
+
+## Text output modes
+
+- `pretty` is the default for `init`, `setup`, and `doctor`
+- `plain` keeps stable prefixed text lines for logs and shell scripts
+- `json` is currently supported by `doctor`
 
 ## Delegated command examples
 
