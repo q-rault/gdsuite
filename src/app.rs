@@ -476,7 +476,7 @@ fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     if args.first().map(|value| value == "--").unwrap_or(false) {
         args.remove(0);
     }
-    process::run_checked(&toolchain.gdtest, &args, &context.root)
+    process::run_checked_streaming(&toolchain.gdtest, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    process::{Command, ExitStatus},
+    process::{Command, ExitStatus, Stdio},
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -38,6 +38,28 @@ pub fn run_checked(command_path: &Path, args: &[String], cwd: &Path) -> Result<P
         ));
     }
     Ok(output)
+}
+
+pub fn run_checked_streaming(command_path: &Path, args: &[String], cwd: &Path) -> Result<()> {
+    let normalized_path = normalize_windows_path(command_path);
+    let mut command = build_command(&normalized_path);
+    let status = command
+        .args(args)
+        .current_dir(cwd)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("failed to execute {}", command_path.display()))?;
+
+    if !status.success() {
+        return Err(anyhow!(
+            "{} failed with exit code {:?}",
+            command_path.display(),
+            status.code()
+        ));
+    }
+
+    Ok(())
 }
 
 fn build_command(command_path: &Path) -> Command {

@@ -743,7 +743,12 @@ fn delegated_test_uses_default_target_without_forwarded_args() {
     fixture.seed_project();
     fixture.seed_installed_toolchain();
 
-    fixture.cmd().arg("test").assert().success();
+    fixture
+        .cmd()
+        .arg("test")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gdtest running"));
 
     let gdtest_args = fs::read_to_string(fixture.root.join("logs/gdtest-args.txt")).unwrap();
     assert!(gdtest_args.contains("test/"));
@@ -1814,6 +1819,7 @@ if "%1"=="init" (
   echo init>"%CD%\logs\gdtest-init.txt"
   exit /b 0
 )
+echo gdtest running
 echo %*> "%CD%\logs\gdtest-args.txt"
 "#,
         );
