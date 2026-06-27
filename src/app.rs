@@ -497,15 +497,10 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
         return Ok(());
     }
 
-    let forwarded = args.args;
-    let toolchain = load_toolchain_or_error(context)?;
-    let args = if forwarded.is_empty() {
-        build_default_health_args(context, &config, None)?
-    } else {
-        prepare_health_args(context, &config, forwarded)?
-    };
-    process::run_checked(&toolchain.gdhealth, &args, &context.root)
-        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let step = run_health_step(context, &config, None, args.args)?;
+    if step.status == "failed" {
+        return Err(command_error(EXIT_VALIDATION_ERROR, step.summary));
+    }
     Ok(())
 }
 
@@ -1153,10 +1148,11 @@ fn run_health_step(
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let bundle_dir = context.root.join(&config.health.bundle_dir);
+    let summary_path = bundle_dir.join("summary.txt");
     let mut artifacts = Vec::new();
 
     for (name, path) in [
-        ("summary", bundle_dir.join("summary.txt")),
+        ("summary", summary_path.clone()),
         ("health_json", bundle_dir.join("health.json")),
     ] {
         if path.exists() {
@@ -1167,12 +1163,15 @@ fn run_health_step(
         }
     }
 
+    let bundle_summary = read_trimmed_file_if_exists(&summary_path);
     let summary = if output.status.success() {
         if artifacts.is_empty() {
             "health passed".to_string()
         } else {
             format!("health passed; artifacts in {}", bundle_dir.display())
         }
+    } else if let Some(bundle_summary) = bundle_summary {
+        bundle_summary
     } else if !output.stderr.trim().is_empty() {
         output.stderr.trim().to_string()
     } else if !output.stdout.trim().is_empty() {
@@ -1193,6 +1192,15 @@ fn run_health_step(
         findings: Vec::new(),
         artifacts,
     })
+}
+
+fn read_trimmed_file_if_exists(path: &Path) -> Option<String> {
+    let body = fs::read_to_string(path).ok()?;
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 fn build_default_health_args(

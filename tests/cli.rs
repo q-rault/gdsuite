@@ -1007,11 +1007,27 @@ fn health_report_json_writes_artifact_even_when_health_fails() {
         .failure()
         .stdout(predicate::str::contains("\"command\": \"health\""))
         .stdout(predicate::str::contains("\"status\": \"failed\""))
+        .stdout(predicate::str::contains("health summary"))
         .stdout(predicate::str::contains("\"name\": \"health_json\""))
         .stderr(predicate::str::contains("health failed"));
 
     assert!(fixture.root.join("reports/gdsuite/health.json").exists());
     assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
+fn health_failure_surfaces_bundle_summary_in_stderr() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(fixture.root.join("mock-state/health-fail.flag"), "").unwrap();
+
+    fixture
+        .cmd()
+        .arg("health")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("health summary"));
 }
 
 #[test]
