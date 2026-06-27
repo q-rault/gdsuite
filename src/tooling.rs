@@ -67,7 +67,6 @@ pub struct CompatibilityReport {
 
 #[derive(Debug, Clone)]
 pub struct ToolCompatibility {
-    pub name: &'static str,
     pub requested: String,
     pub resolved_version: Option<String>,
     pub verdict: CompatibilityVerdict,
@@ -1256,7 +1255,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             Vec::new(),
         ),
         None => ToolCompatibility {
-            name: "gdtoolkit",
             requested: state.tools.gdtoolkit.requested.render_requested(),
             resolved_version: None,
             verdict: CompatibilityVerdict::Error,
@@ -1293,7 +1291,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             report
         }
         (Some(version), Some(harness)) => ToolCompatibility {
-            name: "gdtest",
             requested: state.tools.gdtest.requested.render_requested(),
             resolved_version: Some(version.clone()),
             verdict: CompatibilityVerdict::Error,
@@ -1301,7 +1298,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             extra: vec![("gdtest_harness".to_string(), harness.clone())],
         },
         (Some(version), None) => ToolCompatibility {
-            name: "gdtest",
             requested: state.tools.gdtest.requested.render_requested(),
             resolved_version: Some(version.clone()),
             verdict: CompatibilityVerdict::Error,
@@ -1309,7 +1305,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             extra: Vec::new(),
         },
         (None, _) => ToolCompatibility {
-            name: "gdtest",
             requested: state.tools.gdtest.requested.render_requested(),
             resolved_version: None,
             verdict: CompatibilityVerdict::Error,
@@ -1335,7 +1330,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             )
         }
         (Some(version), Some(schema)) => ToolCompatibility {
-            name: "gdhealth",
             requested: state.tools.gdhealth.requested.render_requested(),
             resolved_version: Some(version.clone()),
             verdict: CompatibilityVerdict::Error,
@@ -1346,7 +1340,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             extra: vec![("gdhealth_schema".to_string(), schema.to_string())],
         },
         (Some(version), None) => ToolCompatibility {
-            name: "gdhealth",
             requested: state.tools.gdhealth.requested.render_requested(),
             resolved_version: Some(version.clone()),
             verdict: CompatibilityVerdict::Error,
@@ -1354,7 +1347,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
             extra: Vec::new(),
         },
         (None, _) => ToolCompatibility {
-            name: "gdhealth",
             requested: state.tools.gdhealth.requested.render_requested(),
             resolved_version: None,
             verdict: CompatibilityVerdict::Error,
@@ -1392,7 +1384,7 @@ pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
 }
 
 fn evaluate_versioned_tool(
-    name: &'static str,
+    tool_name: &'static str,
     requested: &ToolAcquireSpec,
     version: &str,
     release_requested: &ToolAcquireSpec,
@@ -1408,7 +1400,7 @@ fn evaluate_versioned_tool(
         (
             CompatibilityVerdict::Warning,
             format!(
-                "{name} was installed from `{}` and is outside the suite-tested set",
+                "{tool_name} was installed from `{}` and is outside the suite-tested set",
                 requested_rendered
             ),
         )
@@ -1416,19 +1408,18 @@ fn evaluate_versioned_tool(
         (
             CompatibilityVerdict::Warning,
             format!(
-                "{name} {} is outside the suite-tested version {}",
+                "{tool_name} {} is outside the suite-tested version {}",
                 version, tested_version
             ),
         )
     } else {
         (
             CompatibilityVerdict::Ok,
-            format!("{name} matches the suite-tested contract"),
+            format!("{tool_name} matches the suite-tested contract"),
         )
     };
 
     ToolCompatibility {
-        name,
         requested: requested_rendered,
         resolved_version: Some(version.to_string()),
         verdict,
