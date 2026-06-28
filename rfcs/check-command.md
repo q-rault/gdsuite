@@ -2,139 +2,114 @@
 
 ## Summary
 
-Define `gdsuite check` as the single fast validation command.
+Define `gdsuite check` as the single fast static gate for everyday GDScript
+validation.
 
-`gdsuite check` should run:
+`gdsuite check` should answer one narrow question:
 
-- formatting check
-- lint check
-- type-aware validation
+> Is this project still statically clean enough to keep working?
 
-If the chosen linter already provides the required GDScript type-aware pass,
-`check` should not run a second redundant typecheck step. If it does not,
-`check` should run a dedicated GDScript typecheck step.
+That fast gate should cover:
 
-`gdsuite check` must not run tests.
-`gdsuite check` must not run `gdhealth`.
+- formatting
+- linting
+- GDScript type checking
+
+`gdsuite check` must stay separate from:
+
+- `gdsuite test`, which answers behavioral correctness
+- `gdsuite health`, which answers architecture and policy correctness
 
 ## Motivation
 
-The command should answer one narrow question:
+Today there is no single obvious command that means "is my GDScript correct
+enough to continue?" without also pulling in slower or conceptually different
+validation.
 
-> Is this change still clean enough to continue working?
+That gap causes confusion:
 
-That question is different from:
+- `fmt` is too narrow
+- `lint` is closer, but still does not clearly communicate the full fast gate
+- `test` is slower and solves a different problem
+- `health` is deeper policy analysis, not the normal inner loop
 
-- "Do the tests pass?" (`gdsuite test`)
-- "Is the architecture healthy?" (`gdhealth`, if it exists at all)
-
-Mixing those concerns into one umbrella command makes the fast path slower,
-harder to explain, and less predictable.
+`gdsuite check` should be the stable answer to that everyday workflow question.
+It should be fast, explicit, and easy to explain in docs and CI snippets.
 
 ## Goals
 
-- Make `gdsuite check` obvious and stable.
-- Keep the default local gate fast.
-- Avoid hidden pipeline shape behind configuration names such as `local`,
-  `ci`, or `strict`.
-- Keep type-aware validation in the fast path.
-- Keep slow validation separate.
+- Make `gdsuite check` the obvious default static validation command.
+- Keep the command fast enough for routine local use.
+- Give `check` one stable meaning everywhere.
+- Keep type checking in the fast path.
+- Keep slow or policy-oriented validation separate.
 
 ## Non-Goals
 
 - Running the full test suite.
-- Running architecture health analysis.
-- Turning `check` into a configurable workflow DSL.
-- Reimplementing delegated product logic inside `gdsuite`.
+- Running `gdhealth`.
+- Turning `check` into a profile selector or workflow DSL.
+- Defining report artifact behavior as part of the `check` contract.
+- Reimplementing delegated tool logic inside `gdsuite`.
 
-## Proposed Command
+## Command Syntax
 
-The command surface should be:
+The intended command surface is:
 
-```bash
-gdsuite check
-gdsuite check --fix
-```
+| Command / flag | Meaning |
+| --- | --- |
+| `gdsuite check` | Run the full fast static gate. |
+| `gdsuite check --fix` | Apply safe automatic fixes, then run the remaining enabled checks. |
+| `gdsuite check --no-fmt` | Skip the formatting phase. |
+| `gdsuite check --no-lint` | Skip the lint phase. |
+| `gdsuite check --no-typecheck` | Skip the typecheck phase. |
 
-No `--profile`.
-No built-in `local`, `ci`, or `strict` variants.
-No `--report json`.
+Rules:
 
-If the product needs a full CI-oriented composition later, that should be a
-separate command or an explicit CI script, not hidden behind `check`.
+- `--fix` only changes whether safe fixes are attempted before verification.
+- `--no-fmt`, `--no-lint`, and `--no-typecheck` only disable named phases.
+- The command must fail with a usage error if all meaningful phases are disabled.
+- The command must not grow `--profile`, `--report`, `ci`, `strict`, or similar
+  contract-shaping switches.
 
 ## Behavior
 
-`gdsuite check` should run a fixed fast pipeline in order:
+`gdsuite check` should run sequentially and fail fast.
 
-1. format verification
-2. lint verification
-3. type-aware verification
+The pipeline order is:
 
-The type-aware stage has two valid implementations:
+1. formatting
+2. linting
+3. type checking
 
-- use the linter's own type-aware pass, if that capability exists and is the
-  intended source of truth
+Behavior rules:
+
+- each enabled phase starts only after the previous enabled phase succeeds
+- the command stops at the first failing enabled phase
+- later phases do not run after a failure
+- `test` and `health` are never folded into this pipeline
+
+The typecheck phase may be implemented in one of two ways:
+
+- use the linter's own type-aware mode if that is the intended source of truth
 - run a dedicated GDScript typecheck step otherwise
 
-The important contract is the user-facing outcome, not the internal split.
-Users should get one fast "static correctness" command.
-
-## Fix Mode
-
-`gdsuite check --fix` should be part of the primary workflow.
-
-In fix mode, `check` should:
-
-- apply formatting fixes
-- apply safe lint fixes where available
-- still run the remaining static checks after fixes are applied
-- fail if unfixable lint or type issues remain
-
-This matches the intended everyday loop:
-
-- `gdsuite check` to verify
-- `gdsuite check --fix` to auto-correct what the suite can safely correct
-
-If the project later gains staged-file support, `gdsuite check --fix` is the
-right default hook command for staged paths, following the same role `vp check
---fix` plays in VitePlus workflows.
-
-## Optional Step Flags
-
-If `check` exposes step-selection flags, they should stay narrow and explicit:
-
-- `--fix`
-- `--no-fmt`
-- `--no-lint`
-
-These flags are useful only for temporarily narrowing the fast gate during
-local iteration or enabling safe automatic cleanup.
-
-`gdsuite check --no-fmt --no-lint` should be an error.
-The command must not silently succeed when all meaningful work has been turned
-off.
+That implementation detail does not change the user-facing contract. Users
+should still experience one fast static gate.
 
 ## Output Rules
 
-`gdsuite check` should be human-first terminal output, not delegated command
-echo.
+`gdsuite check` output should be human-first.
 
-It should:
+It must:
 
-- not print delegated commands
-- not print internal subprocess invocations
-- print one `pass:` line only after a phase completes successfully
-- mention type checks in the lint success line only when type-check is enabled
+- print one `pass:` line after each successful enabled phase
+- print one `error:` line before failure diagnostics
+- print the raw diagnostics after the `error:` line
+- avoid echoing delegated subcommands or internal subprocess invocations
+- end failure output with a short remediation-oriented summary sentence
 
 Representative success shape:
-
-```text
-pass: Formatting check passed
-pass: Lint and type checks passed
-```
-
-If lint does not own type checking, the success output may instead be:
 
 ```text
 pass: Formatting check passed
@@ -142,135 +117,113 @@ pass: Lint check passed
 pass: GDScript type check passed
 ```
 
-On failure, `check` should print:
+If lint owns the type-aware pass, the final two lines may collapse into:
 
-1. a human-readable `error:` line
-2. the raw diagnostics
-3. a blank line
-4. a final summary sentence
+```text
+pass: Formatting check passed
+pass: Lint and type checks passed
+```
 
-Representative failure output:
+Representative failure shape:
 
 ```text
 error: Formatting issues found
-src/index.js
-steps.json
+res://player/player.gd
+res://ui/hud.gd
 
 Found formatting issues in 2 files. Run `gdsuite check --fix` to apply fixes.
 ```
 
 ```text
-error: Lint or type issues found
-...diagnostics...
+error: GDScript type check failed
+res://combat/hitbox.gd:41 Cannot infer the type of "target"
 
-Found 3 errors and 1 warning in 2 files.
+Found 1 type error. Fix the reported issue and rerun `gdsuite check`.
 ```
 
-The exact wording can be adapted for GDScript, but the shape should stay stable.
-That structure is easier to scan than interleaved tool banners or echoed
-subcommands.
+## Fix Mode
+
+`gdsuite check --fix` should be part of the normal local workflow.
+
+In fix mode, `check` should:
+
+- apply formatting fixes when available
+- apply safe lint fixes when available
+- rerun the remaining enabled phases after applying fixes
+- still fail if unfixable lint or type errors remain
+
+This keeps the main loop simple:
+
+- `gdsuite check` to verify
+- `gdsuite check --fix` to auto-correct what the suite can safely correct
+
+## Relationship To Existing Commands
+
+| Command | Primary question | Speed / depth | Included in `check`? |
+| --- | --- | --- | --- |
+| `gdsuite check` | Is the code statically clean enough to continue? | Fast local gate | Yes |
+| `gdsuite test` | Does behavior still pass the test suite? | Slower behavioral validation | No |
+| `gdsuite health` | Does the project still satisfy architecture and policy rules? | Deeper structural validation | No |
+
+This split is intentional. A command that tries to answer all three questions at
+once becomes slower, harder to teach, and less predictable.
 
 ## Why No Profiles
 
-Profiles add indirection without enough benefit for this command.
+`check` should have one stable meaning, not a hidden pipeline selected by a
+profile name.
 
-With profiles, the user has to know hidden pipeline meaning:
+Reject:
 
-- `check --profile ci`
-- `check --profile strict`
+- `gdsuite check --profile ci`
+- `gdsuite check --profile strict`
+- any other profile-driven command shape
 
-That is weaker than a command whose meaning is fixed.
+Reasons:
 
-For `check`, the abstraction cost is not worth it:
+- profiles make the command less discoverable
+- profiles weaken the distinction between fast and slow validation
+- profiles make the docs harder to keep precise
 
-- it makes the command less discoverable
-- it makes docs harder to write clearly
-- it blurs the line between fast checks and slow validation
-
-The command should mean the same thing everywhere.
-
-## Relationship To `test`
-
-`gdsuite test` should remain separate because it is a slow runner.
-
-Tests are important, but they answer a different question than `check`.
-Making tests part of `check` by default will either slow the command down too
-much or force users to learn conditional behavior. Both are worse than a clean
-split.
-
-The intended mental model is:
-
-- `gdsuite check`: fast static gate
-- `gdsuite test`: slower behavioral validation
-
-## Relationship To `gdhealth`
-
-`gdhealth` should not be part of `check`.
-
-Architecture analysis, thresholds, ownership rules, and similar policy checks
-are not lint. They are a different category of validation with different cost,
-different review semantics, and different failure discussion.
-
-If `gdhealth` continues to exist in the broader ecosystem, it should remain a
-separate tool path rather than being mixed into the fast `check` contract.
-
-The suite should avoid treating `gdhealth` as if it were just "lint with more
-rules." That boundary is conceptually wrong and makes the CLI harder to reason
-about.
+If the project needs explicit CI composition, it should use separate commands
+and scripts instead of redefining `check`.
 
 ## Errors And Exit Codes
 
-`gdsuite check` should fail when:
+`gdsuite check` should exit `0` only when every enabled phase succeeds.
 
-- the project is not bootstrapped
-- required setup state is missing
-- `--no-fmt --no-lint` disables the whole command
-- format verification fails
-- lint verification fails
-- the type-aware stage fails
+It should exit non-zero when:
+
+- required local setup or tooling is missing
+- flag combinations disable the entire command
+- formatting fails
+- linting fails
+- type checking fails
 - fix mode completes but unfixable issues remain
 
-The command should provide direct remediation guidance, usually pointing to
-`gdsuite init` or `gdsuite setup` when local setup state is missing.
+The command should provide direct remediation hints when setup state is missing,
+usually pointing the user to `gdsuite init` or `gdsuite setup`.
 
 ## Drawbacks
 
 - Teams lose one generic mechanism for naming arbitrary validation pipelines.
-- Some future CI flows may need a separate top-level command instead of reusing
+- Some future automation flows may need explicit scripts instead of reusing
   `check`.
 
-These are acceptable tradeoffs because they preserve the meaning of the most
+These tradeoffs are acceptable because they preserve the meaning of the most
 important everyday command.
 
 ## Alternatives Considered
 
 ### Keep Profiles
 
-Rejected.
+Rejected. The command becomes less obvious and starts to hide pipeline meaning
+behind names instead of behavior.
 
-This makes `check` more abstract, but not clearer. The user has to memorize
-named pipeline variants instead of learning one command with one purpose.
+### Put `gdhealth` Inside `check`
 
-### Keep `gdhealth` Inside `check`
-
-Rejected.
-
-That turns the fast gate into a mixed-purpose umbrella command and weakens the
-boundary between lint/static validation and deeper architecture analysis.
+Rejected. Architecture and policy analysis are not part of the fast static gate.
 
 ### Put Tests Inside `check`
 
-Rejected.
-
-Tests are slower and belong to a separate command with separate expectations.
-
-## Alignment With VitePlus
-
-This RFC is now intentionally closer to the VitePlus `check-command` model:
-
-- one command
-- one stable meaning
-- optimized for the fast path
-- deeper validation remains separate
-
-That structure fits `gdsuite` better than a profile-driven `check` model.
+Rejected. Tests are slower and answer a different question.

@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{
-        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs,
-        OutputModeArg, ReportArgs, RunArgs, SetupArgs,
+        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs, OutputModeArg,
+        ReportArgs, RunArgs, SetupArgs,
     },
     config::{CompatibilityVerdict, GdsuiteConfig, Manifest},
-    fixers, migrate, process,
+    fixers, migrate,
     output::{CommandScope, OutputContext, OutputMode},
+    process,
     tooling::{self, ProjectContext},
 };
 
@@ -205,7 +206,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     tool_reports.insert(
         "python".to_string(),
         match python {
-            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
+            }
             None => {
                 missing.push("python".to_string());
                 DoctorToolReport::error(
@@ -224,7 +227,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     tool_reports.insert(
         "gdformat".to_string(),
         match gdformat {
-            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
+            }
             None => {
                 missing.push("gdformat".to_string());
                 DoctorToolReport::error(
@@ -243,7 +248,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     tool_reports.insert(
         "gdlint".to_string(),
         match gdlint {
-            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
+            }
             None => {
                 missing.push("gdlint".to_string());
                 DoctorToolReport::error(
@@ -262,7 +269,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     tool_reports.insert(
         "gdtest".to_string(),
         match gdtest {
-            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"])),
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
+            }
             None => {
                 missing.push("gdtest".to_string());
                 DoctorToolReport::error(
@@ -281,7 +290,9 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     tool_reports.insert(
         "gdhealth".to_string(),
         match gdhealth {
-            Some(path) => DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--help"])),
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--help"]))
+            }
             None => {
                 missing.push("gdhealth".to_string());
                 DoctorToolReport::error(
@@ -367,19 +378,17 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
 
     match status {
         CompatibilityVerdict::Ok | CompatibilityVerdict::Warning => Ok(()),
-        CompatibilityVerdict::Error => {
-            Err(command_error(
-                EXIT_TOOLCHAIN_ERROR,
-                if missing.is_empty() {
-                    "toolchain compatibility check failed".to_string()
-                } else {
-                    format!(
-                        "missing tools: {}; run `gdsuite setup` to install the local toolchain",
-                        missing.join(", ")
-                    )
-                },
-            ))
-        }
+        CompatibilityVerdict::Error => Err(command_error(
+            EXIT_TOOLCHAIN_ERROR,
+            if missing.is_empty() {
+                "toolchain compatibility check failed".to_string()
+            } else {
+                format!(
+                    "missing tools: {}; run `gdsuite setup` to install the local toolchain",
+                    missing.join(", ")
+                )
+            },
+        )),
     }
 }
 
@@ -848,7 +857,9 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
     output.kv("installation", &report.paths.installation);
     output.blank();
 
-    for name in ["godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth"] {
+    for name in [
+        "godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth",
+    ] {
         if let Some(tool) = report.tools.get(name) {
             match tool.status.as_str() {
                 "ok" => {
@@ -857,7 +868,11 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
                         output.kv("version", version);
                     }
                 }
-                _ => output.warn(format!("{} {}", name, tool.summary.as_deref().unwrap_or("unavailable"))),
+                _ => output.warn(format!(
+                    "{} {}",
+                    name,
+                    tool.summary.as_deref().unwrap_or("unavailable")
+                )),
             }
         }
     }

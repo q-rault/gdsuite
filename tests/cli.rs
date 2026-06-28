@@ -30,7 +30,9 @@ fn setup_generates_project_local_toolchain_and_configs() {
         .stdout(predicate::str::contains(
             "[gdsuite:setup] step  installing local toolchain",
         ))
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
     assert!(fixture.root.join("gdsuite.toml").exists());
@@ -165,7 +167,9 @@ fn setup_supports_crate_sources() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
     assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
@@ -301,7 +305,9 @@ fn setup_supports_github_release_repo_with_auth_token() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     assert!(
         fixture
@@ -387,7 +393,9 @@ fn setup_loads_github_token_from_dotenv() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     assert!(
         fixture
@@ -425,7 +433,9 @@ fn setup_supports_non_sibling_local_paths() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     assert!(
         fixture
@@ -611,7 +621,9 @@ fn doctor_plain_output_keeps_prefixed_key_value_lines() {
         .assert()
         .success()
         .stdout(predicate::str::contains("[gdsuite:doctor] project_root="))
-        .stdout(predicate::str::contains("[gdsuite:doctor] gdtest_compat=ok"))
+        .stdout(predicate::str::contains(
+            "[gdsuite:doctor] gdtest_compat=ok",
+        ))
         .stdout(predicate::str::contains("[gdsuite:doctor] status=ok"));
 }
 
@@ -1273,7 +1285,9 @@ fn setup_is_rerunnable_with_partial_state() {
         .arg("setup")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 }
 
 #[test]
@@ -1346,7 +1360,9 @@ fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_con
         .args(["setup", "--sync-product-configs"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:setup] ok    setup complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:setup] ok    setup complete",
+        ));
 
     let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
     assert!(!gdhealth.contains("\".gdsuite/**\""));

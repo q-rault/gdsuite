@@ -24,21 +24,22 @@ Use this page when you want fast feedback during normal development or when you 
 gdsuite check
 ```
 
-2. If CI or automation needs a machine-readable envelope, ask for JSON explicitly.
+2. Use `--fix` when you want the suite to apply safe automatic cleanup before it verifies the remaining phases.
 
 ```bash
-gdsuite check --report json
+gdsuite check --fix
 ```
 
 ## What success looks like
 
-A successful `check` run means the fixed fast pipeline passed: formatting, linting, and GDScript type checking. If `gdsuite.toml` is missing, `check` still runs using built-in defaults. The local toolchain still has to exist under `.gdsuite/state/manifest.json`.
+A successful `check` run means the fixed fast pipeline passed: formatting, linting, and GDScript type checking. `check` is sequential and fail-fast, so later phases run only when earlier phases succeed. If `gdsuite.toml` is missing, `check` still runs using built-in defaults. The local toolchain still has to exist under `.gdsuite/state/manifest.json`.
 
 ## Common mistakes
 
 - Assuming `gdsuite check` runs tests or health checks — it does not; use `gdsuite test` and `gdsuite health` separately
-- Forgetting that `check` is always the same fixed pipeline regardless of context; there are no profiles
+- Expecting `check` to change meaning based on profiles or CI context
+- Expecting report-generation options to be part of the core `check` contract
 
 ## Where to go next
 
-Next step: read [gdsuite test](/workflow-test) for behavioral validation, or run `gdsuite health` directly for architecture analysis.
+Next step: read [gdsuite test](/workflow-test) for behavioral validation, [gdsuite health](/workflow-health) for architecture analysis, or [CI](/ci) for explicit machine-readable pipeline composition.

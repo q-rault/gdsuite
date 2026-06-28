@@ -73,8 +73,12 @@ impl OutputContext {
 
     pub fn status(&self, status: &str) {
         match self.mode {
-            OutputMode::Pretty => self.write_stdout_line(&format!("{} status {}", self.prefix(), status)),
-            OutputMode::Plain => self.write_stdout_line(&format!("{} status={status}", self.prefix())),
+            OutputMode::Pretty => {
+                self.write_stdout_line(&format!("{} status {}", self.prefix(), status))
+            }
+            OutputMode::Plain => {
+                self.write_stdout_line(&format!("{} status={status}", self.prefix()))
+            }
             OutputMode::Json => {}
         }
     }
@@ -82,7 +86,9 @@ impl OutputContext {
     pub fn summary(&self, message: &str) {
         match self.mode {
             OutputMode::Pretty => self.ok(message),
-            OutputMode::Plain => self.write_stdout_line(&format!("{} summary={message}", self.prefix())),
+            OutputMode::Plain => {
+                self.write_stdout_line(&format!("{} summary={message}", self.prefix()))
+            }
             OutputMode::Json => {}
         }
     }
@@ -90,7 +96,9 @@ impl OutputContext {
     pub fn kv(&self, key: &str, value: &str) {
         match self.mode {
             OutputMode::Pretty => self.info(format!("{key:<13} {value}")),
-            OutputMode::Plain => self.write_stdout_line(&format!("{} {key}={value}", self.prefix())),
+            OutputMode::Plain => {
+                self.write_stdout_line(&format!("{} {key}={value}", self.prefix()))
+            }
             OutputMode::Json => {}
         }
     }

@@ -1,32 +1,28 @@
 ---
 title: Profiles
-description: Named suite pipelines that decide which steps run under gdsuite check.
+description: Historical note: named profiles are not the intended way to shape `gdsuite check`.
 ---
 
-Profiles let `gdsuite check` mean different things in different contexts without changing the command name.
+This page exists to record a rejected direction, not an active `check` contract.
 
-## Built-in defaults
+`gdsuite check` should not derive its meaning from named profiles such as
+`local`, `ci`, or `strict`. The RFC direction for the command is a fixed fast
+static gate with explicit boundaries around `test` and `health`.
 
-- `local` -> `fmt`, `lint`, `typecheck`
-- `ci` -> `fmt`, `lint`, `typecheck`, `test`, `health`
-- `strict` -> `fmt`, `lint`, `typecheck`, `test`, `health`, with health enforcement tightened to `warning`
+## Why this page still exists
 
-## Example
+Older drafts explored profile-driven pipelines. That approach was rejected
+because it made `check` less obvious and blurred the difference between fast
+local validation and slower CI-oriented composition.
 
-```toml
-[profiles.strict]
-pipeline = ["fmt", "lint", "typecheck", "test", "health"]
-health_fail_on = "warning"
-```
+## What to do instead
 
-## Important behavior
+- Use `gdsuite check` for the fixed fast static gate.
+- Use `gdsuite test` and `gdsuite health` as separate depth commands.
+- Use explicit CI scripts and `gdsuite report ci` when automation needs a
+  machine-readable pipeline.
 
-`gdsuite check` defaults to `local`. Override it with:
+## Current status
 
-```bash
-gdsuite check --profile ci
-```
-
-## Next step
-
-Next step: read [CI](/ci) for the explicit pipeline shape you should document in automation.
+Do not document or implement profile-shaped meanings for `gdsuite check` from
+this page. Treat the profile model as historical context only.

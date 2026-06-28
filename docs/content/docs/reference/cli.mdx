@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: The current implemented gdsuite command surface as of June 23, 2026.
+description: The documented gdsuite command surface and the intended stable meaning of the main commands.
 ---
 
 ## Core commands
@@ -14,18 +14,28 @@ description: The current implemented gdsuite command surface as of June 23, 2026
 - `gdsuite typecheck`
 - `gdsuite test [--report text|json] -- ...`
 - `gdsuite health [--report text|json] -- ...`
-- `gdsuite check [--profile <name>] [--report text|json]`
+- `gdsuite check [--fix] [--no-fmt] [--no-lint] [--no-typecheck]`
 - `gdsuite report [latest|check|test|health|ci]`
 
 ## Common CI commands
 
 ```bash
 gdsuite doctor --output json
-gdsuite check --report json
+gdsuite check
 gdsuite test --report json
 gdsuite health --report json
 gdsuite report ci
 ```
+
+## Check contract
+
+`gdsuite check` is the fast static gate. Its intended stable meaning is:
+
+- formatting
+- linting
+- GDScript type checking
+
+It is not the place where `test`, `health`, profiles, or CI composition are hidden.
 
 ## Text output modes
 
