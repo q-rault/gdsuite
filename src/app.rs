@@ -565,12 +565,8 @@ fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
 fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let steps = vec![
-        run_fmt_step(context, &config, !args.fix)?,
-        run_lint_step(context, &config, args.fix)?,
-        run_typecheck_step(context, &config)?,
-    ];
-    finish_pipeline(context, &config, "check", report_mode, steps)
+    let steps = run_check_steps(context, &config, args.fix)?;
+    finish_check_pipeline(context, &config, report_mode, steps)
 }
 
 fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
@@ -1059,31 +1055,116 @@ fn display_error(error: &anyhow::Error) -> String {
         .unwrap_or_else(|| error.to_string())
 }
 
+#[derive(Debug, Clone)]
+struct CheckStepResult {
+    report: StepReport,
+    success_message: String,
+    failure_message: String,
+    diagnostics: Vec<String>,
+    failure_summary: String,
+}
+
+impl CheckStepResult {
+    fn passed(report: StepReport, label: &str, tool: &str, duration_ms: u128) -> Self {
+        Self {
+            report,
+            success_message: format!("{label} ({tool}, {duration_ms}ms)"),
+            failure_message: String::new(),
+            diagnostics: Vec::new(),
+            failure_summary: String::new(),
+        }
+    }
+
+    fn failed(
+        report: StepReport,
+        label: &str,
+        tool: &str,
+        duration_ms: u128,
+        diagnostics: Vec<String>,
+        failure_summary: String,
+    ) -> Self {
+        Self {
+            report,
+            success_message: String::new(),
+            failure_message: format!("{label} ({tool}, {duration_ms}ms)"),
+            diagnostics,
+            failure_summary,
+        }
+    }
+}
+
+fn run_check_steps(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    fix: bool,
+) -> Result<Vec<CheckStepResult>> {
+    let mut steps = Vec::new();
+
+    let fmt = run_fmt_step(context, config, !fix)?;
+    let failed = fmt.report.status == "failed";
+    steps.push(fmt);
+    if failed {
+        return Ok(steps);
+    }
+
+    let lint = run_lint_step(context, config, fix)?;
+    let failed = lint.report.status == "failed";
+    steps.push(lint);
+    if failed {
+        return Ok(steps);
+    }
+
+    let typecheck = run_typecheck_step(context, config)?;
+    steps.push(typecheck);
+
+    Ok(steps)
+}
+
 fn run_fmt_step(
     context: &ProjectContext,
     config: &GdsuiteConfig,
     check: bool,
-) -> Result<StepReport> {
+) -> Result<CheckStepResult> {
     let started = Instant::now();
-    match fmt_with_config(context, config, FmtArgs { check }) {
-        Ok(()) => Ok(StepReport::ok(
-            "fmt",
-            started.elapsed().as_millis(),
-            "format check passed",
-        )),
-        Err(error) => Ok(StepReport::failed(
-            "fmt",
-            started.elapsed().as_millis(),
-            display_error(&error),
-        )),
+    let toolchain = load_toolchain_or_error(context)?;
+    let files = fixers::discover_typecheck_files(context, config)?;
+    let mut cmd_args = Vec::new();
+    if check {
+        cmd_args.push("--check".to_string());
     }
+    cmd_args.extend(files.iter().map(|path| path.display().to_string()));
+    let output = process::run(&toolchain.gdformat, &cmd_args, &context.root)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let duration_ms = started.elapsed().as_millis();
+
+    if output.status.success() {
+        return Ok(CheckStepResult::passed(
+            StepReport::ok("fmt", duration_ms, "format check passed"),
+            "Formatting check passed",
+            "fmt",
+            duration_ms,
+        ));
+    }
+
+    let diagnostics = collect_nonempty_lines(&output.stdout, &output.stderr);
+    Ok(CheckStepResult::failed(
+        StepReport::failed("fmt", duration_ms, "formatting issues found"),
+        "Formatting issues found",
+        "fmt",
+        duration_ms,
+        diagnostics.clone(),
+        format!(
+            "{}. Run `gdsuite check --fix` to apply fixes.",
+            format_formatting_summary(&diagnostics)
+        ),
+    ))
 }
 
 fn run_lint_step(
     context: &ProjectContext,
     config: &GdsuiteConfig,
     fix: bool,
-) -> Result<StepReport> {
+) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
     if fix {
@@ -1100,36 +1181,79 @@ fn run_lint_step(
         .map(serde_json::to_value)
         .collect::<serde_json::Result<Vec<_>>>()?;
 
-    Ok(StepReport {
+    let duration_ms = started.elapsed().as_millis();
+    let report = StepReport {
         name: "lint".to_string(),
         status: if output.status.success() {
             "ok".to_string()
         } else {
             "failed".to_string()
         },
-        duration_ms: started.elapsed().as_millis(),
+        duration_ms,
         summary: lint_report
             .summary
+            .clone()
             .unwrap_or_else(|| "lint completed".to_string()),
         findings,
         artifacts: Vec::new(),
-    })
+    };
+
+    if output.status.success() {
+        return Ok(CheckStepResult::passed(
+            report,
+            "Lint check passed",
+            "lint",
+            duration_ms,
+        ));
+    }
+
+    Ok(CheckStepResult::failed(
+        report,
+        "Lint check failed",
+        "lint",
+        duration_ms,
+        lint_diagnostics(&lint_report),
+        lint_failure_summary(&lint_report),
+    ))
 }
 
-fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<StepReport> {
+fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
     let started = Instant::now();
-    match typecheck_with_config(context, config) {
-        Ok(()) => Ok(StepReport::ok(
+    let toolchain = load_toolchain_or_error(context)?;
+    let files = fixers::discover_script_files(context, config)?;
+    let checker_path = context.state_dir.join(TYPECHECK_SCRIPT_NAME);
+    write_typecheck_script(&checker_path, &files)?;
+    let args = vec![
+        "--headless".to_string(),
+        "--script".to_string(),
+        format!("res://.gdsuite/state/{TYPECHECK_SCRIPT_NAME}"),
+    ];
+    let output = process::run(&toolchain.godot_exe, &args, &context.root)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let duration_ms = started.elapsed().as_millis();
+
+    if output.status.success() {
+        return Ok(CheckStepResult::passed(
+            StepReport::ok("typecheck", duration_ms, "typecheck passed"),
+            "GDScript type check passed",
             "typecheck",
-            started.elapsed().as_millis(),
-            "typecheck passed",
-        )),
-        Err(error) => Ok(StepReport::failed(
-            "typecheck",
-            started.elapsed().as_millis(),
-            display_error(&error),
-        )),
+            duration_ms,
+        ));
     }
+
+    let diagnostics = collect_nonempty_lines(&output.stdout, &output.stderr)
+        .into_iter()
+        .filter(|line| line != "typecheck: ok")
+        .collect::<Vec<_>>();
+
+    Ok(CheckStepResult::failed(
+        StepReport::failed("typecheck", duration_ms, "typecheck failed"),
+        "GDScript type check failed",
+        "typecheck",
+        duration_ms,
+        diagnostics.clone(),
+        typecheck_failure_summary(&diagnostics),
+    ))
 }
 
 fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
@@ -1269,31 +1393,89 @@ fn write_health_overlay_config(
     Ok(overlay_path)
 }
 
-fn finish_pipeline(
+fn finish_check_pipeline(
     context: &ProjectContext,
     config: &GdsuiteConfig,
-    command: &str,
     report_mode: String,
-    steps: Vec<StepReport>,
+    steps: Vec<CheckStepResult>,
 ) -> Result<()> {
-    let report = SuiteReport::from_steps(command, context, steps);
+    let report = SuiteReport::from_steps(
+        "check",
+        context,
+        steps.iter().map(|step| step.report.clone()).collect(),
+    );
     if report_mode == "json" {
-        print_and_store_report(context, config, command, &report)?;
-    } else if report.status == "ok" {
-        println!("{command} passed");
+        print_and_store_report(context, config, "check", &report)?;
     } else {
-        for step in report.steps.iter().filter(|step| step.status == "failed") {
-            println!("{}: {}", step.name, step.summary);
-        }
+        render_check_text_results(&steps);
     }
 
     if report.status == "failed" {
         return Err(command_error(
             EXIT_VALIDATION_ERROR,
-            "one or more checks failed".to_string(),
+            "check failed".to_string(),
         ));
     }
     Ok(())
+}
+
+fn render_check_text_results(steps: &[CheckStepResult]) {
+    for step in steps {
+        if step.report.status == "ok" {
+            println!("pass: {}", step.success_message);
+            continue;
+        }
+
+        println!("error: {}", step.failure_message);
+        for line in &step.diagnostics {
+            println!("{line}");
+        }
+        println!();
+        println!("{}", step.failure_summary);
+        break;
+    }
+}
+
+fn collect_nonempty_lines(stdout: &str, stderr: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn format_formatting_summary(diagnostics: &[String]) -> String {
+    let count = diagnostics.len();
+    if count == 1 {
+        "Found formatting issues in 1 file".to_string()
+    } else {
+        format!("Found formatting issues in {count} files")
+    }
+}
+
+fn lint_diagnostics(report: &JsonLintReport) -> Vec<String> {
+    let mut diagnostics = report
+        .findings
+        .iter()
+        .map(|finding| format!("{}:{} {}", finding.file, finding.line, finding.message))
+        .collect::<Vec<_>>();
+    diagnostics.extend(report.raw_stdout.iter().cloned());
+    diagnostics.extend(report.stderr.iter().cloned());
+    diagnostics
+}
+
+fn lint_failure_summary(report: &JsonLintReport) -> String {
+    let count = report.findings.len();
+    let noun = if count == 1 { "error" } else { "errors" };
+    format!("Found {count} lint {noun}. Fix the reported issue and rerun `gdsuite check`.")
+}
+
+fn typecheck_failure_summary(diagnostics: &[String]) -> String {
+    let count = diagnostics.len();
+    let noun = if count == 1 { "error" } else { "errors" };
+    format!("Found {count} type {noun}. Fix the reported issue and rerun `gdsuite check`.")
 }
 
 fn print_and_store_report(

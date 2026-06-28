@@ -851,7 +851,61 @@ fn health_uses_overlay_config_that_enforces_suite_excludes() {
 }
 
 #[test]
-fn check_reports_aggregate_failure() {
+fn check_prints_pass_lines_for_each_successful_phase() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "pass: Formatting check passed (fmt,",
+        ))
+        .stdout(predicate::str::contains("pass: Lint check passed (lint,"))
+        .stdout(predicate::str::contains(
+            "pass: GDScript type check passed (typecheck,",
+        ))
+        .stdout(predicate::str::contains("error:").not());
+}
+
+#[test]
+fn check_stops_after_formatting_failure_and_prints_fix_guidance() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(fixture.root.join("mock-state/fmt-fail.flag"), "").unwrap();
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "error: Formatting issues found (fmt,",
+        ))
+        .stdout(predicate::str::contains("test/sample_a.gd"))
+        .stdout(predicate::str::contains("test/sample_b.gd"))
+        .stdout(predicate::str::contains(
+            "Run `gdsuite check --fix` to apply fixes.",
+        ))
+        .stdout(predicate::str::contains("pass:").not())
+        .stderr(predicate::str::contains("check failed"));
+
+    assert!(
+        !fixture.root.join("logs/gdlint-args.txt").exists(),
+        "check should stop before lint after formatting failure"
+    );
+    assert!(
+        !fixture.root.join("mock-state/godot-args.txt").exists(),
+        "check should stop before typecheck after formatting failure"
+    );
+}
+
+#[test]
+fn check_stops_after_lint_failure_and_does_not_run_typecheck() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
@@ -862,8 +916,22 @@ fn check_reports_aggregate_failure() {
         .arg("check")
         .assert()
         .failure()
-        .stdout(predicate::str::contains("lint:"))
-        .stderr(predicate::str::contains("one or more checks failed"));
+        .stdout(predicate::str::contains(
+            "pass: Formatting check passed (fmt,",
+        ))
+        .stdout(predicate::str::contains("error: Lint check failed (lint,"))
+        .stdout(predicate::str::contains(
+            "test/sample.gd:3 Function name \"BadName\" is not valid",
+        ))
+        .stdout(predicate::str::contains(
+            "Found 1 lint error. Fix the reported issue and rerun `gdsuite check`.",
+        ))
+        .stderr(predicate::str::contains("check failed"));
+
+    assert!(
+        !fixture.root.join("mock-state/godot-args.txt").exists(),
+        "check should stop before typecheck after lint failure"
+    );
 }
 
 #[test]
@@ -1017,8 +1085,23 @@ fn check_includes_typecheck_in_failure_summary() {
         .arg("check")
         .assert()
         .failure()
-        .stdout(predicate::str::contains("typecheck:"))
-        .stderr(predicate::str::contains("one or more checks failed"));
+        .stdout(predicate::str::contains(
+            "pass: Formatting check passed (fmt,",
+        ))
+        .stdout(predicate::str::contains("pass: Lint check passed (lint,"))
+        .stdout(predicate::str::contains(
+            "error: GDScript type check failed (typecheck,",
+        ))
+        .stdout(predicate::str::contains(
+            "res://combat/hitbox.gd:41 Cannot infer the type of \"target\"",
+        ))
+        .stdout(predicate::str::contains(
+            "Found 1 type error. Fix the reported issue and rerun `gdsuite check`.",
+        ))
+        .stdout(predicate::str::contains("failed to execute").not())
+        .stdout(predicate::str::contains("stdout:").not())
+        .stdout(predicate::str::contains("stderr:").not())
+        .stderr(predicate::str::contains("check failed"));
 }
 
 #[test]
@@ -1793,7 +1876,10 @@ if not errorlevel 1 (
   mkdir ".godot" 2>nul
   > ".godot\global_script_class_cache.cfg" echo imported
 )
-if exist "mock-state\typecheck-fail" exit /b 1
+if exist "mock-state\typecheck-fail" (
+  >&2 echo res://combat/hitbox.gd:41 Cannot infer the type of "target"
+  exit /b 1
+)
 echo typecheck: ok
 exit /b 0
 "#,
@@ -1811,8 +1897,10 @@ if "%1"=="-m" if "%2"=="venv" (
   >> "%3\Scripts\python.cmd" echo @if "%%1"=="--version" echo Python 3.12.0
   >> "%3\Scripts\python.cmd" echo @if "%%1"=="-m" if "%%2"=="pip" if "%%3"=="install" echo pip ok
   >> "%3\Scripts\python.cmd" echo @if "%%1"=="-m" if "%%2"=="pip" if "%%3"=="show" if "%%4"=="gdtoolkit" echo Version: 4.5.0
-  > "%3\Scripts\gdformat.cmd" echo @echo gdformat ok
-  > "%3\Scripts\gdlint.cmd" echo @echo gdlint ok
+  > "%3\Scripts\gdformat.cmd" echo @echo off
+  >> "%3\Scripts\gdformat.cmd" echo @echo gdformat ok
+  > "%3\Scripts\gdlint.cmd" echo @echo off
+  >> "%3\Scripts\gdlint.cmd" echo @echo gdlint ok
   exit /b 0
 )
 if "%1"=="-m" if "%2"=="pip" (
@@ -1869,7 +1957,15 @@ if not "%ROOT%"=="" (
         );
         write_cmd(
             &gdsuite_dir.join("python/Scripts/gdformat.cmd"),
-            "@echo off\r\necho %*> \"%CD%\\logs\\gdformat-args.txt\"\r\necho gdformat ok\r\n",
+            r#"@echo off
+echo %*> "%CD%\logs\gdformat-args.txt"
+if exist "%CD%\mock-state\fmt-fail.flag" (
+  echo test/sample_a.gd
+  echo test/sample_b.gd
+  exit /b 1
+)
+echo gdformat ok
+"#,
         );
         write_cmd(
             &gdsuite_dir.join("python/Scripts/gdlint.cmd"),
