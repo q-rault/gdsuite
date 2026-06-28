@@ -9,9 +9,7 @@ use std::{
 };
 
 use assert_cmd::Command;
-use flate2::{Compression, write::GzEncoder};
 use predicates::prelude::*;
-use tar::Builder;
 use tempfile::TempDir;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
@@ -230,10 +228,6 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/gdtypecheck/0.1.0/download".to_string(),
-                build_tar_gz(&[("gdtypecheck-0.1.0/README.md", "gdtypecheck\n")]),
-            ),
-            (
                 "/q-rault/gdtest/releases/download/v0.1.1/gdtest-v0.1.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
@@ -266,6 +260,20 @@ impl Fixture {
                     "gdhealth-v0.1.1-x86_64-pc-windows-msvc/gdhealth.cmd",
                     "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
+            ),
+            (
+                "/q-rault/gdtypecheck/releases/download/v0.1.0/gdtypecheck-v0.1.0-x86_64-pc-windows-msvc.zip"
+                    .to_string(),
+                build_zip(&[
+                    (
+                        "gdtypecheck-v0.1.0-x86_64-pc-windows-msvc/gdtypecheck.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.1.0\r\n",
+                    ),
+                    (
+                        "gdtypecheck-v0.1.0-x86_64-pc-windows-msvc/README.md",
+                        "gdtypecheck\n",
+                    ),
+                ]),
             ),
         ]));
 
@@ -532,7 +540,7 @@ root = "."
 gdtoolkit = "==4.5.0"
 gdtest_source = "github:q-rault/gdtest@v0.1.1"
 gdhealth_source = "github:q-rault/gdhealth@v0.1.1"
-gdtypecheck_source = "crate:gdtypecheck@0.1.0"
+gdtypecheck_source = "github:q-rault/gdtypecheck@v0.1.0"
 
 [commands]
 default_test_target = "test/"
@@ -673,23 +681,6 @@ impl From<Vec<u8>> for TestRoute {
     fn from(body: Vec<u8>) -> Self {
         Self { body }
     }
-}
-
-fn build_tar_gz(entries: &[(&str, &str)]) -> Vec<u8> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    {
-        let mut archive = Builder::new(&mut encoder);
-        for (path, contents) in entries {
-            let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
-            header.set_mode(0o644);
-            header.set_size(contents.len() as u64);
-            header.set_cksum();
-            archive.append(&header, contents.as_bytes()).unwrap();
-        }
-        archive.finish().unwrap();
-    }
-    encoder.finish().unwrap()
 }
 
 fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {

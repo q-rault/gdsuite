@@ -15,7 +15,7 @@ acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", 
 tested = "==0.1.1"
 
 [tools.gdtypecheck]
-acquire = { kind = "crate", crate = "gdtypecheck", version = "0.1.0" }
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.1.0" }
 tested = "==0.1.0"
 
 [contracts.gdtest]
