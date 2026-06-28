@@ -867,6 +867,21 @@ fn check_reports_aggregate_failure() {
 }
 
 #[test]
+fn check_help_mentions_fix_flag() {
+    let fixture = Fixture::new();
+
+    fixture
+        .cmd()
+        .args(["check", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--fix"))
+        .stdout(predicate::str::contains(
+            "Auto-format first, then apply safe lint fixes before validation",
+        ));
+}
+
+#[test]
 fn check_report_json_emits_suite_envelope_and_writes_artifact() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -885,6 +900,34 @@ fn check_report_json_emits_suite_envelope_and_writes_artifact() {
 
     assert!(fixture.root.join("reports/gdsuite/check.json").exists());
     assert!(fixture.root.join("reports/gdsuite/latest.json").exists());
+}
+
+#[test]
+fn check_fix_runs_mutating_fmt_and_safe_lint_fixes_before_typecheck() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fs::write(
+        fixture.root.join("test/sample.gd"),
+        "class_name Foo   \r\nextends Node   ",
+    )
+    .unwrap();
+
+    fixture.cmd().args(["check", "--fix"]).assert().success();
+
+    let updated = fs::read_to_string(fixture.root.join("test/sample.gd")).unwrap();
+    assert_eq!(updated, "class_name Foo\r\nextends Node\r\n");
+
+    let gdformat_args = fs::read_to_string(fixture.root.join("logs/gdformat-args.txt")).unwrap();
+    assert!(!gdformat_args.contains("--check"));
+    assert!(gdformat_args.contains("-w"));
+
+    let gdlint_args = fs::read_to_string(fixture.root.join("logs/gdlint-args.txt")).unwrap();
+    assert!(gdlint_args.contains("--verbose"));
+
+    let godot_args = fs::read_to_string(fixture.root.join("mock-state/godot-args.txt")).unwrap();
+    assert!(godot_args.contains("--headless"));
 }
 
 #[test]
@@ -1826,7 +1869,7 @@ if not "%ROOT%"=="" (
         );
         write_cmd(
             &gdsuite_dir.join("python/Scripts/gdformat.cmd"),
-            "@echo gdformat ok",
+            "@echo off\r\necho %*> \"%CD%\\logs\\gdformat-args.txt\"\r\necho gdformat ok\r\n",
         );
         write_cmd(
             &gdsuite_dir.join("python/Scripts/gdlint.cmd"),

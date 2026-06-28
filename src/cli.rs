@@ -105,6 +105,11 @@ pub struct ForwardReportArgs {
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
+    #[arg(
+        long,
+        help = "Auto-format first, then apply safe lint fixes before validation"
+    )]
+    pub fix: bool,
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
 }

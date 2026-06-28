@@ -566,8 +566,8 @@ fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     let steps = vec![
-        run_fmt_step(context, &config, true)?,
-        run_lint_step(context, &config)?,
+        run_fmt_step(context, &config, !args.fix)?,
+        run_lint_step(context, &config, args.fix)?,
         run_typecheck_step(context, &config)?,
     ];
     finish_pipeline(context, &config, "check", report_mode, steps)
@@ -1079,9 +1079,17 @@ fn run_fmt_step(
     }
 }
 
-fn run_lint_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<StepReport> {
+fn run_lint_step(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    fix: bool,
+) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
+    if fix {
+        fixers::apply_safe_fixes(context, config, &toolchain.gdformat)
+            .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    }
     let cmd_args = lint_args(context, config, "json")?;
     let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
