@@ -451,7 +451,6 @@ fn default_check_steps() -> Vec<CheckStep> {
         CheckStep::Fmt,
         CheckStep::Lint,
         CheckStep::Typecheck,
-        CheckStep::Test,
         CheckStep::Health,
     ]
 }
@@ -485,7 +484,7 @@ default = "text"
 artifacts_dir = "reports/gdsuite"
 
 [check]
-steps = ["fmt", "lint", "typecheck", "test", "health"]
+steps = ["fmt", "lint", "typecheck", "health"]
 "#,
         release
             .tools
@@ -546,7 +545,7 @@ steps = {}
 }
 
 fn render_check_steps(steps: &[CheckStep]) -> String {
-    let values = steps
+        let values = steps
         .iter()
         .map(|step| match step {
             CheckStep::Fmt => "\"fmt\"",

@@ -262,15 +262,15 @@ impl Fixture {
                 )]),
             ),
             (
-                "/q-rault/gdtypecheck/releases/download/v0.1.0/gdtypecheck-v0.1.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtypecheck/releases/download/v0.1.1/gdtypecheck-v0.1.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtypecheck-v0.1.0-x86_64-pc-windows-msvc/gdtypecheck.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.1.0\r\n",
+                        "gdtypecheck-v0.1.1-x86_64-pc-windows-msvc/gdtypecheck.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.1.1\r\n",
                     ),
                     (
-                        "gdtypecheck-v0.1.0-x86_64-pc-windows-msvc/README.md",
+                        "gdtypecheck-v0.1.1-x86_64-pc-windows-msvc/README.md",
                         "gdtypecheck\n",
                     ),
                 ]),
@@ -540,7 +540,7 @@ root = "."
 gdtoolkit = "==4.5.0"
 gdtest_source = "github:q-rault/gdtest@v0.1.1"
 gdhealth_source = "github:q-rault/gdhealth@v0.1.1"
-gdtypecheck_source = "github:q-rault/gdtypecheck@v0.1.0"
+gdtypecheck_source = "github:q-rault/gdtypecheck@v0.1.1"
 
 [commands]
 default_test_target = "test/"
@@ -551,7 +551,7 @@ default = "text"
 artifacts_dir = "reports/gdsuite"
 
 [check]
-steps = ["fmt", "lint", "typecheck", "test", "health"]
+steps = ["fmt", "lint", "typecheck", "health"]
 "#
     }
 
