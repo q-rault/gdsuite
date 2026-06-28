@@ -11,17 +11,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{
-        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs, OutputModeArg,
-        ReportArgs, RunArgs, SetupArgs,
+        Cli, Commands, DoctorArgs, ForwardArgs, ForwardReportArgs, LintArgs, OutputArgs,
+        OutputModeArg, ReportArgs, RunArgs, SetupArgs,
     },
-    config::{CompatibilityVerdict, GdsuiteConfig, Manifest},
-    fixers, migrate,
+    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
+    migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
     tooling::{self, ProjectContext},
 };
-
-const TYPECHECK_SCRIPT_NAME: &str = "typecheck_checker.gd";
 
 pub const EXIT_USAGE_ERROR: u8 = 2;
 pub const EXIT_SETUP_ERROR: u8 = 10;
@@ -50,7 +48,7 @@ pub fn run() -> Result<()> {
         Commands::Doctor(args) => doctor(&context, cli.godot_exe.as_deref(), args),
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
-        Commands::Typecheck => typecheck(&context),
+        Commands::Typecheck(args) => typecheck(&context, args),
         Commands::Test(args) => test(&context, args),
         Commands::Health(args) => health(&context, args),
         Commands::Check(args) => check(&context, args),
@@ -67,7 +65,6 @@ fn init(context: &ProjectContext, cli_godot: Option<&Path>, args: OutputArgs) ->
             output: args,
             sync_product_configs: false,
         },
-        true,
         &output,
     )?;
     finish_mutating_command(&output, "initialization complete");
@@ -75,14 +72,12 @@ fn init(context: &ProjectContext, cli_godot: Option<&Path>, args: OutputArgs) ->
 }
 
 fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
-    migrate::migrate_project(context, cli_godot)?;
-    println!("migrate complete");
-    Ok(())
+    migrate::migrate_project(context, cli_godot)
 }
 
 fn setup(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
     let output = OutputContext::new(resolve_output_mode(args.output.output), CommandScope::Setup);
-    setup_impl(context, cli_godot, args, false, &output)?;
+    setup_impl(context, cli_godot, args, &output)?;
     finish_mutating_command(&output, "setup complete");
     Ok(())
 }
@@ -91,7 +86,6 @@ fn setup_impl(
     context: &ProjectContext,
     cli_godot: Option<&Path>,
     args: SetupArgs,
-    import_product_configs: bool,
     output: &OutputContext,
 ) -> Result<()> {
     output.step("resolving project setup");
@@ -106,12 +100,7 @@ fn setup_impl(
 
     output.step("writing gdsuite config");
     GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
-    let mut config = tooling::load_config(context)?;
-    if import_product_configs {
-        output.step("importing delegated product configs");
-        tooling::import_product_configs_into_canonical(context, &mut config)?;
-        config.write(&context.config_path)?;
-    }
+    let config = tooling::load_config(context)?;
     if args.sync_product_configs {
         output.warn(
             "`--sync-product-configs` is deprecated and has no effect; gdsuite no longer manages gdtest.toml or gdhealth.toml",
@@ -150,6 +139,7 @@ fn setup_impl(
         &compatibility.gdtoolkit,
         &compatibility.gdtest,
         &compatibility.gdhealth,
+        &compatibility.gdtypecheck,
     ] {
         if tool.verdict == CompatibilityVerdict::Warning {
             output.warn(&tool.reason);
@@ -160,6 +150,7 @@ fn setup_impl(
             &compatibility.gdtoolkit,
             &compatibility.gdtest,
             &compatibility.gdhealth,
+            &compatibility.gdtypecheck,
         ]
         .into_iter()
         .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
@@ -310,6 +301,27 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         },
     );
 
+    let gdtypecheck = manifest
+        .as_ref()
+        .and_then(|m| m.gdtypecheck.clone())
+        .or_else(|| tooling::find_binary(context, &["gdtypecheck"]));
+    tool_reports.insert(
+        "gdtypecheck".to_string(),
+        match gdtypecheck {
+            Some(path) => {
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
+            }
+            None => {
+                missing.push("gdtypecheck".to_string());
+                DoctorToolReport::error(
+                    None,
+                    None,
+                    "not found; run `gdsuite setup` to install the toolchain",
+                )
+            }
+        },
+    );
+
     let mut status = if missing.is_empty() {
         CompatibilityVerdict::Ok
     } else {
@@ -346,6 +358,10 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
             compatibility_reports.insert(
                 "gdhealth".to_string(),
                 DoctorCompatibilityReport::from_tool(&compatibility.gdhealth),
+            );
+            compatibility_reports.insert(
+                "gdtypecheck".to_string(),
+                DoctorCompatibilityReport::from_tool(&compatibility.gdtypecheck),
             );
             status = match (status, tooling::report_status(&compatibility)) {
                 (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => {
@@ -410,43 +426,19 @@ fn finish_mutating_command(output: &OutputContext, summary: &str) {
     }
 }
 
-fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
-    fmt_with_config(context, &config, args)
-}
-
-fn fmt_with_config(context: &ProjectContext, config: &GdsuiteConfig, args: FmtArgs) -> Result<()> {
+fn fmt(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_typecheck_files(context, config)?;
-
-    let mut cmd_args = Vec::new();
-    if args.check {
-        cmd_args.push("--check".to_string());
-    }
-    cmd_args.extend(files.iter().map(|path| path.display().to_string()));
-    process::run_checked(&toolchain.gdformat, &cmd_args, &context.root)
+    let cmd_args = default_or_dot(args.args);
+    process::run_checked_streaming(&toolchain.gdformat, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
 }
 
 fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-
-    if args.fix {
-        let safe_report = fixers::apply_safe_fixes(context, &config, &toolchain.gdformat)?;
-        if args.unsafe_fixes {
-            let unsafe_report = fixers::apply_unsafe_fixes(context, &config)?;
-            for skipped in unsafe_report.skipped {
-                println!("skipped: {skipped}");
-            }
-            println!("unsafe_changed={}", unsafe_report.changed_files.len());
-        }
-        println!("safe_changed={}", safe_report.changed_files.len());
-    }
-
-    let cmd_args = lint_args(context, &config, &report_mode)?;
+    let cmd_args = lint_args(args.args, &report_mode);
     let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     print_lint_output(&output, &report_mode)?;
@@ -476,14 +468,7 @@ fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     }
 
     let toolchain = load_toolchain_or_error(context)?;
-    let mut args = if args.args.is_empty() {
-        vec![config.commands.default_test_target]
-    } else {
-        args.args
-    };
-    if args.first().map(|value| value == "--").unwrap_or(false) {
-        args.remove(0);
-    }
+    let args = default_test_args(&config, args.args);
     process::run_checked_streaming(&toolchain.gdtest, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
@@ -493,7 +478,7 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     if report_mode == "json" {
-        let step = run_health_step(context, &config, None, args.args)?;
+        let step = run_health_step(context, args.args)?;
         let report = SuiteReport::from_steps("health", context, vec![step]);
         print_and_store_report(context, &config, "health", &report)?;
         if report.status == "failed" {
@@ -505,66 +490,25 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
         return Ok(());
     }
 
-    let step = run_health_step(context, &config, None, args.args)?;
+    let step = run_health_step(context, args.args)?;
     if step.status == "failed" {
         return Err(command_error(EXIT_VALIDATION_ERROR, step.summary));
     }
     Ok(())
 }
 
-fn typecheck(context: &ProjectContext) -> Result<()> {
-    let config = load_config_or_error(context)?;
-    typecheck_with_config(context, &config)
-}
-
-fn typecheck_with_config(context: &ProjectContext, config: &GdsuiteConfig) -> Result<()> {
+fn typecheck(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_script_files(context, config)?;
-    let checker_path = context.state_dir.join(TYPECHECK_SCRIPT_NAME);
-    write_typecheck_script(&checker_path, &files)?;
-    let args = vec![
-        "--headless".to_string(),
-        "--script".to_string(),
-        format!("res://.gdsuite/state/{TYPECHECK_SCRIPT_NAME}"),
-    ];
-    process::run_checked(&toolchain.godot_exe, &args, &context.root)
+    let cmd_args = default_or_dot(args.args);
+    process::run_checked_streaming(&toolchain.gdtypecheck, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
     Ok(())
-}
-
-fn write_typecheck_script(path: &Path, files: &[PathBuf]) -> Result<()> {
-    let mut lines = vec![
-        "extends SceneTree".to_string(),
-        String::new(),
-        "func _init():".to_string(),
-        "\tvar files = [".to_string(),
-    ];
-    for file in files {
-        let res_path = format!("res://{}", file.display().to_string().replace('\\', "/"));
-        lines.push(format!("\t\t\"{res_path}\","));
-    }
-    lines.extend([
-        "\t]".to_string(),
-        "\tvar errors = []".to_string(),
-        "\tfor f in files:".to_string(),
-        "\t\tif load(f) == null:".to_string(),
-        "\t\t\terrors.append(f)".to_string(),
-        "\tif errors.size() > 0:".to_string(),
-        "\t\tfor e in errors:".to_string(),
-        "\t\t\tprinterr(\"typecheck: \" + e)".to_string(),
-        "\t\tquit(1)".to_string(),
-        "\telse:".to_string(),
-        "\t\tprint(\"typecheck: ok\")".to_string(),
-        "\t\tquit(0)".to_string(),
-    ]);
-    fs::write(path, lines.join("\n") + "\n")
-        .with_context(|| format!("failed to write typecheck script {}", path.display()))
 }
 
 fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let steps = run_check_steps(context, &config, args.fix)?;
+    let steps = run_check_steps(context, &config)?;
     finish_check_pipeline(context, &config, report_mode, steps)
 }
 
@@ -721,19 +665,47 @@ fn resolve_report_mode(config: &GdsuiteConfig, cli_report: Option<&str>) -> Resu
     }
 }
 
-fn lint_args(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    report: &str,
-) -> Result<Vec<String>> {
-    let mut args = Vec::new();
+fn lint_args(args: Vec<String>, report: &str) -> Vec<String> {
+    let mut args = strip_passthrough_marker(args);
+    let needs_default_target = args.is_empty();
     if report == "json" {
         args.push("--verbose".to_string());
     }
-    for file in fixers::discover_script_files(context, config)? {
-        args.push(file.display().to_string());
+    if needs_default_target {
+        args.push(".".to_string());
     }
-    Ok(args)
+    args
+}
+
+fn strip_passthrough_marker(mut args: Vec<String>) -> Vec<String> {
+    if args.first().is_some_and(|value| value == "--") {
+        args.remove(0);
+    }
+    args
+}
+
+fn default_or_dot(args: Vec<String>) -> Vec<String> {
+    let mut args = strip_passthrough_marker(args);
+    if args.is_empty() {
+        args.push(".".to_string());
+    }
+    args
+}
+
+fn default_test_args(config: &GdsuiteConfig, args: Vec<String>) -> Vec<String> {
+    let mut args = strip_passthrough_marker(args);
+    if args.is_empty() {
+        args.push(config.commands.default_test_target.clone());
+    }
+    args
+}
+
+fn default_health_args(config: &GdsuiteConfig, args: Vec<String>) -> Vec<String> {
+    let mut args = strip_passthrough_marker(args);
+    if args.is_empty() {
+        args.push(config.commands.default_health_subcommand.clone());
+    }
+    args
 }
 
 fn print_lint_output(output: &process::ProcessOutput, report: &str) -> Result<()> {
@@ -853,7 +825,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
     output.blank();
 
     for name in [
-        "godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth",
+        "godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth", "gdtypecheck",
     ] {
         if let Some(tool) = report.tools.get(name) {
             match tool.status.as_str() {
@@ -874,7 +846,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
 
     if !report.compatibility.is_empty() {
         output.blank();
-        for name in ["gdtoolkit", "gdtest", "gdhealth"] {
+        for name in ["gdtoolkit", "gdtest", "gdhealth", "gdtypecheck"] {
             if let Some(tool) = report.compatibility.get(name) {
                 let installed = tool.installed.as_deref().unwrap_or("unknown");
                 let message = format!(
@@ -1095,43 +1067,31 @@ impl CheckStepResult {
 fn run_check_steps(
     context: &ProjectContext,
     config: &GdsuiteConfig,
-    fix: bool,
 ) -> Result<Vec<CheckStepResult>> {
     let mut steps = Vec::new();
 
-    let fmt = run_fmt_step(context, config, !fix)?;
-    let failed = fmt.report.status == "failed";
-    steps.push(fmt);
-    if failed {
-        return Ok(steps);
+    for step in &config.check.steps {
+        let result = match step {
+            CheckStep::Fmt => run_fmt_step(context)?,
+            CheckStep::Lint => run_lint_step(context)?,
+            CheckStep::Typecheck => run_typecheck_step(context)?,
+            CheckStep::Test => run_test_step(context, config)?,
+            CheckStep::Health => run_health_check_step(context, config)?,
+        };
+        let failed = result.report.status == "failed";
+        steps.push(result);
+        if failed {
+            break;
+        }
     }
-
-    let lint = run_lint_step(context, config, fix)?;
-    let failed = lint.report.status == "failed";
-    steps.push(lint);
-    if failed {
-        return Ok(steps);
-    }
-
-    let typecheck = run_typecheck_step(context, config)?;
-    steps.push(typecheck);
 
     Ok(steps)
 }
 
-fn run_fmt_step(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    check: bool,
-) -> Result<CheckStepResult> {
+fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_typecheck_files(context, config)?;
-    let mut cmd_args = Vec::new();
-    if check {
-        cmd_args.push("--check".to_string());
-    }
-    cmd_args.extend(files.iter().map(|path| path.display().to_string()));
+    let cmd_args = vec!["--check".to_string(), ".".to_string()];
     let output = process::run(&toolchain.gdformat, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let duration_ms = started.elapsed().as_millis();
@@ -1152,25 +1112,14 @@ fn run_fmt_step(
         "fmt",
         duration_ms,
         diagnostics.clone(),
-        format!(
-            "{}. Run `gdsuite check --fix` to apply fixes.",
-            format_formatting_summary(&diagnostics)
-        ),
+        format!("{}. Run `gdsuite fmt` to format the target.", format_formatting_summary(&diagnostics)),
     ))
 }
 
-fn run_lint_step(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    fix: bool,
-) -> Result<CheckStepResult> {
+fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    if fix {
-        fixers::apply_safe_fixes(context, config, &toolchain.gdformat)
-            .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    }
-    let cmd_args = lint_args(context, config, "json")?;
+    let cmd_args = lint_args(Vec::new(), "json");
     let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let lint_report = JsonLintReport::from_output(&output);
@@ -1216,18 +1165,11 @@ fn run_lint_step(
     ))
 }
 
-fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
+fn run_typecheck_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let files = fixers::discover_script_files(context, config)?;
-    let checker_path = context.state_dir.join(TYPECHECK_SCRIPT_NAME);
-    write_typecheck_script(&checker_path, &files)?;
-    let args = vec![
-        "--headless".to_string(),
-        "--script".to_string(),
-        format!("res://.gdsuite/state/{TYPECHECK_SCRIPT_NAME}"),
-    ];
-    let output = process::run(&toolchain.godot_exe, &args, &context.root)
+    let args = vec![".".to_string()];
+    let output = process::run(&toolchain.gdtypecheck, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let duration_ms = started.elapsed().as_millis();
 
@@ -1240,10 +1182,7 @@ fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Resul
         ));
     }
 
-    let diagnostics = collect_nonempty_lines(&output.stdout, &output.stderr)
-        .into_iter()
-        .filter(|line| line != "typecheck: ok")
-        .collect::<Vec<_>>();
+    let diagnostics = collect_nonempty_lines(&output.stdout, &output.stderr);
 
     Ok(CheckStepResult::failed(
         StepReport::failed("typecheck", duration_ms, "typecheck failed"),
@@ -1252,6 +1191,51 @@ fn run_typecheck_step(context: &ProjectContext, config: &GdsuiteConfig) -> Resul
         duration_ms,
         diagnostics.clone(),
         typecheck_failure_summary(&diagnostics),
+    ))
+}
+
+fn run_test_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
+    let report = run_test_step_with_args(
+        context,
+        vec![config.commands.default_test_target.clone()],
+    )?;
+    let duration_ms = report.duration_ms;
+    if report.status == "ok" {
+        return Ok(CheckStepResult::passed(
+            report,
+            "Tests passed",
+            "test",
+            duration_ms,
+        ));
+    }
+    Ok(CheckStepResult::failed(
+        report,
+        "Tests failed",
+        "test",
+        duration_ms,
+        Vec::new(),
+        "Fix the reported test failure and rerun `gdsuite check`.".to_string(),
+    ))
+}
+
+fn run_health_check_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
+    let report = run_health_step(context, vec![config.commands.default_health_subcommand.clone()])?;
+    let duration_ms = report.duration_ms;
+    if report.status == "ok" {
+        return Ok(CheckStepResult::passed(
+            report,
+            "Health checks passed",
+            "health",
+            duration_ms,
+        ));
+    }
+    Ok(CheckStepResult::failed(
+        report.clone(),
+        "Health checks failed",
+        "health",
+        duration_ms,
+        Vec::new(),
+        report.summary,
     ))
 }
 
@@ -1279,21 +1263,15 @@ fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> 
 
 fn run_health_step(
     context: &ProjectContext,
-    config: &GdsuiteConfig,
-    fail_on_override: Option<&str>,
     forwarded: Vec<String>,
 ) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let args = if forwarded.is_empty() {
-        build_default_health_args(context, config, fail_on_override)?
-    } else {
-        prepare_health_args(context, config, forwarded)?
-    };
+    let args = default_health_args(&load_runtime_config(context)?, forwarded);
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    let bundle_dir = context.root.join(&config.health.bundle_dir);
+    let bundle_dir = context.root.join(tooling::GDHEALTH_ARTIFACT_DIR);
     let summary_path = bundle_dir.join("summary.txt");
     let mut artifacts = Vec::new();
 
@@ -1347,49 +1325,6 @@ fn read_trimmed_file_if_exists(path: &Path) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
-}
-
-fn build_default_health_args(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    fail_on_override: Option<&str>,
-) -> Result<Vec<String>> {
-    let fail_on = fail_on_override.unwrap_or(&config.health.fail_on);
-    prepare_health_args(
-        context,
-        config,
-        vec![
-            config.health.command.clone(),
-            "--fail-on".to_string(),
-            fail_on.to_string(),
-        ],
-    )
-}
-
-fn prepare_health_args(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-    forwarded: Vec<String>,
-) -> Result<Vec<String>> {
-    if forwarded.iter().any(|arg| arg == "--config") {
-        return Ok(forwarded);
-    }
-
-    let overlay_path = write_health_overlay_config(context, config)?;
-    let mut args = vec!["--config".to_string(), overlay_path.display().to_string()];
-    args.extend(forwarded);
-    Ok(args)
-}
-
-fn write_health_overlay_config(
-    context: &ProjectContext,
-    config: &GdsuiteConfig,
-) -> Result<PathBuf> {
-    let doc = tooling::merged_gdhealth_overlay_config(config)?;
-    let overlay_path = context.state_dir.join("gdhealth.gdsuite.toml");
-    fs::write(&overlay_path, toml::to_string(&doc)?)
-        .with_context(|| format!("failed to write {}", overlay_path.display()))?;
-    Ok(overlay_path)
 }
 
 fn finish_check_pipeline(

@@ -3,61 +3,40 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow};
 use globwalk::GlobWalkerBuilder;
 
-use crate::{
-    config::GdsuiteConfig,
-    tooling::{self, ProjectContext},
-};
+use crate::{config::GdsuiteConfig, tooling::{self, ProjectContext}};
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
-    migrate_suite_config(context, cli_godot)?;
+    let (config, warnings) = migrate_suite_config(context, cli_godot)?;
     rewrite_entrypoints(context)?;
+    for warning in warnings {
+        println!("warning: {warning}");
+    }
+    println!("migrate complete");
+    config.write(&context.config_path)?;
     Ok(())
 }
 
 fn migrate_suite_config(
     context: &ProjectContext,
     cli_godot: Option<&Path>,
-) -> Result<GdsuiteConfig> {
-    let mut config = load_migratable_suite_config(context)?;
-
-    if let Some(path) = cli_godot {
-        config.project.godot_exe = Some(path.to_path_buf());
-    } else if config.project.godot_exe.is_none()
-        && let Ok(path) = tooling::resolve_godot(context, None, Some(&config))
-    {
-        config.project.godot_exe = Some(path);
-    }
-
-    config.write(&context.config_path)?;
-    Ok(config)
-}
-
-fn load_migratable_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
-    if !context.config_path.exists() {
-        return Ok(GdsuiteConfig::default());
-    }
-
-    match tooling::load_config(context) {
-        Ok(config) => Ok(config),
-        Err(_) => load_legacy_suite_config(context),
-    }
-}
-
-fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
-    let body = fs::read_to_string(&context.config_path)
-        .with_context(|| format!("failed to read {}", context.config_path.display()))?;
-    let value: toml::Value = body
-        .parse()
-        .with_context(|| format!("failed to parse {}", context.config_path.display()))?;
-    if value.get("paths").is_none() {
-        return Err(anyhow!(
-            "failed to parse config {}; run `gdsuite migrate` after fixing the file",
-            context.config_path.display()
-        ));
-    }
+) -> Result<(GdsuiteConfig, Vec<String>)> {
+    let body = if context.config_path.exists() {
+        fs::read_to_string(&context.config_path)
+            .with_context(|| format!("failed to read {}", context.config_path.display()))?
+    } else {
+        String::new()
+    };
+    let value = if body.trim().is_empty() {
+        toml::Value::Table(Default::default())
+    } else {
+        body.parse()
+            .with_context(|| format!("failed to parse {}", context.config_path.display()))?
+    };
 
     let mut config = GdsuiteConfig::default();
+    let warnings = collect_migration_warnings(context, &value);
+
     if let Some(project) = value.get("project").and_then(|value| value.as_table()) {
         if let Some(root) = project.get("root").and_then(|value| value.as_str()) {
             config.project.root = root.to_string();
@@ -73,11 +52,14 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
         if let Some(source) = tools.get("gdtest_source").and_then(|value| value.as_str()) {
             config.tools.gdtest_source = source.into();
         }
+        if let Some(source) = tools.get("gdhealth_source").and_then(|value| value.as_str()) {
+            config.tools.gdhealth_source = source.into();
+        }
         if let Some(source) = tools
-            .get("gdhealth_source")
+            .get("gdtypecheck_source")
             .and_then(|value| value.as_str())
         {
-            config.tools.gdhealth_source = source.into();
+            config.tools.gdtypecheck_source = source.into();
         }
     }
     if let Some(commands) = value.get("commands").and_then(|value| value.as_table()) {
@@ -94,81 +76,80 @@ fn load_legacy_suite_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
             config.commands.default_health_subcommand = subcommand.to_string();
         }
     }
-    if let Some(fix) = value.get("fix").and_then(|value| value.as_table()) {
-        if let Some(rules) = string_array(fix.get("safe_rules")) {
-            config.fix.safe_rules = rules;
-        }
-        if let Some(rules) = string_array(fix.get("unsafe_rules")) {
-            config.fix.unsafe_rules = rules;
-        }
-    }
-    if let Some(lint) = value.get("lint").and_then(|value| value.as_table())
-        && let Some(line_length) = lint.get("line_length").and_then(|value| value.as_integer())
-    {
-        config.lint.line_length = line_length as usize;
-    }
     if let Some(reports) = value.get("reports").and_then(|value| value.as_table()) {
         if let Some(default) = reports.get("default").and_then(|value| value.as_str()) {
             config.reports.default = default.to_string();
         }
-        if let Some(dir) = reports
-            .get("artifacts_dir")
-            .and_then(|value| value.as_str())
-        {
+        if let Some(dir) = reports.get("artifacts_dir").and_then(|value| value.as_str()) {
             config.reports.artifacts_dir = dir.into();
         }
     }
-    if let Some(health) = value.get("health").and_then(|value| value.as_table()) {
-        if let Some(command) = health.get("command").and_then(|value| value.as_str()) {
-            config.health.command = command.to_string();
-        }
-        if let Some(fail_on) = health.get("fail_on").and_then(|value| value.as_str()) {
-            config.health.fail_on = fail_on.to_string();
-        }
-        if let Some(bundle_dir) = health.get("bundle_dir").and_then(|value| value.as_str()) {
-            config.health.bundle_dir = bundle_dir.into();
-        }
-    }
-    if let Some(paths) = value.get("paths").and_then(|value| value.as_table()) {
-        let scripts =
-            string_array(paths.get("scripts")).unwrap_or_else(|| config.lint.include.clone());
-        let exclude =
-            string_array(paths.get("exclude")).unwrap_or_else(|| config.lint.exclude.clone());
-        config.lint.include = scripts.clone();
-        config.lint.exclude = exclude.clone();
-        config.typecheck.include = scripts.clone();
-        config.typecheck.exclude = exclude.clone();
-        config.gdtest.patterns = scripts
-            .iter()
-            .filter(|pattern| pattern.contains("test"))
-            .cloned()
-            .collect::<Vec<_>>();
-        if config.gdtest.patterns.is_empty() {
-            config.gdtest.patterns = vec!["test/**/*.gd".to_string(), "**/*.test.gd".to_string()];
-        }
-        config.gdtest.coverage_exclude = exclude.clone();
-        config.gdhealth.discovery.include = scripts;
-        if config.gdhealth.discovery.include.is_empty() {
-            config.gdhealth.discovery.include = vec!["**/*.gd".to_string()];
-        }
-        config.gdhealth.discovery.exclude = exclude
-            .into_iter()
-            .filter(|pattern| pattern != ".gdsuite/**")
-            .collect();
+    if let Some(check) = value.get("check").and_then(|value| value.as_table())
+        && let Some(steps) = check.get("steps")
+    {
+        config.check.steps = steps
+            .clone()
+            .try_into()
+            .map_err(|_| anyhow!("failed to parse [check].steps in {}", context.config_path.display()))?;
     }
 
-    Ok(config)
+    if let Some(path) = cli_godot {
+        config.project.godot_exe = Some(path.to_path_buf());
+    } else if config.project.godot_exe.is_none()
+        && let Ok(path) = tooling::resolve_godot(context, None, Some(&config))
+    {
+        config.project.godot_exe = Some(path);
+    }
+
+    Ok((config, warnings))
 }
 
-fn string_array(value: Option<&toml::Value>) -> Option<Vec<String>> {
-    value.and_then(|value| {
-        value.as_array().map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str().map(ToString::to_string))
-                .collect::<Vec<_>>()
-        })
-    })
+fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Some(table) = value.as_table() else {
+        return warnings;
+    };
+
+    if table.contains_key("lint") {
+        warnings.push(
+            "Moved out of suite contract: create `gdlintrc` with your lint rules.".to_string(),
+        );
+    }
+    if table.contains_key("gdtest") {
+        warnings.push(
+            "Moved out of suite contract: create `gdtest.toml` with your gdtest settings.".to_string(),
+        );
+    }
+    if table.contains_key("gdhealth") {
+        warnings.push(
+            "Moved out of suite contract: create `gdhealth.toml` with your gdhealth settings.".to_string(),
+        );
+    }
+    if table.contains_key("health") {
+        warnings.push(
+            "Moved out of suite contract: remove suite-owned health settings and use gdhealth native config or explicit CLI args.".to_string(),
+        );
+    }
+    if table.contains_key("fix") {
+        warnings.push(
+            "Moved out of suite contract: suite-owned lint fixers were removed.".to_string(),
+        );
+    }
+    if table.contains_key("typecheck") {
+        warnings.push(
+            "Moved out of suite contract: install and configure the delegated typecheck tool directly.".to_string(),
+        );
+    }
+    if !path_exists_any(context, &["gdformatrc", ".gdformatrc"]) {
+        warnings.push(
+            "Moved out of suite contract: create `gdformatrc` if you need formatter settings.".to_string(),
+        );
+    }
+    warnings
+}
+
+fn path_exists_any(context: &ProjectContext, paths: &[&str]) -> bool {
+    paths.iter().any(|path| context.root.join(path).exists())
 }
 
 fn rewrite_entrypoints(context: &ProjectContext) -> Result<()> {

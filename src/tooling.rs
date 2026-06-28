@@ -13,14 +13,16 @@ use zip::ZipArchive;
 
 use crate::{
     config::{
-        CompatibilityVerdict, GdhealthConfig, GdhealthPolicyConfig, GdhealthProjectConfig,
-        GdhealthThresholdsConfig, GdsuiteConfig, GdtestConfig, InstalledContractsState,
-        InstalledState, InstalledToolState, Manifest, ReleaseManifest, ToolAcquireSpec,
+        CompatibilityVerdict, GdsuiteConfig, InstalledContractsState, InstalledState,
+        InstalledToolState, Manifest, ReleaseManifest, ToolAcquireSpec,
     },
     process,
 };
 
 pub const GD_DIR: &str = ".gdsuite";
+const GDTEST_HARNESS_PATH: &str = "addons/gdtest/gdtest_worker.gd";
+const GDTEST_EDITOR_PLUGIN_DIR: &str = "addons/gdtest_editor";
+pub const GDHEALTH_ARTIFACT_DIR: &str = "reports/code-health";
 
 #[derive(Debug, Clone)]
 pub struct ProjectContext {
@@ -43,6 +45,7 @@ pub struct Toolchain {
     pub gdlint: PathBuf,
     pub gdtest: PathBuf,
     pub gdhealth: PathBuf,
+    pub gdtypecheck: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +53,7 @@ pub struct InstallPlan {
     pub gdtoolkit: ToolAcquireSpec,
     pub gdtest: ToolAcquireSpec,
     pub gdhealth: ToolAcquireSpec,
+    pub gdtypecheck: ToolAcquireSpec,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +67,7 @@ pub struct CompatibilityReport {
     pub gdtoolkit: ToolCompatibility,
     pub gdtest: ToolCompatibility,
     pub gdhealth: ToolCompatibility,
+    pub gdtypecheck: ToolCompatibility,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +86,7 @@ struct ProbedToolchain {
     gdtest_harness_version: Option<String>,
     gdhealth_version: Option<String>,
     gdhealth_schema_version: Option<u32>,
+    gdtypecheck_version: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -240,6 +246,11 @@ pub fn install_plan(config: &GdsuiteConfig) -> InstallPlan {
         } else {
             parse_tool_source_spec(&config.tools.gdhealth_source, "gdhealth")
         },
+        gdtypecheck: if config.tools.gdtypecheck_source == default_gdtypecheck_requested() {
+            release.tools.gdtypecheck.acquire.clone()
+        } else {
+            parse_tool_source_spec(&config.tools.gdtypecheck_source, "gdtypecheck")
+        },
     }
 }
 
@@ -259,6 +270,10 @@ fn default_gdtest_requested() -> String {
 
 fn default_gdhealth_requested() -> String {
     release_manifest().tools.gdhealth.acquire.render_requested()
+}
+
+fn default_gdtypecheck_requested() -> String {
+    release_manifest().tools.gdtypecheck.acquire.render_requested()
 }
 
 pub fn resolve_godot(
@@ -344,6 +359,10 @@ pub fn resolve_toolchain(
             .gdhealth
             .or_else(|| find_binary(context, &["gdhealth"]))
             .ok_or_else(|| anyhow!("missing gdhealth in manifest"))?,
+        gdtypecheck: manifest
+            .gdtypecheck
+            .or_else(|| find_binary(context, &["gdtypecheck"]))
+            .ok_or_else(|| anyhow!("missing gdtypecheck in manifest"))?,
     })
 }
 
@@ -357,6 +376,7 @@ pub fn install_toolchain(
     install_gdtoolkit(&python, &requested.gdtoolkit, context)?;
     let gdtest = install_tool(context, &requested.gdtest, "gdtest")?;
     let gdhealth = install_tool(context, &requested.gdhealth, "gdhealth")?;
+    let gdtypecheck = install_tool(context, &requested.gdtypecheck, "gdtypecheck")?;
     let gdformat =
         find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
     let gdlint =
@@ -370,6 +390,7 @@ pub fn install_toolchain(
             gdlint: Some(gdlint),
             gdtest: Some(gdtest),
             gdhealth: Some(gdhealth),
+            gdtypecheck: Some(gdtypecheck),
         },
         requested,
     })
@@ -386,16 +407,17 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     process::run_checked(&toolchain.gdlint, &["--help".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdhealth, &["--help".to_string()], &context.root)?;
+    process::run_checked(&toolchain.gdtypecheck, &["--version".to_string()], &context.root)?;
     Ok(())
 }
 
 pub fn ensure_gdtest_class_cache(
     context: &ProjectContext,
-    config: &GdsuiteConfig,
+    _config: &GdsuiteConfig,
     godot_exe: &Path,
     addon_report: &AddonInstallReport,
 ) -> Result<()> {
-    let runtime_dir = harness_parent_dir(&config.gdtest.harness);
+    let runtime_dir = harness_parent_dir(GDTEST_HARNESS_PATH);
     let runtime_res_dir = res_dir_from_rel_path(&runtime_dir);
     let gdt_res_path = join_res_path(&runtime_res_dir, "gdt.gd");
     let cache_path = context
@@ -435,6 +457,11 @@ pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> 
             .gdsuite_dir
             .join("tools")
             .join("gdhealth")
+            .join("bin"),
+        context
+            .gdsuite_dir
+            .join("tools")
+            .join("gdtypecheck")
             .join("bin"),
         context.gdsuite_dir.join("bin"),
     ];
@@ -1189,6 +1216,10 @@ pub fn probe_installation_state(
                 requested: requested.gdhealth.clone(),
                 resolved_version: probed.gdhealth_version.clone(),
             },
+            gdtypecheck: InstalledToolState {
+                requested: requested.gdtypecheck.clone(),
+                resolved_version: probed.gdtypecheck_version.clone(),
+            },
         },
         contracts: InstalledContractsState {
             gdtest_harness_version: probed.gdtest_harness_version,
@@ -1310,10 +1341,29 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
         },
     };
 
+    let gdtypecheck = match &state.tools.gdtypecheck.resolved_version {
+        Some(version) => evaluate_versioned_tool(
+            "gdtypecheck",
+            &state.tools.gdtypecheck.requested,
+            version,
+            &release.tools.gdtypecheck.acquire,
+            &release.tools.gdtypecheck.tested,
+            Vec::new(),
+        ),
+        None => ToolCompatibility {
+            requested: state.tools.gdtypecheck.requested.render_requested(),
+            resolved_version: None,
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdtypecheck version probe failed".to_string(),
+            extra: Vec::new(),
+        },
+    };
+
     CompatibilityReport {
         gdtoolkit,
         gdtest,
         gdhealth,
+        gdtypecheck,
     }
 }
 
@@ -1322,6 +1372,7 @@ pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
         &report.gdtoolkit.verdict,
         &report.gdtest.verdict,
         &report.gdhealth.verdict,
+        &report.gdtypecheck.verdict,
     ];
     if verdicts
         .iter()
@@ -1394,6 +1445,7 @@ fn probe_toolchain(
         gdtest_harness_version: probe_gdtest_harness_version(context, config),
         gdhealth_version: probe_command_version(&toolchain.gdhealth, &["--version"], context),
         gdhealth_schema_version: probe_gdhealth_schema_version(&toolchain.gdhealth, context),
+        gdtypecheck_version: probe_command_version(&toolchain.gdtypecheck, &["--version"], context),
     })
 }
 
@@ -1446,9 +1498,9 @@ fn extract_version_token(line: &str) -> Option<String> {
 
 fn probe_gdtest_harness_version(
     context: &ProjectContext,
-    config: &GdsuiteConfig,
+    _config: &GdsuiteConfig,
 ) -> Option<String> {
-    let harness_path = context.root.join(&config.gdtest.harness);
+    let harness_path = context.root.join(GDTEST_HARNESS_PATH);
     let body = fs::read_to_string(harness_path).ok()?;
     extract_quoted_assignment(&body, "HARNESS_VERSION")
 }
@@ -1495,303 +1547,6 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
-pub(crate) fn render_gdhealth_config(config: &GdsuiteConfig) -> String {
-    let lines = vec![
-        "[project]".to_string(),
-        format!("root = {}", toml_string(&config.gdhealth.project.root)),
-        String::new(),
-        "[discovery]".to_string(),
-        format!(
-            "include = {}",
-            toml_array(config.gdhealth.discovery.include.clone())
-        ),
-        format!(
-            "exclude = {}",
-            toml_array(config.gdhealth.discovery.exclude.clone())
-        ),
-        String::new(),
-        "[groups]".to_string(),
-        render_group_lines(&config.gdhealth.groups),
-    ];
-
-    let mut body = lines[..lines.len() - 1].join("\n");
-    if !body.ends_with('\n') {
-        body.push('\n');
-    }
-    body.push_str(&lines.last().cloned().unwrap_or_default());
-    body.push('\n');
-    append_gdhealth_thresholds_and_policy(&mut body, &config.gdhealth);
-    body
-}
-
-pub fn merged_gdhealth_overlay_config(config: &GdsuiteConfig) -> Result<toml::Value> {
-    let mut doc: toml::Value = render_gdhealth_config(config)
-        .parse()
-        .context("failed to render gdhealth overlay config")?;
-    let table = doc
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("gdhealth config root must be a TOML table"))?;
-    let discovery = table
-        .entry("discovery")
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("gdhealth discovery section must be a TOML table"))?;
-    let excludes = discovery
-        .entry("exclude")
-        .or_insert_with(|| toml::Value::Array(Vec::new()))
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("gdhealth discovery.exclude must be an array"))?;
-    if !excludes
-        .iter()
-        .any(|value| value.as_str() == Some(".gdsuite/**"))
-    {
-        excludes.push(toml::Value::String(".gdsuite/**".to_string()));
-    }
-    Ok(doc)
-}
-
-fn toml_array(values: Vec<String>) -> String {
-    let values = values
-        .into_iter()
-        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\")))
-        .collect::<Vec<_>>();
-    format!("[{}]", values.join(", "))
-}
-
-fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\"))
-}
-
-fn render_group_lines(groups: &std::collections::BTreeMap<String, Vec<String>>) -> String {
-    groups
-        .iter()
-        .map(|(name, patterns)| format!("{name} = {}", toml_array(patterns.clone())))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn append_gdhealth_thresholds_and_policy(body: &mut String, config: &GdhealthConfig) {
-    if has_thresholds(&config.thresholds) {
-        body.push_str("\n[thresholds]\n");
-        append_optional_threshold(body, "file_lines_warn", config.thresholds.file_lines_warn);
-        append_optional_threshold(
-            body,
-            "file_lines_critical",
-            config.thresholds.file_lines_critical,
-        );
-        append_optional_threshold(
-            body,
-            "function_lines_warn",
-            config.thresholds.function_lines_warn,
-        );
-        append_optional_threshold(
-            body,
-            "function_lines_critical",
-            config.thresholds.function_lines_critical,
-        );
-        append_optional_threshold(body, "cyclomatic_warn", config.thresholds.cyclomatic_warn);
-        append_optional_threshold(
-            body,
-            "cyclomatic_critical",
-            config.thresholds.cyclomatic_critical,
-        );
-        append_optional_threshold(body, "nesting_warn", config.thresholds.nesting_warn);
-        append_optional_threshold(body, "nesting_critical", config.thresholds.nesting_critical);
-        append_optional_threshold(body, "parameters_warn", config.thresholds.parameters_warn);
-    }
-
-    if !config.policy.allow_cycles.is_empty() || !config.policy.forbidden_dependencies.is_empty() {
-        body.push_str("\n[policy]\n");
-        body.push_str(&format!(
-            "allow_cycles = {}\n",
-            toml_array(config.policy.allow_cycles.clone())
-        ));
-        for rule in &config.policy.forbidden_dependencies {
-            body.push_str("\n[[policy.forbidden_dependencies]]\n");
-            body.push_str(&format!("from = {}\n", toml_string(&rule.from)));
-            body.push_str(&format!("to = {}\n", toml_string(&rule.to)));
-            body.push_str(&format!("severity = {}\n", toml_string(&rule.severity)));
-        }
-    }
-}
-
-fn append_optional_threshold(body: &mut String, key: &str, value: Option<usize>) {
-    if let Some(value) = value {
-        body.push_str(&format!("{key} = {value}\n"));
-    }
-}
-
-fn has_thresholds(config: &GdhealthThresholdsConfig) -> bool {
-    config.file_lines_warn.is_some()
-        || config.file_lines_critical.is_some()
-        || config.function_lines_warn.is_some()
-        || config.function_lines_critical.is_some()
-        || config.cyclomatic_warn.is_some()
-        || config.cyclomatic_critical.is_some()
-        || config.nesting_warn.is_some()
-        || config.nesting_critical.is_some()
-        || config.parameters_warn.is_some()
-}
-
-pub fn import_product_configs_into_canonical(
-    context: &ProjectContext,
-    config: &mut GdsuiteConfig,
-) -> Result<()> {
-    if context.gdtest_config_path.exists() {
-        let body = fs::read_to_string(&context.gdtest_config_path)
-            .with_context(|| format!("failed to read {}", context.gdtest_config_path.display()))?;
-        let value: toml::Value = body
-            .parse()
-            .with_context(|| format!("failed to parse {}", context.gdtest_config_path.display()))?;
-        config.gdtest = import_gdtest_config(value, &config.gdtest);
-    }
-
-    if context.gdhealth_config_path.exists() {
-        let body = fs::read_to_string(&context.gdhealth_config_path).with_context(|| {
-            format!("failed to read {}", context.gdhealth_config_path.display())
-        })?;
-        let value: toml::Value = body.parse().with_context(|| {
-            format!("failed to parse {}", context.gdhealth_config_path.display())
-        })?;
-        config.gdhealth = import_gdhealth_config(value, &config.gdhealth);
-    }
-
-    Ok(())
-}
-
-fn import_gdtest_config(value: toml::Value, defaults: &GdtestConfig) -> GdtestConfig {
-    let mut config = defaults.clone();
-    if let Some(display_mode) = value.get("display_mode").and_then(|value| value.as_str()) {
-        config.display_mode = display_mode.to_string();
-    }
-    if let Some(harness) = value.get("harness").and_then(|value| value.as_str()) {
-        config.harness = harness.to_string();
-    }
-    if let Some(editor_plugin_dir) = value
-        .get("editor_plugin_dir")
-        .and_then(|value| value.as_str())
-    {
-        config.editor_plugin_dir = editor_plugin_dir.to_string();
-    }
-    if let Some(install_editor) = value
-        .get("install_editor")
-        .and_then(|value| value.as_bool())
-    {
-        config.install_editor = install_editor;
-    }
-    if let Some(patterns) = array_of_strings(value.get("patterns")) {
-        config.patterns = patterns;
-    }
-    if let Some(exclude) = array_of_strings(value.get("coverage_exclude")) {
-        config.coverage_exclude = exclude;
-    }
-    if let Some(profile) = value.get("profile").and_then(|value| value.as_table()) {
-        for (name, profile_value) in profile {
-            let entry = config.profile.entry(name.clone()).or_default();
-            if let Some(reporter) = profile_value
-                .get("reporter")
-                .and_then(|value| value.as_str())
-            {
-                entry.reporter = Some(reporter.to_string());
-            }
-            if let Some(fail_fast) = profile_value
-                .get("fail_fast")
-                .and_then(|value| value.as_bool())
-            {
-                entry.fail_fast = Some(fail_fast);
-            }
-        }
-    }
-    config
-}
-
-fn import_gdhealth_config(value: toml::Value, defaults: &GdhealthConfig) -> GdhealthConfig {
-    let mut config = defaults.clone();
-    if let Some(project) = value.get("project").and_then(|value| value.as_table())
-        && let Some(root) = project.get("root").and_then(|value| value.as_str())
-    {
-        config.project = GdhealthProjectConfig {
-            root: root.to_string(),
-        };
-    }
-    if let Some(discovery) = value.get("discovery").and_then(|value| value.as_table()) {
-        let mut imported = config.discovery.clone();
-        if let Some(include) = array_of_strings(discovery.get("include")) {
-            imported.include = include;
-        }
-        if let Some(exclude) = array_of_strings(discovery.get("exclude")) {
-            imported.exclude = exclude
-                .into_iter()
-                .filter(|pattern| pattern != ".gdsuite/**")
-                .collect();
-        }
-        config.discovery = imported;
-    }
-    if let Some(groups) = value.get("groups").and_then(|value| value.as_table()) {
-        config.groups = groups
-            .iter()
-            .filter_map(|(name, value)| {
-                array_of_strings(Some(value)).map(|patterns| (name.clone(), patterns))
-            })
-            .collect();
-    }
-    if let Some(thresholds) = value.get("thresholds").and_then(|value| value.as_table()) {
-        config.thresholds = GdhealthThresholdsConfig {
-            file_lines_warn: usize_value(thresholds.get("file_lines_warn")),
-            file_lines_critical: usize_value(thresholds.get("file_lines_critical")),
-            function_lines_warn: usize_value(thresholds.get("function_lines_warn")),
-            function_lines_critical: usize_value(thresholds.get("function_lines_critical")),
-            cyclomatic_warn: usize_value(thresholds.get("cyclomatic_warn")),
-            cyclomatic_critical: usize_value(thresholds.get("cyclomatic_critical")),
-            nesting_warn: usize_value(thresholds.get("nesting_warn")),
-            nesting_critical: usize_value(thresholds.get("nesting_critical")),
-            parameters_warn: usize_value(thresholds.get("parameters_warn")),
-        };
-    }
-    if let Some(policy) = value.get("policy").and_then(|value| value.as_table()) {
-        let allow_cycles = array_of_strings(policy.get("allow_cycles")).unwrap_or_default();
-        let forbidden_dependencies = policy
-            .get("forbidden_dependencies")
-            .and_then(|value| value.as_array())
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(|value| {
-                        let table = value.as_table()?;
-                        Some(crate::config::GdhealthForbiddenDependency {
-                            from: table.get("from")?.as_str()?.to_string(),
-                            to: table.get("to")?.as_str()?.to_string(),
-                            severity: table.get("severity")?.as_str()?.to_string(),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        config.policy = GdhealthPolicyConfig {
-            allow_cycles,
-            forbidden_dependencies,
-        };
-    }
-    config
-}
-
-fn array_of_strings(value: Option<&toml::Value>) -> Option<Vec<String>> {
-    value.and_then(|value| {
-        value.as_array().map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str().map(ToString::to_string))
-                .collect::<Vec<_>>()
-        })
-    })
-}
-
-fn usize_value(value: Option<&toml::Value>) -> Option<usize> {
-    value
-        .and_then(|value| value.as_integer())
-        .map(|value| value as usize)
-}
-
 pub fn install_gdtest_addons(
     context: &ProjectContext,
     config: &GdsuiteConfig,
@@ -1806,7 +1561,7 @@ pub fn install_gdtest_addons(
     }
 
     let mut report = AddonInstallReport::default();
-    let runtime_target_dir = harness_parent_dir(&config.gdtest.harness);
+    let runtime_target_dir = harness_parent_dir(GDTEST_HARNESS_PATH);
     let runtime_res_dir = res_dir_from_rel_path(&runtime_target_dir);
     install_addon_dir(
         &runtime_source,
@@ -1815,22 +1570,20 @@ pub fn install_gdtest_addons(
         |relative, contents| rewrite_runtime_asset(relative, contents, &runtime_res_dir),
     )?;
 
-    if config.gdtest.install_editor {
-        let editor_source = source_root.join("addons").join("gdtest_editor");
-        if !editor_source.exists() {
-            return Err(anyhow!(
-                "gdtest editor addon source missing at {}",
-                editor_source.display()
-            ));
-        }
-        let editor_res_dir = res_dir_from_rel_path(Path::new(&config.gdtest.editor_plugin_dir));
-        install_addon_dir(
-            &editor_source,
-            &context.root.join(&config.gdtest.editor_plugin_dir),
-            &mut report,
-            |relative, contents| rewrite_editor_asset(relative, contents, &editor_res_dir),
-        )?;
+    let editor_source = source_root.join("addons").join("gdtest_editor");
+    if !editor_source.exists() {
+        return Err(anyhow!(
+            "gdtest editor addon source missing at {}",
+            editor_source.display()
+        ));
     }
+    let editor_res_dir = res_dir_from_rel_path(Path::new(GDTEST_EDITOR_PLUGIN_DIR));
+    install_addon_dir(
+        &editor_source,
+        &context.root.join(GDTEST_EDITOR_PLUGIN_DIR),
+        &mut report,
+        |relative, contents| rewrite_editor_asset(relative, contents, &editor_res_dir),
+    )?;
 
     Ok(report)
 }

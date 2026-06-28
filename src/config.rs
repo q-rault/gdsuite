@@ -1,11 +1,10 @@
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -17,19 +16,9 @@ pub struct GdsuiteConfig {
     #[serde(default)]
     pub commands: CommandsConfig,
     #[serde(default)]
-    pub fix: FixConfig,
-    #[serde(default)]
-    pub lint: LintConfig,
-    #[serde(default)]
-    pub typecheck: TypecheckConfig,
-    #[serde(default)]
     pub reports: ReportsConfig,
     #[serde(default)]
-    pub health: HealthConfig,
-    #[serde(default)]
-    pub gdtest: GdtestConfig,
-    #[serde(default)]
-    pub gdhealth: GdhealthConfig,
+    pub check: CheckConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +36,8 @@ pub struct ToolsConfig {
     pub gdtest_source: String,
     #[serde(default = "default_gdhealth_source")]
     pub gdhealth_source: String,
+    #[serde(default = "default_gdtypecheck_source")]
+    pub gdtypecheck_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,32 +49,6 @@ pub struct CommandsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FixConfig {
-    #[serde(default = "default_safe_rules")]
-    pub safe_rules: Vec<String>,
-    #[serde(default = "default_unsafe_rules")]
-    pub unsafe_rules: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LintConfig {
-    #[serde(default = "default_line_length")]
-    pub line_length: usize,
-    #[serde(default = "default_scripts")]
-    pub include: Vec<String>,
-    #[serde(default = "default_exclude")]
-    pub exclude: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TypecheckConfig {
-    #[serde(default = "default_scripts")]
-    pub include: Vec<String>,
-    #[serde(default = "default_exclude")]
-    pub exclude: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportsConfig {
     #[serde(default = "default_report_format")]
     pub default: String,
@@ -92,93 +57,19 @@ pub struct ReportsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HealthConfig {
-    #[serde(default = "default_health_command")]
-    pub command: String,
-    #[serde(default = "default_health_fail_on")]
-    pub fail_on: String,
-    #[serde(default = "default_health_bundle_dir")]
-    pub bundle_dir: PathBuf,
+pub struct CheckConfig {
+    #[serde(default = "default_check_steps")]
+    pub steps: Vec<CheckStep>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GdtestConfig {
-    #[serde(default = "default_gdtest_display_mode")]
-    pub display_mode: String,
-    #[serde(default = "default_gdtest_harness")]
-    pub harness: String,
-    #[serde(default = "default_gdtest_editor_plugin_dir")]
-    pub editor_plugin_dir: String,
-    #[serde(default = "default_gdtest_install_editor")]
-    pub install_editor: bool,
-    #[serde(default = "default_gdtest_patterns")]
-    pub patterns: Vec<String>,
-    #[serde(default = "default_exclude")]
-    pub coverage_exclude: Vec<String>,
-    #[serde(default)]
-    pub profile: BTreeMap<String, GdtestProfileConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GdtestProfileConfig {
-    pub reporter: Option<String>,
-    pub fail_fast: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GdhealthConfig {
-    #[serde(default)]
-    pub project: GdhealthProjectConfig,
-    #[serde(default)]
-    pub discovery: GdhealthDiscoveryConfig,
-    #[serde(default = "default_gdhealth_groups")]
-    pub groups: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
-    pub thresholds: GdhealthThresholdsConfig,
-    #[serde(default)]
-    pub policy: GdhealthPolicyConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GdhealthProjectConfig {
-    #[serde(default = "default_root")]
-    pub root: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GdhealthDiscoveryConfig {
-    #[serde(default = "default_gdhealth_include")]
-    pub include: Vec<String>,
-    #[serde(default = "default_gdhealth_exclude")]
-    pub exclude: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GdhealthThresholdsConfig {
-    pub file_lines_warn: Option<usize>,
-    pub file_lines_critical: Option<usize>,
-    pub function_lines_warn: Option<usize>,
-    pub function_lines_critical: Option<usize>,
-    pub cyclomatic_warn: Option<usize>,
-    pub cyclomatic_critical: Option<usize>,
-    pub nesting_warn: Option<usize>,
-    pub nesting_critical: Option<usize>,
-    pub parameters_warn: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GdhealthPolicyConfig {
-    #[serde(default)]
-    pub allow_cycles: Vec<String>,
-    #[serde(default)]
-    pub forbidden_dependencies: Vec<GdhealthForbiddenDependency>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GdhealthForbiddenDependency {
-    pub from: String,
-    pub to: String,
-    pub severity: String,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckStep {
+    Fmt,
+    Lint,
+    Typecheck,
+    Test,
+    Health,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -189,6 +80,7 @@ pub struct Manifest {
     pub gdlint: Option<PathBuf>,
     pub gdtest: Option<PathBuf>,
     pub gdhealth: Option<PathBuf>,
+    pub gdtypecheck: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +101,7 @@ pub struct ReleaseTools {
     pub gdtoolkit: ReleaseTool,
     pub gdtest: ReleaseTool,
     pub gdhealth: ReleaseTool,
+    pub gdtypecheck: ReleaseTool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +175,7 @@ pub struct InstalledToolsState {
     pub gdtoolkit: InstalledToolState,
     pub gdtest: InstalledToolState,
     pub gdhealth: InstalledToolState,
+    pub gdtypecheck: InstalledToolState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +213,7 @@ impl Default for ToolsConfig {
             gdtoolkit: default_gdtoolkit_version(),
             gdtest_source: default_gdtest_source(),
             gdhealth_source: default_gdhealth_source(),
+            gdtypecheck_source: default_gdtypecheck_source(),
         }
     }
 }
@@ -332,34 +227,6 @@ impl Default for CommandsConfig {
     }
 }
 
-impl Default for FixConfig {
-    fn default() -> Self {
-        Self {
-            safe_rules: default_safe_rules(),
-            unsafe_rules: default_unsafe_rules(),
-        }
-    }
-}
-
-impl Default for LintConfig {
-    fn default() -> Self {
-        Self {
-            line_length: default_line_length(),
-            include: default_scripts(),
-            exclude: default_exclude(),
-        }
-    }
-}
-
-impl Default for TypecheckConfig {
-    fn default() -> Self {
-        Self {
-            include: default_scripts(),
-            exclude: default_exclude(),
-        }
-    }
-}
-
 impl Default for ReportsConfig {
     fn default() -> Self {
         Self {
@@ -369,55 +236,10 @@ impl Default for ReportsConfig {
     }
 }
 
-impl Default for HealthConfig {
+impl Default for CheckConfig {
     fn default() -> Self {
         Self {
-            command: default_health_command(),
-            fail_on: default_health_fail_on(),
-            bundle_dir: default_health_bundle_dir(),
-        }
-    }
-}
-
-impl Default for GdtestConfig {
-    fn default() -> Self {
-        Self {
-            display_mode: default_gdtest_display_mode(),
-            harness: default_gdtest_harness(),
-            editor_plugin_dir: default_gdtest_editor_plugin_dir(),
-            install_editor: default_gdtest_install_editor(),
-            patterns: default_gdtest_patterns(),
-            coverage_exclude: default_exclude(),
-            profile: default_gdtest_profiles(),
-        }
-    }
-}
-
-impl Default for GdhealthConfig {
-    fn default() -> Self {
-        Self {
-            project: GdhealthProjectConfig::default(),
-            discovery: GdhealthDiscoveryConfig::default(),
-            groups: default_gdhealth_groups(),
-            thresholds: GdhealthThresholdsConfig::default(),
-            policy: GdhealthPolicyConfig::default(),
-        }
-    }
-}
-
-impl Default for GdhealthProjectConfig {
-    fn default() -> Self {
-        Self {
-            root: default_root(),
-        }
-    }
-}
-
-impl Default for GdhealthDiscoveryConfig {
-    fn default() -> Self {
-        Self {
-            include: default_gdhealth_include(),
-            exclude: default_gdhealth_exclude(),
+            steps: default_check_steps(),
         }
     }
 }
@@ -426,10 +248,12 @@ impl GdsuiteConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
-        let mut config: Self = toml::from_str(&text)
+        let value: toml::Value = toml::from_str(&text)
             .with_context(|| format!("failed to parse config {}", path.display()))?;
-        config.ensure_gdtest_profile_defaults();
-        Ok(config)
+        reject_legacy_sections(path, &value)?;
+        value
+            .try_into()
+            .with_context(|| format!("failed to parse config {}", path.display()))
     }
 
     pub fn write(&self, path: &Path) -> Result<()> {
@@ -444,18 +268,6 @@ impl GdsuiteConfig {
 
         fs::write(path, default_config_template(godot_exe))
             .with_context(|| format!("failed to write config {}", path.display()))
-    }
-
-    fn ensure_gdtest_profile_defaults(&mut self) {
-        for (name, defaults) in default_gdtest_profiles() {
-            let profile = self.gdtest.profile.entry(name).or_default();
-            if profile.reporter.is_none() {
-                profile.reporter = defaults.reporter;
-            }
-            if profile.fail_fast.is_none() {
-                profile.fail_fast = defaults.fail_fast;
-            }
-        }
     }
 }
 
@@ -529,6 +341,57 @@ impl ToolAcquireSpec {
     }
 }
 
+fn reject_legacy_sections(path: &Path, value: &toml::Value) -> Result<()> {
+    let Some(table) = value.as_table() else {
+        return Ok(());
+    };
+
+    let legacy = [
+        (
+            "lint",
+            "create `gdlintrc` with your native gdlint settings",
+        ),
+        (
+            "health",
+            "remove suite-owned health settings; use gdhealth CLI args or `gdhealth.toml`",
+        ),
+        (
+            "gdtest",
+            "create `gdtest.toml` with your native gdtest settings",
+        ),
+        (
+            "gdhealth",
+            "create `gdhealth.toml` with your native gdhealth settings",
+        ),
+        (
+            "typecheck",
+            "configure the delegated typecheck tool directly; gdsuite no longer owns typecheck config",
+        ),
+        (
+            "fix",
+            "remove suite-owned fixers; use the delegated tool behavior instead",
+        ),
+    ]
+    .into_iter()
+    .filter(|(key, _)| table.contains_key(*key))
+    .collect::<Vec<_>>();
+
+    if legacy.is_empty() {
+        return Ok(());
+    }
+
+    let guidance = legacy
+        .into_iter()
+        .map(|(key, message)| format!("[{key}] is no longer supported: {message}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(anyhow!(
+        "unsupported legacy sections in {}: {}. Run `gdsuite migrate` to rewrite the file.",
+        path.display(),
+        guidance
+    ))
+}
+
 fn default_root() -> String {
     ".".to_string()
 }
@@ -559,30 +422,12 @@ fn default_gdhealth_source() -> String {
         .render_requested()
 }
 
-fn default_scripts() -> Vec<String> {
-    vec![
-        "*.gd".to_string(),
-        "client/**/*.gd".to_string(),
-        "server/**/*.gd".to_string(),
-        "test/**/*.gd".to_string(),
-    ]
-}
-
-fn default_exclude() -> Vec<String> {
-    vec![
-        "addons/**".to_string(),
-        ".godot/**".to_string(),
-        "reports/**".to_string(),
-        ".gdsuite/**".to_string(),
-    ]
-}
-
-fn default_gdhealth_exclude() -> Vec<String> {
-    vec![
-        "addons/**".to_string(),
-        ".godot/**".to_string(),
-        "reports/**".to_string(),
-    ]
+fn default_gdtypecheck_source() -> String {
+    ReleaseManifest::bundled()
+        .tools
+        .gdtypecheck
+        .acquire
+        .render_requested()
 }
 
 fn default_test_target() -> String {
@@ -593,22 +438,6 @@ fn default_health_subcommand() -> String {
     "health".to_string()
 }
 
-fn default_safe_rules() -> Vec<String> {
-    vec![
-        "format".to_string(),
-        "trailing-whitespace".to_string(),
-        "final-newline".to_string(),
-    ]
-}
-
-fn default_unsafe_rules() -> Vec<String> {
-    vec!["class-definitions-order".to_string()]
-}
-
-fn default_line_length() -> usize {
-    100
-}
-
 fn default_report_format() -> String {
     "text".to_string()
 }
@@ -617,76 +446,14 @@ fn default_artifacts_dir() -> PathBuf {
     PathBuf::from("reports/gdsuite")
 }
 
-fn default_health_command() -> String {
-    "health".to_string()
-}
-
-fn default_health_fail_on() -> String {
-    "critical".to_string()
-}
-
-fn default_health_bundle_dir() -> PathBuf {
-    PathBuf::from("reports/code-health")
-}
-
-fn default_gdtest_display_mode() -> String {
-    "headless".to_string()
-}
-
-fn default_gdtest_harness() -> String {
-    "addons/gdtest/gdtest_worker.gd".to_string()
-}
-
-fn default_gdtest_editor_plugin_dir() -> String {
-    "addons/gdtest_editor".to_string()
-}
-
-fn default_gdtest_install_editor() -> bool {
-    true
-}
-
-fn default_gdtest_patterns() -> Vec<String> {
-    vec!["test/**/*.gd".to_string(), "**/*.test.gd".to_string()]
-}
-
-fn default_gdtest_profiles() -> BTreeMap<String, GdtestProfileConfig> {
-    BTreeMap::from([(
-        "ci".to_string(),
-        GdtestProfileConfig {
-            reporter: Some("junit".to_string()),
-            fail_fast: Some(true),
-        },
-    )])
-}
-
-fn default_gdhealth_include() -> Vec<String> {
-    vec!["**/*.gd".to_string()]
-}
-
-fn default_gdhealth_groups() -> BTreeMap<String, Vec<String>> {
-    BTreeMap::from([
-        (
-            "client".to_string(),
-            vec!["client/**/*.gd".to_string(), "client/**".to_string()],
-        ),
-        (
-            "server".to_string(),
-            vec!["server/**/*.gd".to_string(), "server/**".to_string()],
-        ),
-        (
-            "test".to_string(),
-            vec!["test/**/*.gd".to_string(), "test/**".to_string()],
-        ),
-        (
-            "root_gameplay".to_string(),
-            vec![
-                "*.gd".to_string(),
-                "!test/**".to_string(),
-                "!server/**".to_string(),
-                "!client/**".to_string(),
-            ],
-        ),
-    ])
+fn default_check_steps() -> Vec<CheckStep> {
+    vec![
+        CheckStep::Fmt,
+        CheckStep::Lint,
+        CheckStep::Typecheck,
+        CheckStep::Test,
+        CheckStep::Health,
+    ]
 }
 
 fn default_config_template(godot_exe: Option<&Path>) -> String {
@@ -707,57 +474,18 @@ root = "."
 gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
+gdtypecheck_source = "{}"
 
 [commands]
 default_test_target = "test/"
 default_health_subcommand = "health"
 
-[fix]
-safe_rules = ["format", "trailing-whitespace", "final-newline"]
-unsafe_rules = ["class-definitions-order"]
-
-[lint]
-line_length = 100
-include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
-exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
-
-[typecheck]
-include = ["*.gd", "client/**/*.gd", "server/**/*.gd", "test/**/*.gd"]
-exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
-
 [reports]
 default = "text"
 artifacts_dir = "reports/gdsuite"
 
-[health]
-command = "health"
-fail_on = "critical"
-bundle_dir = "reports/code-health"
-
-[gdtest]
-display_mode = "headless"
-harness = "addons/gdtest/gdtest_worker.gd"
-editor_plugin_dir = "addons/gdtest_editor"
-install_editor = true
-patterns = ["test/**/*.gd", "**/*.test.gd"]
-coverage_exclude = ["addons/**", ".godot/**", "reports/**", ".gdsuite/**"]
-
-[gdtest.profile.ci]
-reporter = "junit"
-fail_fast = true
-
-[gdhealth.project]
-root = "."
-
-[gdhealth.discovery]
-include = ["**/*.gd"]
-exclude = ["addons/**", ".godot/**", "reports/**"]
-
-[gdhealth.groups]
-client = ["client/**/*.gd", "client/**"]
-server = ["server/**/*.gd", "server/**"]
-test = ["test/**/*.gd", "test/**"]
-root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
+[check]
+steps = ["fmt", "lint", "typecheck", "test", "health"]
 "#,
         release
             .tools
@@ -767,6 +495,7 @@ root_gameplay = ["*.gd", "!test/**", "!server/**", "!client/**"]
             .expect("gdtoolkit release manifest must use pip"),
         release.tools.gdtest.acquire.render_requested(),
         release.tools.gdhealth.acquire.render_requested(),
+        release.tools.gdtypecheck.acquire.render_requested(),
     )
 }
 
@@ -783,201 +512,49 @@ fn render_gdsuite_config(config: &GdsuiteConfig) -> String {
         })
         .unwrap_or_default();
 
-    let mut body = format!(
+    format!(
         r#"[project]
 root = "{}"
 {godot_exe}[tools]
 gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
+gdtypecheck_source = "{}"
 
 [commands]
 default_test_target = "{}"
 default_health_subcommand = "{}"
 
-[fix]
-safe_rules = {}
-unsafe_rules = {}
+[reports]
+default = "{}"
+artifacts_dir = "{}"
 
-[lint]
-line_length = {}
-include = {}
-exclude = {}
-
-[typecheck]
-include = {}
-exclude = {}
+[check]
+steps = {}
 "#,
         escape_string(&config.project.root),
         escape_string(&config.tools.gdtoolkit),
         escape_string(&config.tools.gdtest_source),
         escape_string(&config.tools.gdhealth_source),
+        escape_string(&config.tools.gdtypecheck_source),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
-        render_string_array(&config.fix.safe_rules),
-        render_string_array(&config.fix.unsafe_rules),
-        config.lint.line_length,
-        render_string_array(&config.lint.include),
-        render_string_array(&config.lint.exclude),
-        render_string_array(&config.typecheck.include),
-        render_string_array(&config.typecheck.exclude),
-    );
-
-    body.push_str(&format!(
-        r#"
-[reports]
-default = "{}"
-artifacts_dir = "{}"
-
-[health]
-command = "{}"
-fail_on = "{}"
-bundle_dir = "{}"
-
-[gdtest]
-display_mode = "{}"
-harness = "{}"
-editor_plugin_dir = "{}"
-install_editor = {}
-patterns = {}
-coverage_exclude = {}
-"#,
         escape_string(&config.reports.default),
         escape_path(&config.reports.artifacts_dir),
-        escape_string(&config.health.command),
-        escape_string(&config.health.fail_on),
-        escape_path(&config.health.bundle_dir),
-        escape_string(&config.gdtest.display_mode),
-        escape_string(&config.gdtest.harness),
-        escape_string(&config.gdtest.editor_plugin_dir),
-        config.gdtest.install_editor,
-        render_string_array(&config.gdtest.patterns),
-        render_string_array(&config.gdtest.coverage_exclude),
-    ));
-
-    for (name, profile) in &config.gdtest.profile {
-        body.push_str(&format!("\n[gdtest.profile.{name}]\n"));
-        if let Some(reporter) = &profile.reporter {
-            body.push_str(&format!("reporter = \"{}\"\n", escape_string(reporter)));
-        }
-        if let Some(fail_fast) = profile.fail_fast {
-            body.push_str(&format!("fail_fast = {fail_fast}\n"));
-        }
-    }
-
-    body.push_str(&format!(
-        r#"
-[gdhealth.project]
-root = "{}"
-
-[gdhealth.discovery]
-include = {}
-exclude = {}
-
-[gdhealth.groups]
-"#,
-        escape_string(&config.gdhealth.project.root),
-        render_string_array(&config.gdhealth.discovery.include),
-        render_string_array(&config.gdhealth.discovery.exclude),
-    ));
-
-    for (name, patterns) in &config.gdhealth.groups {
-        body.push_str(&format!("{name} = {}\n", render_string_array(patterns)));
-    }
-
-    if has_thresholds(&config.gdhealth.thresholds) {
-        body.push_str("\n[gdhealth.thresholds]\n");
-        append_optional_usize(
-            &mut body,
-            "file_lines_warn",
-            config.gdhealth.thresholds.file_lines_warn,
-        );
-        append_optional_usize(
-            &mut body,
-            "file_lines_critical",
-            config.gdhealth.thresholds.file_lines_critical,
-        );
-        append_optional_usize(
-            &mut body,
-            "function_lines_warn",
-            config.gdhealth.thresholds.function_lines_warn,
-        );
-        append_optional_usize(
-            &mut body,
-            "function_lines_critical",
-            config.gdhealth.thresholds.function_lines_critical,
-        );
-        append_optional_usize(
-            &mut body,
-            "cyclomatic_warn",
-            config.gdhealth.thresholds.cyclomatic_warn,
-        );
-        append_optional_usize(
-            &mut body,
-            "cyclomatic_critical",
-            config.gdhealth.thresholds.cyclomatic_critical,
-        );
-        append_optional_usize(
-            &mut body,
-            "nesting_warn",
-            config.gdhealth.thresholds.nesting_warn,
-        );
-        append_optional_usize(
-            &mut body,
-            "nesting_critical",
-            config.gdhealth.thresholds.nesting_critical,
-        );
-        append_optional_usize(
-            &mut body,
-            "parameters_warn",
-            config.gdhealth.thresholds.parameters_warn,
-        );
-    }
-
-    if !config.gdhealth.policy.allow_cycles.is_empty()
-        || !config.gdhealth.policy.forbidden_dependencies.is_empty()
-    {
-        body.push_str("\n[gdhealth.policy]\n");
-        body.push_str(&format!(
-            "allow_cycles = {}\n",
-            render_string_array(&config.gdhealth.policy.allow_cycles)
-        ));
-        for rule in &config.gdhealth.policy.forbidden_dependencies {
-            body.push_str("\n[[gdhealth.policy.forbidden_dependencies]]\n");
-            body.push_str(&format!("from = \"{}\"\n", escape_string(&rule.from)));
-            body.push_str(&format!("to = \"{}\"\n", escape_string(&rule.to)));
-            body.push_str(&format!(
-                "severity = \"{}\"\n",
-                escape_string(&rule.severity)
-            ));
-        }
-    }
-
-    body
+        render_check_steps(&config.check.steps),
+    )
 }
 
-fn has_thresholds(config: &GdhealthThresholdsConfig) -> bool {
-    config.file_lines_warn.is_some()
-        || config.file_lines_critical.is_some()
-        || config.function_lines_warn.is_some()
-        || config.function_lines_critical.is_some()
-        || config.cyclomatic_warn.is_some()
-        || config.cyclomatic_critical.is_some()
-        || config.nesting_warn.is_some()
-        || config.nesting_critical.is_some()
-        || config.parameters_warn.is_some()
-}
-
-fn append_optional_usize(body: &mut String, key: &str, value: Option<usize>) {
-    if let Some(value) = value {
-        body.push_str(&format!("{key} = {value}\n"));
-    }
-}
-
-fn render_string_array(values: &[String]) -> String {
-    let values = values
+fn render_check_steps(steps: &[CheckStep]) -> String {
+    let values = steps
         .iter()
-        .map(|value| format!("\"{}\"", escape_string(value)))
+        .map(|step| match step {
+            CheckStep::Fmt => "\"fmt\"",
+            CheckStep::Lint => "\"lint\"",
+            CheckStep::Typecheck => "\"typecheck\"",
+            CheckStep::Test => "\"test\"",
+            CheckStep::Health => "\"health\"",
+        })
         .collect::<Vec<_>>();
     format!("[{}]", values.join(", "))
 }

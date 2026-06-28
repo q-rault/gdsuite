@@ -19,20 +19,20 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(about = "Bootstrap the local gdsuite toolchain and import suite config")]
+    #[command(about = "Bootstrap the local gdsuite toolchain and write suite config")]
     Init(OutputArgs),
-    #[command(about = "Normalize suite-owned config and rewrite obvious entrypoints")]
+    #[command(about = "Rewrite gdsuite.toml to the orchestration-only schema")]
     Migrate,
     #[command(about = "Install or repair the local gdsuite toolchain")]
     Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor(DoctorArgs),
-    #[command(about = "Run gdformat on discovered GDScript files")]
-    Fmt(FmtArgs),
-    #[command(about = "Run gdlint and optional suite-owned fixers")]
+    #[command(about = "Forward arguments to gdformat")]
+    Fmt(ForwardArgs),
+    #[command(about = "Forward arguments to gdlint")]
     Lint(LintArgs),
-    #[command(about = "Run a Godot headless load() pass over discovered scripts")]
-    Typecheck,
+    #[command(about = "Forward arguments to gdtypecheck")]
+    Typecheck(ForwardArgs),
     #[command(
         about = "Forward arguments to project-local gdtest",
         long_about = "Forward arguments to project-local gdtest.\n\nUse `gdsuite test` for normal suite-owned test execution. Use `gdsuite test -- ...` when you need direct gdtest flags or subcommands."
@@ -47,12 +47,6 @@ pub enum Commands {
     Check(RunArgs),
     #[command(about = "Print a saved suite JSON report artifact")]
     Report(ReportArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct FmtArgs {
-    #[arg(long)]
-    pub check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -87,12 +81,16 @@ pub enum OutputModeArg {
 
 #[derive(Debug, Args)]
 pub struct LintArgs {
-    #[arg(long)]
-    pub fix: bool,
-    #[arg(long)]
-    pub unsafe_fixes: bool,
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
+    #[arg(last = true, action = ArgAction::Append)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ForwardArgs {
+    #[arg(last = true, action = ArgAction::Append)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -105,11 +103,6 @@ pub struct ForwardReportArgs {
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
-    #[arg(
-        long,
-        help = "Auto-format first, then apply safe lint fixes before validation"
-    )]
-    pub fix: bool,
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
 }

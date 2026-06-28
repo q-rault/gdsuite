@@ -1,7 +1,6 @@
 mod app;
 mod cli;
 mod config;
-mod fixers;
 mod migrate;
 mod output;
 mod process;
