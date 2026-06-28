@@ -56,8 +56,8 @@ On success it must:
 1. Resolve the Godot executable.
 2. Create `.gdsuite/` and its state/tool directories.
 3. Write `gdsuite.toml` if it does not already exist.
-4. Write missing delegated product configs (`gdtest.toml`,
-   `gdhealth.toml`).
+4. Detect and optionally import existing delegated product configs
+   (`gdtest.toml`, `gdhealth.toml`) into `gdsuite.toml`.
 5. Install the project-local Python environment used for `gdtoolkit`.
 6. Install `gdformat` and `gdlint` into the project-local toolchain.
 7. Install `gdtest` and `gdhealth` from the sources declared in
@@ -67,8 +67,9 @@ On success it must:
    configured suite paths, without overwriting locally modified addon files.
 10. Verify the resulting toolchain is executable.
 
-`init` is allowed to create missing files. It is not the command for
-reconciling an already customized project with new suite-owned invariants.
+`init` is allowed to create `gdsuite.toml` and adopt existing product-owned
+config into the suite contract. It should not create delegated product config
+files as part of the normal model.
 
 ### `gdsuite setup`
 
@@ -79,7 +80,6 @@ It must:
 
 - reuse the committed `gdsuite.toml` contract when it exists
 - install, restore, or refresh the project-local toolchain under `.gdsuite/`
-- preserve existing project configs unless `--sync-product-configs` is used
 - refresh manifests and version state
 - remain safe to rerun on partial or drifted local state
 
@@ -87,9 +87,6 @@ It must:
 narrow for the command name. `setup` also covers first install after clone,
 normal reruns, and deterministic reconciliation against the committed suite
 contract.
-
-With `--sync-product-configs`, `setup` also re-renders the suite-owned subset
-of `gdtest.toml` and `gdhealth.toml` while preserving product-owned fields.
 
 ### `gdsuite doctor`
 
@@ -100,7 +97,6 @@ It must report:
 - config and manifest locations
 - resolved executable paths
 - actionable missing-tool guidance
-- drift between delegated configs and suite-owned invariants
 
 ## Source Model
 
@@ -167,7 +163,7 @@ The default bootstrap contract is:
 - default `gdtoolkit` to a compatible floating major line
 - default delegated tool sources to local sibling checkout paths during the
   prototype phase
-- default report settings and delegated config invariants
+- default report settings and suite workflow behavior
 
 Today the prototype writes local-path defaults such as:
 

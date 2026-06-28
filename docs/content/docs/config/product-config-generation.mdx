@@ -1,21 +1,35 @@
 ---
 title: Product Config Generation
-description: How gdsuite writes missing product configs, synchronizes suite invariants, and keeps direct product use viable.
+description: How delegated product configs relate to the suite-first model and when they still matter.
 ---
 
-The suite does not replace product configs. It generates missing files and synchronizes only the parts it must own for correctness.
+The suite-first model does not depend on generated `gdtest.toml` or
+`gdhealth.toml` files.
+
+`gdsuite` should use `gdsuite.toml` for normal operation. Delegated product
+configs remain relevant only for direct `gdtest` or `gdhealth` CLI usage, or
+as import inputs when adopting an older repository.
 
 ## What `init` does
 
-- writes missing `gdtest.toml`
-- writes missing `gdhealth.toml`
 - writes the top-level `gdsuite.toml`
+- detects existing `gdtest.toml` or `gdhealth.toml`
+- imports relevant settings from those files into `gdsuite.toml`
+- leaves delegated product configs untouched after import
 
-## What `migrate` adds
+## What the suite does not do
 
-- rewrites older suite config into the current contract
-- merges suite-owned invariants into existing product configs
-- rewrites obvious project docs and CI entrypoints toward suite commands
+- it does not create `gdtest.toml`
+- it does not create `gdhealth.toml`
+- it does not synchronize delegated product configs with `gdsuite.toml`
+- it does not treat drift between delegated product configs and `gdsuite.toml`
+  as part of the intended architecture
+
+## When delegated product configs still matter
+
+- keep `gdtest.toml` only if you run `gdtest` directly
+- keep `gdhealth.toml` only if you run `gdhealth` directly
+- otherwise, prefer a repository shape centered on `gdsuite.toml`
 
 ## Next step
 

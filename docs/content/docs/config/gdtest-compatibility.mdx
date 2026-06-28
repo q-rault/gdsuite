@@ -1,20 +1,29 @@
 ---
 title: gdtest.toml compatibility
-description: Which gdtest config areas stay product-owned and which ones gdsuite expects to keep aligned.
+description: When gdtest.toml is still useful and why gdsuite no longer depends on it.
 ---
 
-`gdtest.toml` remains a normal `gdtest` config file. Users can still run `gdtest` directly.
+`gdtest.toml` remains a normal `gdtest` config file. Users can still run
+`gdtest` directly.
 
-## Suite-owned expectations
+For `gdsuite`, it is a compatibility file rather than part of the normal suite
+contract.
 
-- suite-aligned test discovery patterns
-- CI profile wiring such as `profile.ci.reporter`
-- other shared defaults required for `gdsuite test` and `gdsuite check --profile ci`
+## What `gdsuite` uses instead
 
-## Product-owned areas
+`gdsuite` should read `gdsuite.toml` for suite workflows, including the
+`gdtest`-related settings that matter to `gdsuite test` and `gdsuite check`.
 
-- advanced harness and runtime behavior
-- filters, jobs, and product-specific execution details
+## When `gdtest.toml` still matters
+
+- when you run `gdtest` directly
+- when `gdsuite init` imports settings from an older repository
+
+## What `gdsuite` does not assume
+
+- it does not require `gdtest.toml` to exist
+- it does not keep `gdtest.toml` aligned with `gdsuite.toml`
+- it does not read `gdtest.toml` as a runtime fallback during normal suite use
 
 ## Next step
 

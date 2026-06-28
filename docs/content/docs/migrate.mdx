@@ -9,7 +9,9 @@ This page explains how to bring an existing repository onto the current `gdsuite
 
 ## When you should use this
 
-Use this page when the project already has `gdtest`, `gdhealth`, CI files, or older docs wording that predates the current suite-first model.
+Use this page when the project already has `gdtest`, `gdhealth`, product config
+files, CI files, or older docs wording that predates the current suite-first
+model.
 
 ## What you need before starting
 
@@ -25,16 +27,16 @@ Use this page when the project already has `gdtest`, `gdhealth`, CI files, or ol
 cd path/to/existing-project
 ```
 
-2. Run the migration command.
+2. Run the adoption command.
 
 ```bash
-gdsuite migrate
+gdsuite init
 ```
 
-3. Review the resulting top-level and product config files.
+3. Review the resulting suite config and any obvious doc changes.
 
 ```bash
-git diff -- gdsuite.toml gdtest.toml gdhealth.toml README.md docs
+git diff -- gdsuite.toml README.md docs
 ```
 
 4. Run the normal suite checks.
@@ -50,14 +52,14 @@ gdsuite health
 Success means:
 
 - `gdsuite.toml` reflects the current suite contract
-- suite-owned invariants are synchronized into `gdtest.toml` and `gdhealth.toml`
+- relevant settings from older product configs are imported into `gdsuite.toml`
 - obvious old `gdtest` and `gdhealth health` entrypoints in docs or CI are rewritten toward suite entrypoints
-- `gdsuite doctor` no longer warns about known config drift
+- runtime `gdsuite` commands no longer depend on delegated product configs
 
 ## Common mistakes
 
-- Using `setup --sync-product-configs` as if it were the main adoption path
-- Skipping review of generated config changes in an older repo
+- Treating `migrate` or delegated-config sync as the main adoption path instead of `init`
+- Expecting `gdsuite` to keep `gdtest.toml` or `gdhealth.toml` aligned after import
 - Leaving stale CI wording that still implies a nonexistent `gdsuite ci` command
 
 ## Where to go next

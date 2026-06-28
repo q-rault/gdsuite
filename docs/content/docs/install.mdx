@@ -61,14 +61,13 @@ Success means:
 
 - `.gdsuite/` exists in the project
 - `gdsuite.toml` exists
-- `gdtest.toml` and `gdhealth.toml` exist if they were missing before
 - `gdsuite doctor` prints resolved paths and ends with `[gdsuite:doctor] status ok`
 
 ## Common mistakes
 
 - Installing `gdsuite` globally but never running `gdsuite init` inside the project
 - Assuming Godot discovery will work if the executable has a custom name or location
-- Treating `gdtest.toml` or `gdhealth.toml` as the top-level workflow contract instead of `gdsuite.toml`
+- Treating `gdtest.toml` or `gdhealth.toml` as part of the normal `gdsuite` runtime contract instead of `gdsuite.toml`
 
 ## Where to go next
 

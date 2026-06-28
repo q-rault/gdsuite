@@ -11,7 +11,7 @@ If the suite feels broken, start with:
 gdsuite doctor
 ```
 
-That prints resolved paths, config locations, setup state, and warnings about product config drift.
+That prints resolved paths, config locations, and setup state.
 
 When all tools are installed, pretty output ends with `[gdsuite:doctor] status ok`:
 
@@ -50,15 +50,17 @@ The project was never bootstrapped. Run:
 gdsuite init
 ```
 
-### Product config drift warnings
+### Old delegated product configs still exist
 
-`doctor` warns when `gdtest.toml` or `gdhealth.toml` drift from suite-owned invariants. The preferred repair path is:
+If the repository still has `gdtest.toml` or `gdhealth.toml`, remember that
+those files are for direct `gdtest` or `gdhealth` CLI usage, not for normal
+`gdsuite` runtime behavior.
 
 ```bash
-gdsuite migrate
+gdsuite init
 ```
 
-Use `gdsuite setup --sync-product-configs` only when you specifically want the lower-level repair/bootstrap flow.
+Then review whether the imported settings now belong in `gdsuite.toml`.
 
 ### CI aggregation fails
 
@@ -70,7 +72,8 @@ Use `gdsuite setup --sync-product-configs` only when you specifically want the l
 
 ### Health seems to ignore config exclusions
 
-Remember that `gdsuite health` writes and uses a suite overlay for `gdhealth.toml` so suite-generated state does not leak into analysis.
+Check the `gdhealth`-related settings in `gdsuite.toml`. In the suite-first
+model, `gdsuite health` should not depend on project-root `gdhealth.toml`.
 
 ## Next step
 

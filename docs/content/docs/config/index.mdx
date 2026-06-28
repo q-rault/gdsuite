@@ -1,22 +1,32 @@
 ---
 title: Config Overview
-description: Understand which config belongs to the suite, which belongs to each delegated product, and where drift warnings come from.
+description: Understand which config belongs to the suite and when delegated product configs still matter.
 ---
 
-`gdsuite.toml` is the suite-owned top-level contract. `gdtest.toml` and `gdhealth.toml` remain real product configs, but the suite synchronizes a narrow set of invariants into them so the workflow stays coherent.
+`gdsuite.toml` is the suite-owned top-level contract. It is the normal config
+surface for `gdsuite` workflows.
+
+`gdtest.toml` and `gdhealth.toml` are product-owned files for users who run
+`gdtest` or `gdhealth` directly outside of `gdsuite`. They are not part of the
+normal `gdsuite` runtime contract.
 
 ## Ownership split
 
-- Suite-owned: the workflow contract in `gdsuite.toml`, suite report paths, local toolchain state, and the product config invariants required for suite correctness
-- Product-owned: direct `gdtest` harness and runtime knobs, direct `gdhealth` groups and dependency policy, and deeper product-only behavior
+- Suite-owned: the workflow contract in `gdsuite.toml`, suite report paths,
+  local toolchain state, and the delegated-tool settings that matter to normal
+  `gdsuite` workflows
+- Product-owned: direct `gdtest` harness and runtime knobs, direct `gdhealth`
+  groups and dependency policy, and deeper product-only behavior for users who
+  run those tools separately
 
 `gdlint` owns per-file and per-function maintainability metrics. `gdhealth` stays focused on architecture and policy.
 
-## What changes the suite writes
+## What the suite reads
 
-- `gdsuite init` writes missing config files
-- `gdsuite migrate` adopts an existing repo into the current contract
-- `gdsuite doctor` warns when existing product configs drift from suite-owned invariants
+- `gdsuite init` creates `gdsuite.toml` and may import settings from existing
+  `gdtest.toml` or `gdhealth.toml`
+- normal runtime commands read `gdsuite.toml` and suite-managed state
+- `gdsuite` does not depend on delegated product configs during normal runtime
 
 ## Where to look next
 

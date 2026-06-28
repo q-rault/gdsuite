@@ -1,20 +1,26 @@
 ---
 title: gdhealth.toml compatibility
-description: Which gdhealth config areas stay product-owned and which ones the suite overlays or synchronizes.
+description: When gdhealth.toml is still useful and how that stays separate from the suite contract.
 ---
 
-`gdhealth.toml` remains a normal `gdhealth` config file. The suite keeps a narrow set of discovery and exclusion invariants aligned so health runs behave consistently in suite workflows.
+`gdhealth.toml` remains a normal `gdhealth` config file. For `gdsuite`, it is
+now a compatibility file rather than part of the normal suite runtime contract.
 
-## Suite-owned expectations
+## What `gdsuite` uses instead
 
-- suite-aligned discovery include and exclude rules
-- overlays that keep `.gdsuite/**` generated state out of analysis
+`gdsuite` should read `gdsuite.toml` for suite workflows, including the
+`gdhealth`-related settings that matter to `gdsuite health`.
 
-## Product-owned areas
+## When `gdhealth.toml` still matters
 
-- groups
-- policy rules
-- direct architecture-specific tuning
+- when you run `gdhealth` directly
+- when `gdsuite init` imports settings from an older repository
+
+## What `gdsuite` does not assume
+
+- it does not require `gdhealth.toml` to exist
+- it does not keep `gdhealth.toml` aligned with `gdsuite.toml`
+- it does not use delegated-config drift as part of the target architecture
 
 ## Ownership boundary
 
