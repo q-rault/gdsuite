@@ -428,7 +428,7 @@ fn finish_mutating_command(output: &OutputContext, summary: &str) {
 
 fn fmt(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let cmd_args = default_or_dot(args.args);
+    let cmd_args = default_or_dot_or_append_target_for_flags(args.args);
     process::run_checked_streaming(&toolchain.gdformat, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
@@ -687,6 +687,18 @@ fn strip_passthrough_marker(mut args: Vec<String>) -> Vec<String> {
 fn default_or_dot(args: Vec<String>) -> Vec<String> {
     let mut args = strip_passthrough_marker(args);
     if args.is_empty() {
+        args.push(".".to_string());
+    }
+    args
+}
+
+fn default_or_dot_or_append_target_for_flags(args: Vec<String>) -> Vec<String> {
+    let mut args = strip_passthrough_marker(args);
+    if args.is_empty()
+        || args
+            .iter()
+            .all(|value| value.starts_with('-'))
+    {
         args.push(".".to_string());
     }
     args
