@@ -36,8 +36,8 @@ fn setup_generates_project_local_toolchain_and_configs() {
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
     assert!(fixture.root.join("gdsuite.toml").exists());
-    assert!(fixture.root.join("gdtest.toml").exists());
-    assert!(fixture.root.join("gdhealth.toml").exists());
+    assert!(!fixture.root.join("gdtest.toml").exists());
+    assert!(!fixture.root.join("gdhealth.toml").exists());
     assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
     assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 }
@@ -66,24 +66,16 @@ fn init_generates_project_local_toolchain_and_configs() {
 
     assert!(fixture.root.join(".gdsuite/state/manifest.json").exists());
     assert!(fixture.root.join("gdsuite.toml").exists());
-    assert!(fixture.root.join("gdtest.toml").exists());
-    assert!(fixture.root.join("gdhealth.toml").exists());
+    assert!(!fixture.root.join("gdtest.toml").exists());
+    assert!(!fixture.root.join("gdhealth.toml").exists());
     assert!(fixture.root.join("addons/gdtest/gdtest_worker.gd").exists());
     assert!(fixture.root.join("addons/gdtest_editor/plugin.gd").exists());
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
     assert!(config.contains("[reports]"));
     assert!(config.contains("[health]"));
-
-    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
-    assert!(gdtest.contains("patterns = [\"test/**/*.gd\", \"**/*.test.gd\"]"));
-    assert!(gdtest.contains("[profile.ci]"));
-    assert!(gdtest.contains("reporter = \"junit\""));
-
-    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
-    assert!(gdhealth.contains("[discovery]"));
-    assert!(gdhealth.contains("include = [\"**/*.gd\"]"));
-    assert!(gdhealth.contains("[groups]"));
+    assert!(config.contains("[gdtest]"));
+    assert!(config.contains("[gdhealth.discovery]"));
 }
 
 #[test]
@@ -543,7 +535,7 @@ fn doctor_reports_resolved_paths() {
 }
 
 #[test]
-fn doctor_warns_when_gdhealth_config_drifts_from_canonical_sections() {
+fn doctor_ignores_gdhealth_config_drift() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
@@ -558,15 +550,12 @@ fn doctor_warns_when_gdhealth_config_drifts_from_canonical_sections() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "[gdsuite:doctor] warn  gdhealth config drift from gdsuite.toml:",
-        ))
-        .stdout(predicate::str::contains("project.root"))
-        .stdout(predicate::str::contains("[gdsuite:doctor] status warning"));
+        .stdout(predicate::str::contains("drift from gdsuite.toml").not())
+        .stdout(predicate::str::contains("[gdsuite:doctor] status ok"));
 }
 
 #[test]
-fn doctor_warns_when_gdtest_config_misses_suite_defaults() {
+fn doctor_ignores_gdtest_config_drift() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
@@ -581,11 +570,8 @@ fn doctor_warns_when_gdtest_config_misses_suite_defaults() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "[gdsuite:doctor] warn  gdtest config drift from gdsuite.toml:",
-        ))
-        .stdout(predicate::str::contains("profile.ci.reporter"))
-        .stdout(predicate::str::contains("[gdsuite:doctor] status warning"));
+        .stdout(predicate::str::contains("drift from gdsuite.toml").not())
+        .stdout(predicate::str::contains("[gdsuite:doctor] status ok"));
 }
 
 #[test]
@@ -828,13 +814,13 @@ fn health_uses_built_in_defaults_when_gdsuite_config_is_missing() {
 }
 
 #[test]
-fn health_uses_overlay_config_that_enforces_suite_excludes() {
+fn health_uses_overlay_config_from_gdsuite_only() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
     fs::write(
         fixture.root.join("gdhealth.toml"),
-        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
+        "[discovery]\ninclude = [\"legacy/**/*.gd\"]\nexclude = [\"addons/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
     )
     .unwrap();
 
@@ -847,7 +833,9 @@ fn health_uses_overlay_config_that_enforces_suite_excludes() {
     let overlay =
         fs::read_to_string(fixture.root.join(".gdsuite/state/gdhealth.gdsuite.toml")).unwrap();
     assert!(overlay.contains("\".gdsuite/**\""));
-    assert!(overlay.contains("legacy = [\"*.gd\"]"));
+    assert!(overlay.contains("include = [\"**/*.gd\"]"));
+    assert!(overlay.contains("client = [\"client/**/*.gd\", \"client/**\"]"));
+    assert!(!overlay.contains("legacy = [\"*.gd\"]"));
 }
 
 #[test]
@@ -1465,38 +1453,12 @@ fn init_installs_gdtest_addon_into_custom_harness_directory() {
     assert!(fixture.root.join("vendor/gdtest/gdtest_worker.gd").exists());
     let worker = fs::read_to_string(fixture.root.join("vendor/gdtest/gdtest_worker.gd")).unwrap();
     assert!(worker.contains("res://vendor/gdtest/gdunit4_chain.gd"));
-    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
-    assert!(gdtest.contains("harness = \"vendor/gdtest/gdtest_worker.gd\""));
+    let gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(gdsuite.contains("harness = \"vendor/gdtest/gdtest_worker.gd\""));
 }
 
 #[test]
-fn setup_sync_product_configs_persists_suite_excludes_into_existing_gdhealth_config() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_tool_sources();
-    fixture.seed_path_tools();
-    fs::write(
-        fixture.root.join("gdhealth.toml"),
-        "[discovery]\ninclude = [\"**/*.gd\"]\nexclude = [\"addons/**\", \".godot/**\", \"reports/**\"]\n\n[groups]\nlegacy = [\"*.gd\"]\n",
-    )
-    .unwrap();
-
-    fixture
-        .cmd()
-        .args(["setup", "--sync-product-configs"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "[gdsuite:setup] ok    setup complete",
-        ));
-
-    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
-    assert!(!gdhealth.contains("\".gdsuite/**\""));
-    assert!(gdhealth.contains("legacy = [\"*.gd\"]"));
-}
-
-#[test]
-fn setup_sync_product_configs_persists_suite_defaults_into_existing_gdtest_config() {
+fn setup_sync_product_configs_is_a_no_op_with_warning() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_tool_sources();
@@ -1511,16 +1473,16 @@ fn setup_sync_product_configs_persists_suite_defaults_into_existing_gdtest_confi
         .cmd()
         .args(["setup", "--sync-product-configs"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("deprecated and has no effect"));
 
     let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
-    assert!(gdtest.contains("reporter = \"junit\""));
-    assert!(gdtest.contains("fail_fast = true"));
-    assert!(gdtest.contains("patterns = [\"test/**/*.gd\", \"**/*.test.gd\"]"));
+    assert!(gdtest.contains("patterns = [\"spec/**/*.gd\"]"));
+    assert!(gdtest.contains("reporter = \"text\""));
 }
 
 #[test]
-fn migrate_syncs_suite_configs_and_rewrites_obvious_entrypoints() {
+fn migrate_rewrites_obvious_entrypoints_without_touching_product_configs() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fs::create_dir_all(fixture.root.join(".github/workflows")).unwrap();
@@ -1553,10 +1515,10 @@ fn migrate_syncs_suite_configs_and_rewrites_obvious_entrypoints() {
 
     let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
     assert!(gdtest.contains("patterns = [\"spec/**/*.gd\"]"));
-    assert!(gdtest.contains("reporter = \"junit\""));
+    assert!(!gdtest.contains("reporter = \"junit\""));
 
     let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
-    assert!(!gdhealth.contains("\".gdsuite/**\""));
+    assert!(gdhealth.contains("exclude = [\"addons/**\"]"));
 
     let workflow = fs::read_to_string(fixture.root.join(".github/workflows/ci.yml")).unwrap();
     assert!(workflow.contains("gdsuite test --filter combat"));
@@ -1581,21 +1543,18 @@ fn migrate_is_idempotent() {
 
     fixture.cmd().arg("migrate").assert().success();
     let first_gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    let first_gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
     let first_gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
 
     fixture.cmd().arg("migrate").assert().success();
     let second_gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    let second_gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
     let second_gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
 
     assert_eq!(first_gdsuite, second_gdsuite);
-    assert_eq!(first_gdtest, second_gdtest);
     assert_eq!(first_gdhealth, second_gdhealth);
 }
 
 #[test]
-fn migrate_then_setup_sync_produces_no_doctor_drift_warnings() {
+fn init_imports_product_configs_into_gdsuite_and_leaves_them_untouched() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_tool_sources();
@@ -1611,18 +1570,18 @@ fn migrate_then_setup_sync_produces_no_doctor_drift_warnings() {
     )
     .unwrap();
 
-    fixture.cmd().arg("migrate").assert().success();
-    fixture
-        .cmd()
-        .args(["setup", "--sync-product-configs"])
-        .assert()
-        .success();
-    fixture
-        .cmd()
-        .arg("doctor")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("drift from gdsuite.toml").not());
+    fixture.cmd().arg("init").assert().success();
+
+    let gdsuite = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(gdsuite.contains("patterns = [\"spec/**/*.gd\"]"));
+    assert!(gdsuite.contains("reporter = \"text\""));
+    assert!(gdsuite.contains("legacy = [\"*.gd\"]"));
+
+    let gdtest = fs::read_to_string(fixture.root.join("gdtest.toml")).unwrap();
+    assert!(gdtest.contains("patterns = [\"spec/**/*.gd\"]"));
+
+    let gdhealth = fs::read_to_string(fixture.root.join("gdhealth.toml")).unwrap();
+    assert!(gdhealth.contains("legacy = [\"*.gd\"]"));
 }
 
 #[test]

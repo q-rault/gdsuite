@@ -67,6 +67,7 @@ fn init(context: &ProjectContext, cli_godot: Option<&Path>, args: OutputArgs) ->
             output: args,
             sync_product_configs: false,
         },
+        true,
         &output,
     )?;
     finish_mutating_command(&output, "initialization complete");
@@ -81,7 +82,7 @@ fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result
 
 fn setup(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) -> Result<()> {
     let output = OutputContext::new(resolve_output_mode(args.output.output), CommandScope::Setup);
-    setup_impl(context, cli_godot, args, &output)?;
+    setup_impl(context, cli_godot, args, false, &output)?;
     finish_mutating_command(&output, "setup complete");
     Ok(())
 }
@@ -90,6 +91,7 @@ fn setup_impl(
     context: &ProjectContext,
     cli_godot: Option<&Path>,
     args: SetupArgs,
+    import_product_configs: bool,
     output: &OutputContext,
 ) -> Result<()> {
     output.step("resolving project setup");
@@ -104,12 +106,16 @@ fn setup_impl(
 
     output.step("writing gdsuite config");
     GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
-    let config = tooling::load_config(context)?;
-    output.step("writing product configs");
-    tooling::generate_external_configs(context, &config)?;
+    let mut config = tooling::load_config(context)?;
+    if import_product_configs {
+        output.step("importing delegated product configs");
+        tooling::import_product_configs_into_canonical(context, &mut config)?;
+        config.write(&context.config_path)?;
+    }
     if args.sync_product_configs {
-        output.step("syncing product configs");
-        tooling::sync_product_configs(context, &config)?;
+        output.warn(
+            "`--sync-product-configs` is deprecated and has no effect; gdsuite no longer manages gdtest.toml or gdhealth.toml",
+        );
     }
     output.step("installing local toolchain");
     let install = tooling::install_toolchain(context, &config, &godot_path)
@@ -350,13 +356,6 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
                 }
                 _ => CompatibilityVerdict::Ok,
             };
-        }
-    }
-
-    for warning in tooling::product_config_warnings(context, &config)? {
-        warnings.push(warning);
-        if status == CompatibilityVerdict::Ok {
-            status = CompatibilityVerdict::Warning;
         }
     }
 
@@ -1386,7 +1385,7 @@ fn write_health_overlay_config(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<PathBuf> {
-    let doc = tooling::merged_gdhealth_overlay_config(context, config)?;
+    let doc = tooling::merged_gdhealth_overlay_config(config)?;
     let overlay_path = context.state_dir.join("gdhealth.gdsuite.toml");
     fs::write(&overlay_path, toml::to_string(&doc)?)
         .with_context(|| format!("failed to write {}", overlay_path.display()))?;

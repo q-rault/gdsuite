@@ -10,8 +10,7 @@ use crate::{
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
-    let config = migrate_suite_config(context, cli_godot)?;
-    tooling::sync_product_configs(context, &config)?;
+    migrate_suite_config(context, cli_godot)?;
     rewrite_entrypoints(context)?;
     Ok(())
 }
@@ -21,7 +20,6 @@ fn migrate_suite_config(
     cli_godot: Option<&Path>,
 ) -> Result<GdsuiteConfig> {
     let mut config = load_migratable_suite_config(context)?;
-    tooling::import_product_configs_into_canonical(context, &mut config)?;
 
     if let Some(path) = cli_godot {
         config.project.godot_exe = Some(path.to_path_buf());

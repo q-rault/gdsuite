@@ -19,11 +19,11 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(about = "Bootstrap the local gdsuite toolchain and product configs")]
+    #[command(about = "Bootstrap the local gdsuite toolchain and import suite config")]
     Init(OutputArgs),
-    #[command(about = "Migrate an existing project to the suite-first config model")]
+    #[command(about = "Normalize suite-owned config and rewrite obvious entrypoints")]
     Migrate,
-    #[command(about = "Install or repair the local gdsuite toolchain and product configs")]
+    #[command(about = "Install or repair the local gdsuite toolchain")]
     Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor(DoctorArgs),
@@ -61,7 +61,7 @@ pub struct SetupArgs {
     pub output: OutputArgs,
     #[arg(
         long,
-        help = "Merge safe suite-owned defaults into existing product configs"
+        help = "Deprecated; delegated product config syncing is no longer part of the suite contract"
     )]
     pub sync_product_configs: bool,
 }
