@@ -91,12 +91,14 @@ fn build_bare_command(command_path: &Path) -> Command {
     Command::new(command_path)
 }
 
-fn normalize_windows_path(path: &Path) -> PathBuf {
+/// Removes the `\\\\?\\` prefix of canonicalized Windows paths, which is noise in
+/// messages and which tools such as Python's `venv` can fail on.
+pub fn normalize_windows_path(path: &Path) -> PathBuf {
     let text = path.display().to_string();
-    if let Some(stripped) = text.strip_prefix(r"\\?\") {
-        return PathBuf::from(stripped);
+    match text.strip_prefix(r"\\?\") {
+        Some(stripped) if !stripped.starts_with("UNC") => PathBuf::from(stripped),
+        _ => path.to_path_buf(),
     }
-    path.to_path_buf()
 }
 
 fn is_script(path: &Path) -> bool {

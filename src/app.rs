@@ -38,7 +38,7 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let root = fs::canonicalize(&cli.project_root)
         .with_context(|| format!("invalid project root {}", cli.project_root.display()))?;
-    let context = ProjectContext::new(root);
+    let context = ProjectContext::new(process::normalize_windows_path(&root));
     tooling::load_dotenv_if_present(&context)?;
 
     match cli.command {
