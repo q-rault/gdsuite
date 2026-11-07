@@ -174,18 +174,6 @@ pub fn ensure_gitignored(context: &ProjectContext) -> Result<()> {
     fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))
 }
 
-/// The Godot of the previous setup, if nothing newer says otherwise. An explicit
-/// `GODOT_EXE` still wins.
-pub fn remembered_godot(context: &ProjectContext) -> Option<PathBuf> {
-    if env::var_os("GODOT_EXE").is_some() {
-        return None;
-    }
-    load_manifest(context)
-        .ok()?
-        .godot_exe
-        .filter(|path| path.exists())
-}
-
 pub fn load_dotenv_if_present(context: &ProjectContext) -> Result<()> {
     let path = context.root.join(".env");
     if !path.exists() {
@@ -350,6 +338,12 @@ pub fn resolve_godot(
         && let Some(path) = &config.project.godot_exe
     {
         candidates.push(path.clone());
+    }
+    // The Godot of the last setup, which is the one the delegated tools are given.
+    if let Ok(manifest) = load_manifest(context)
+        && let Some(path) = manifest.godot_exe
+    {
+        candidates.push(path);
     }
     if let Ok(path) = which::which("godot") {
         candidates.push(path);

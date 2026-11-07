@@ -52,7 +52,13 @@ jobs:
           printf 'config_version=5\n\n[application]\nconfig/name="e2e"\n' > project.godot
           printf 'class_name Player\nextends RefCounted\n\nvar health := 10\n\n\nfunc hit(amount: int) -> void:\n\thealth -= amount\n' > player.gd
           printf 'extends GdTest\n\n\nfunc test_hit() -> void:\n\tvar p := Player.new()\n\tp.hit(3)\n\tassert_eq(p.health, 7)\n' > test/test_player.gd
-          "$gdsuite" --godot-exe "$GODOT_EXE" init
-          "$gdsuite" --godot-exe "$GODOT_EXE" doctor
-          "$gdsuite" --godot-exe "$GODOT_EXE" test
-          "$gdsuite" --godot-exe "$GODOT_EXE" check
+          # Godot is not on the PATH here, and only init is told where it is: every
+          # later command has to use what setup remembered.
+          godot="$GODOT_EXE"
+          unset GODOT_EXE
+          "$gdsuite" --godot-exe "$godot" init
+          "$gdsuite" doctor
+          "$gdsuite" test
+          "$gdsuite" check
+          ! grep -q godot_exe gdsuite.toml
+          grep -qx '.gdsuite/' .gitignore

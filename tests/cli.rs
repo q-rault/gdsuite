@@ -193,6 +193,31 @@ fn delegated_tools_receive_the_godot_chosen_at_setup() {
 }
 
 #[test]
+fn doctor_uses_the_godot_remembered_from_setup() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    let custom = fixture.root.join("custom-godot");
+    fs::create_dir_all(&custom).unwrap();
+    fs::copy(
+        fixture.root.join("mock-bin/godot.cmd"),
+        custom.join("godot.cmd"),
+    )
+    .unwrap();
+    let manifest_path = fixture.root.join(".gdsuite/state/manifest.json");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    assert!(manifest.contains("mock-bin"), "{manifest}");
+    fs::write(&manifest_path, manifest.replace("mock-bin", "custom-godot")).unwrap();
+
+    fixture
+        .cmd()
+        .env_remove("GODOT_EXE")
+        .args(["doctor", "--output", "json"])
+        .assert()
+        .stdout(predicate::str::contains("custom-godot"));
+}
+
+#[test]
 fn old_schema_is_rejected_with_migration_guidance() {
     let fixture = Fixture::new();
     fixture.seed_project();

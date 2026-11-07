@@ -96,15 +96,10 @@ fn setup_impl(
     } else {
         None
     };
-    // gdsuite.toml is meant to be committed, so a machine's Godot path stays out of it
-    // and is remembered in .gdsuite/ for the next setup instead.
-    let remembered = tooling::remembered_godot(context);
-    let godot_path = tooling::resolve_godot(
-        context,
-        cli_godot.or(remembered.as_deref()),
-        existing.as_ref(),
-    )?;
+    let godot_path = tooling::resolve_godot(context, cli_godot, existing.as_ref())?;
 
+    // This file is meant to be committed, so a machine's Godot path stays out of it.
+    // The manifest in .gdsuite/ remembers it instead.
     output.step("writing gdsuite config");
     GdsuiteConfig::write_if_missing(&context.config_path, None)?;
     tooling::ensure_gitignored(context)?;
