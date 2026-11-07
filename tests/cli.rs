@@ -1,3 +1,7 @@
+// The fixtures stand in for the delegated tools with `.cmd` scripts. Other platforms
+// are covered end to end by .github/workflows/e2e.yml.
+#![cfg(windows)]
+
 use std::{
     collections::HashMap,
     fs,

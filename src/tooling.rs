@@ -493,6 +493,7 @@ fn ensure_venv(context: &ProjectContext) -> Result<PathBuf> {
     }
 
     let python = which::which("python")
+        .or_else(|_| which::which("python3"))
         .or_else(|_| which::which("py"))
         .context("python is required for setup")?;
     process::run_checked(
