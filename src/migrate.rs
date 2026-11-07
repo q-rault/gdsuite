@@ -3,10 +3,7 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow};
 use globwalk::GlobWalkerBuilder;
 
-use crate::{
-    config::GdsuiteConfig,
-    tooling::{self, ProjectContext},
-};
+use crate::{config::GdsuiteConfig, tooling::ProjectContext};
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
@@ -106,10 +103,6 @@ fn migrate_suite_config(
 
     if let Some(path) = cli_godot {
         config.project.godot_exe = Some(path.to_path_buf());
-    } else if config.project.godot_exe.is_none()
-        && let Ok(path) = tooling::resolve_godot(context, None, Some(&config))
-    {
-        config.project.godot_exe = Some(path);
     }
 
     Ok((config, warnings))

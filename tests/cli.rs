@@ -259,6 +259,15 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
     assert!(config.contains("gdtypecheck_source"));
+    assert!(
+        !config.contains("godot_exe"),
+        "a machine's Godot path must stay out of the committed config:\n{config}"
+    );
+    let gitignore = fs::read_to_string(fixture.root.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line == ".gdsuite/"),
+        "{gitignore}"
+    );
     for name in [".gdformatrc", ".gdlintrc"] {
         let rc = fs::read_to_string(fixture.root.join(name)).unwrap();
         assert!(rc.contains("addons: null"), "{name} must exclude addons");
@@ -764,6 +773,26 @@ fn write_cmd(path: &Path, body: &str) {
 
 fn escape(path: PathBuf) -> String {
     path.display().to_string().replace('\\', "\\\\")
+}
+
+#[test]
+fn setup_extends_an_existing_gitignore_once() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(fixture.root.join(".gitignore"), "/.godot\nmy-secrets.txt").unwrap();
+
+    fixture.cmd().arg("init").assert().success();
+    fixture.cmd().arg("setup").assert().success();
+
+    let gitignore = fs::read_to_string(fixture.root.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.starts_with("/.godot\nmy-secrets.txt\n"),
+        "{gitignore}"
+    );
+    assert_eq!(gitignore.matches(".gdsuite/").count(), 1, "{gitignore}");
+    assert_eq!(gitignore.matches(".godot").count(), 1, "{gitignore}");
 }
 
 #[test]

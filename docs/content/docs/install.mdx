@@ -52,14 +52,14 @@ That now defaults to readable scoped logs such as:
 gdsuite doctor
 ```
 
-If Godot is in a non-standard location, set `GODOT_EXE` or configure it in `gdsuite.toml` before rerunning `doctor`.
+If Godot is in a non-standard location, pass `--godot-exe`, set `GODOT_EXE`, or configure it in `gdsuite.toml` before rerunning `doctor`.
 Use `gdsuite doctor --output plain` for stable shell parsing or `gdsuite doctor --output json` for structured integrations.
 
 ## What success looks like
 
 Success means:
 
-- `.gdsuite/` exists in the project
+- `.gdsuite/` exists in the project and is listed in `.gitignore`, along with other generated folders
 - `gdsuite.toml` exists
 - `gdsuite doctor` prints resolved paths and ends with `[gdsuite:doctor] status ok`
 

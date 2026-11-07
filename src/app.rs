@@ -91,15 +91,23 @@ fn setup_impl(
     output.step("resolving project setup");
     context.ensure_dirs()?;
     output.step("resolving Godot executable");
-    let godot_path = if context.config_path.exists() {
-        let existing = tooling::load_config(context)?;
-        tooling::resolve_godot(context, cli_godot, Some(&existing))?
+    let existing = if context.config_path.exists() {
+        Some(tooling::load_config(context)?)
     } else {
-        tooling::resolve_godot(context, cli_godot, None)?
+        None
     };
+    // gdsuite.toml is meant to be committed, so a machine's Godot path stays out of it
+    // and is remembered in .gdsuite/ for the next setup instead.
+    let remembered = tooling::remembered_godot(context);
+    let godot_path = tooling::resolve_godot(
+        context,
+        cli_godot.or(remembered.as_deref()),
+        existing.as_ref(),
+    )?;
 
     output.step("writing gdsuite config");
-    GdsuiteConfig::write_if_missing(&context.config_path, Some(&godot_path))?;
+    GdsuiteConfig::write_if_missing(&context.config_path, None)?;
+    tooling::ensure_gitignored(context)?;
     let config = tooling::load_config(context)?;
     if args.sync_product_configs {
         output.warn(
