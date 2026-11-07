@@ -60,5 +60,8 @@ jobs:
           "$gdsuite" doctor
           "$gdsuite" test
           "$gdsuite" check
-          ! grep -q godot_exe gdsuite.toml
+          if grep -q godot_exe gdsuite.toml; then
+            echo 'gdsuite.toml must not contain a machine path'
+            exit 1
+          fi
           grep -qx '.gdsuite/' .gitignore
