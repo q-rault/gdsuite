@@ -545,7 +545,7 @@ steps = {}
 }
 
 fn render_check_steps(steps: &[CheckStep]) -> String {
-        let values = steps
+    let values = steps
         .iter()
         .map(|step| match step {
             CheckStep::Fmt => "\"fmt\"",

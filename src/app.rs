@@ -114,6 +114,8 @@ fn setup_impl(
     output.step("installing gdtest addons");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    tooling::write_gdtoolkit_configs_if_missing(context)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     for skipped in &addon_report.skipped_modified {
         output.warn(format!(
             "gdtest addon install skipped modified file {}",
@@ -694,11 +696,7 @@ fn default_or_dot(args: Vec<String>) -> Vec<String> {
 
 fn default_or_dot_or_append_target_for_flags(args: Vec<String>) -> Vec<String> {
     let mut args = strip_passthrough_marker(args);
-    if args.is_empty()
-        || args
-            .iter()
-            .all(|value| value.starts_with('-'))
-    {
+    if args.is_empty() || args.iter().all(|value| value.starts_with('-')) {
         args.push(".".to_string());
     }
     args
@@ -837,7 +835,13 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
     output.blank();
 
     for name in [
-        "godot", "python", "gdformat", "gdlint", "gdtest", "gdhealth", "gdtypecheck",
+        "godot",
+        "python",
+        "gdformat",
+        "gdlint",
+        "gdtest",
+        "gdhealth",
+        "gdtypecheck",
     ] {
         if let Some(tool) = report.tools.get(name) {
             match tool.status.as_str() {
@@ -1124,7 +1128,10 @@ fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
         "fmt",
         duration_ms,
         diagnostics.clone(),
-        format!("{}. Run `gdsuite fmt` to format the target.", format_formatting_summary(&diagnostics)),
+        format!(
+            "{}. Run `gdsuite fmt` to format the target.",
+            format_formatting_summary(&diagnostics)
+        ),
     ))
 }
 
@@ -1207,10 +1214,8 @@ fn run_typecheck_step(context: &ProjectContext) -> Result<CheckStepResult> {
 }
 
 fn run_test_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
-    let report = run_test_step_with_args(
-        context,
-        vec![config.commands.default_test_target.clone()],
-    )?;
+    let report =
+        run_test_step_with_args(context, vec![config.commands.default_test_target.clone()])?;
     let duration_ms = report.duration_ms;
     if report.status == "ok" {
         return Ok(CheckStepResult::passed(
@@ -1230,8 +1235,14 @@ fn run_test_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<Che
     ))
 }
 
-fn run_health_check_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
-    let report = run_health_step(context, vec![config.commands.default_health_subcommand.clone()])?;
+fn run_health_check_step(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+) -> Result<CheckStepResult> {
+    let report = run_health_step(
+        context,
+        vec![config.commands.default_health_subcommand.clone()],
+    )?;
     let duration_ms = report.duration_ms;
     if report.status == "ok" {
         return Ok(CheckStepResult::passed(
@@ -1273,10 +1284,7 @@ fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> 
     }
 }
 
-fn run_health_step(
-    context: &ProjectContext,
-    forwarded: Vec<String>,
-) -> Result<StepReport> {
+fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
     let args = default_health_args(&load_runtime_config(context)?, forwarded);

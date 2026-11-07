@@ -1,8 +1,10 @@
 # gdsuite
 
+Install with `cargo install gdsuite`.
+
 `gdsuite` is the workflow entrypoint for Godot projects. It installs local tooling, owns orchestration settings in `gdsuite.toml`, and delegates execution to `gdtoolkit`, `gdtest`, `gdhealth`, and `gdtypecheck`.
 
-The primary user documentation now lives in the local docs portal under [`docs/`](docs/). That portal is intended to be the main docs home for `gdsuite`, `gdtest`, and `gdhealth`.
+User documentation lives in the docs portal under [`docs/`](docs/), which covers `gdsuite`, [`gdtest`](https://github.com/q-rault/gdtest) and [`gdhealth`](https://github.com/q-rault/gdhealth).
 
 Common commands:
 
@@ -21,7 +23,7 @@ gdsuite report ci
 
 `gdsuite.toml` is orchestration-only. Native tool behavior stays in the native files for each delegated tool, such as `.gdformatrc`, `.gdlintrc`, `gdtest.toml`, and `gdhealth.toml`.
 
-`init`, `setup`, and `doctor` now default to human-readable scoped logs like `[gdsuite:init] step ...`. Use `--output plain` for stable shell-friendly text and `--output json` for structured `doctor` integrations.
+`init`, `setup`, and `doctor` default to human-readable scoped logs like `[gdsuite:init] step ...`. Use `--output plain` for stable shell-friendly text and `--output json` for structured `doctor` integrations.
 
 Local validation for the Rust CLI remains:
 

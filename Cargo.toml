@@ -2,22 +2,16 @@
 name = "gdsuite"
 version = "0.1.0"
 edition = "2024"
-description = "Suite-owned CLI dispatcher for Godot projects — coordinates gdtoolkit, gdtest, and gdhealth"
-license = "MIT"
+rust-version = "1.96"
+authors = ["Quentin Rault"]
+description = "Workflow CLI for Godot projects: installs and coordinates gdtoolkit, gdtest, gdhealth and gdtypecheck"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/q-rault/gdsuite"
+homepage = "https://github.com/q-rault/gdsuite"
 readme = "README.md"
 keywords = ["godot", "gamedev", "cli", "tooling"]
 categories = ["development-tools", "command-line-utilities"]
-exclude = [
-    ".ai/",
-    ".codex/",
-    "docs/",
-    "scripts/",
-    ".gdsuite-release.toml",
-    "CLAUDE.md",
-    "AGENTS.md",
-    "gdsuite-*.md",
-]
+include = ["/src/**", "/.gdsuite-release.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE"]
 
 [dependencies]
 anstream = "1.0"

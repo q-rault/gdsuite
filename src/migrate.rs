@@ -3,7 +3,10 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow};
 use globwalk::GlobWalkerBuilder;
 
-use crate::{config::GdsuiteConfig, tooling::{self, ProjectContext}};
+use crate::{
+    config::GdsuiteConfig,
+    tooling::{self, ProjectContext},
+};
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
@@ -52,7 +55,10 @@ fn migrate_suite_config(
         if let Some(source) = tools.get("gdtest_source").and_then(|value| value.as_str()) {
             config.tools.gdtest_source = source.into();
         }
-        if let Some(source) = tools.get("gdhealth_source").and_then(|value| value.as_str()) {
+        if let Some(source) = tools
+            .get("gdhealth_source")
+            .and_then(|value| value.as_str())
+        {
             config.tools.gdhealth_source = source.into();
         }
         if let Some(source) = tools
@@ -80,17 +86,22 @@ fn migrate_suite_config(
         if let Some(default) = reports.get("default").and_then(|value| value.as_str()) {
             config.reports.default = default.to_string();
         }
-        if let Some(dir) = reports.get("artifacts_dir").and_then(|value| value.as_str()) {
+        if let Some(dir) = reports
+            .get("artifacts_dir")
+            .and_then(|value| value.as_str())
+        {
             config.reports.artifacts_dir = dir.into();
         }
     }
     if let Some(check) = value.get("check").and_then(|value| value.as_table())
         && let Some(steps) = check.get("steps")
     {
-        config.check.steps = steps
-            .clone()
-            .try_into()
-            .map_err(|_| anyhow!("failed to parse [check].steps in {}", context.config_path.display()))?;
+        config.check.steps = steps.clone().try_into().map_err(|_| {
+            anyhow!(
+                "failed to parse [check].steps in {}",
+                context.config_path.display()
+            )
+        })?;
     }
 
     if let Some(path) = cli_godot {
@@ -117,12 +128,14 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
     }
     if table.contains_key("gdtest") {
         warnings.push(
-            "Moved out of suite contract: create `gdtest.toml` with your gdtest settings.".to_string(),
+            "Moved out of suite contract: create `gdtest.toml` with your gdtest settings."
+                .to_string(),
         );
     }
     if table.contains_key("gdhealth") {
         warnings.push(
-            "Moved out of suite contract: create `gdhealth.toml` with your gdhealth settings.".to_string(),
+            "Moved out of suite contract: create `gdhealth.toml` with your gdhealth settings."
+                .to_string(),
         );
     }
     if table.contains_key("health") {
@@ -131,9 +144,8 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
         );
     }
     if table.contains_key("fix") {
-        warnings.push(
-            "Moved out of suite contract: suite-owned lint fixers were removed.".to_string(),
-        );
+        warnings
+            .push("Moved out of suite contract: suite-owned lint fixers were removed.".to_string());
     }
     if table.contains_key("typecheck") {
         warnings.push(
@@ -142,7 +154,8 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
     }
     if !path_exists_any(context, &["gdformatrc", ".gdformatrc"]) {
         warnings.push(
-            "Moved out of suite contract: create `gdformatrc` if you need formatter settings.".to_string(),
+            "Moved out of suite contract: create `gdformatrc` if you need formatter settings."
+                .to_string(),
         );
     }
     warnings

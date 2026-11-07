@@ -104,7 +104,12 @@ fn health_defaults_to_configured_subcommand() {
     fixture.cmd().arg("health").assert().success();
 
     assert_eq!(fixture.read_log("gdhealth-args.txt"), "health");
-    assert!(!fixture.root.join(".gdsuite/state/gdhealth.gdsuite.toml").exists());
+    assert!(
+        !fixture
+            .root
+            .join(".gdsuite/state/gdhealth.gdsuite.toml")
+            .exists()
+    );
 }
 
 #[test]
@@ -119,7 +124,10 @@ fn health_forwards_args_exactly() {
         .assert()
         .success();
 
-    assert_eq!(fixture.read_log("gdhealth-args.txt"), "scan --fail-on critical");
+    assert_eq!(
+        fixture.read_log("gdhealth-args.txt"),
+        "scan --fail-on critical"
+    );
 }
 
 #[test]
@@ -131,7 +139,12 @@ fn typecheck_defaults_to_dot_and_does_not_generate_checker_script() {
     fixture.cmd().arg("typecheck").assert().success();
 
     assert_eq!(fixture.read_log("gdtypecheck-args.txt"), ".");
-    assert!(!fixture.root.join(".gdsuite/state/typecheck_checker.gd").exists());
+    assert!(
+        !fixture
+            .root
+            .join(".gdsuite/state/typecheck_checker.gd")
+            .exists()
+    );
 }
 
 #[test]
@@ -143,10 +156,7 @@ fn check_runs_configured_steps_in_order_and_stops_on_failure() {
 
     fixture.cmd().arg("check").assert().failure().code(12);
 
-    assert_eq!(
-        fixture.read_log("step-order.txt"),
-        "fmt\nlint\ntypecheck"
-    );
+    assert_eq!(fixture.read_log("step-order.txt"), "fmt\nlint\ntypecheck");
     assert!(!fixture.root.join("logs/gdtest-args.txt").exists());
     assert!(!fixture.root.join("logs/gdhealth-args.txt").exists());
 }
@@ -156,7 +166,11 @@ fn old_schema_is_rejected_with_migration_guidance() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
-    fs::write(fixture.root.join("gdsuite.toml"), fixture.legacy_gdsuite_config()).unwrap();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.legacy_gdsuite_config(),
+    )
+    .unwrap();
 
     fixture
         .cmd()
@@ -172,7 +186,11 @@ fn old_schema_is_rejected_with_migration_guidance() {
 fn migrate_rewrites_legacy_config_to_orchestration_only_schema() {
     let fixture = Fixture::new();
     fixture.seed_project();
-    fs::write(fixture.root.join("gdsuite.toml"), fixture.legacy_gdsuite_config()).unwrap();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.legacy_gdsuite_config(),
+    )
+    .unwrap();
 
     fixture
         .cmd()
@@ -204,10 +222,16 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
         .arg("init")
         .assert()
         .success()
-        .stdout(predicate::str::contains("[gdsuite:init] ok    initialization complete"));
+        .stdout(predicate::str::contains(
+            "[gdsuite:init] ok    initialization complete",
+        ));
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
     assert!(config.contains("gdtypecheck_source"));
+    for name in [".gdformatrc", ".gdlintrc"] {
+        let rc = fs::read_to_string(fixture.root.join(name)).unwrap();
+        assert!(rc.contains("addons: null"), "{name} must exclude addons");
+    }
     assert!(config.contains("[check]"));
     assert!(!config.contains("[lint]"));
     assert!(!config.contains("[health]"));
@@ -228,37 +252,37 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/q-rault/gdtest/releases/download/v0.1.1/gdtest-v0.1.1-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtest/releases/download/v0.2.0/gdtest-v0.2.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.1.1\r\n",
+                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.0\r\n",
                     ),
                     (
-                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.2.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
+                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.1.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
             ),
             (
-                "/q-rault/gdhealth/releases/download/v0.1.1/gdhealth-v0.1.1-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdhealth/releases/download/v0.2.0/gdhealth-v0.2.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdhealth-v0.1.1-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.1.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.2.0-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.2.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
             ),
             (
@@ -323,7 +347,7 @@ impl Fixture {
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.1.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+            "const HARNESS_VERSION = \"0.2.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
         )
         .unwrap();
         fs::write(gdtest_root.join("addons/gdtest/gdunit4_chain.gd"), "").unwrap();
@@ -379,7 +403,7 @@ echo Success: no problems found
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtest 0.1.1
+  echo gdtest 0.2.0
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtest-args.txt"
@@ -392,7 +416,7 @@ echo gdtest ok
             &gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdhealth 0.1.1
+  echo gdhealth 0.2.0
   exit /b 0
 )
 if "%1"=="--schema-version" (
@@ -428,7 +452,11 @@ if exist "%CD%\mock-state\typecheck-fail.flag" (
 echo gdtypecheck ok
 "#,
         );
-        fs::write(self.root.join("gdsuite.toml"), self.default_gdsuite_config()).unwrap();
+        fs::write(
+            self.root.join("gdsuite.toml"),
+            self.default_gdsuite_config(),
+        )
+        .unwrap();
         fs::write(
             gdsuite_dir.join("state/manifest.json"),
             format!(
@@ -454,7 +482,7 @@ echo gdtypecheck ok
         fs::create_dir_all(self.root.join("addons/gdtest")).unwrap();
         fs::write(
             self.root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.1.1\"\n",
+            "const HARNESS_VERSION = \"0.2.0\"\n",
         )
         .unwrap();
     }
@@ -519,9 +547,9 @@ goto scan
 if not "%ROOT%"=="" (
   mkdir "%ROOT%\bin" 2>nul
   > "%ROOT%\bin\gdtest.cmd" echo @echo off
-  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.1.1
+  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.0
   > "%ROOT%\bin\gdhealth.cmd" echo @echo off
-  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.1.1
+  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.2.0
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--help" echo gdhealth help
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--schema-version" echo 1
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="schema-version" echo 1
@@ -703,4 +731,28 @@ fn write_cmd(path: &Path, body: &str) {
 
 fn escape(path: PathBuf) -> String {
     path.display().to_string().replace('\\', "\\\\")
+}
+
+#[test]
+fn setup_keeps_an_existing_gdtoolkit_config() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join("gdlintrc"),
+        "custom: true
+",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("init").assert().success();
+
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("gdlintrc")).unwrap(),
+        "custom: true
+"
+    );
+    assert!(!fixture.root.join(".gdlintrc").exists());
+    assert!(fixture.root.join(".gdformatrc").exists());
 }

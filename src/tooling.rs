@@ -273,7 +273,11 @@ fn default_gdhealth_requested() -> String {
 }
 
 fn default_gdtypecheck_requested() -> String {
-    release_manifest().tools.gdtypecheck.acquire.render_requested()
+    release_manifest()
+        .tools
+        .gdtypecheck
+        .acquire
+        .render_requested()
 }
 
 pub fn resolve_godot(
@@ -407,7 +411,11 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     process::run_checked(&toolchain.gdlint, &["--help".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdhealth, &["--help".to_string()], &context.root)?;
-    process::run_checked(&toolchain.gdtypecheck, &["--version".to_string()], &context.root)?;
+    process::run_checked(
+        &toolchain.gdtypecheck,
+        &["--version".to_string()],
+        &context.root,
+    )?;
     Ok(())
 }
 
@@ -1545,6 +1553,21 @@ fn normalize_spec(spec: &str) -> String {
 
 fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
+}
+
+/// Keep `gdformat` and `gdlint` out of addons and generated directories, so that
+/// `gdsuite check` does not report files the project did not write. A config the
+/// project already has, under either name gdtoolkit accepts, is left alone.
+pub fn write_gdtoolkit_configs_if_missing(context: &ProjectContext) -> Result<()> {
+    const EXCLUDES: &str = "excluded_directories: !!set\n  .git: null\n  .godot: null\n  .gdsuite: null\n  addons: null\n";
+    for name in ["gdformatrc", "gdlintrc"] {
+        let dotted = context.root.join(format!(".{name}"));
+        if !dotted.exists() && !context.root.join(name).exists() {
+            fs::write(&dotted, EXCLUDES)
+                .with_context(|| format!("failed to write {}", dotted.display()))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn install_gdtest_addons(
