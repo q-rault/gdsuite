@@ -1,9 +1,18 @@
 use std::{
+    env,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
+    sync::OnceLock,
 };
 
 use anyhow::{Context, Result, anyhow};
+
+static GODOT_EXE: OnceLock<PathBuf> = OnceLock::new();
+
+/// The Godot that delegated tools should use, unless `GODOT_EXE` is already set.
+pub fn set_godot_exe(path: &Path) {
+    let _ = GODOT_EXE.set(path.to_path_buf());
+}
 
 pub struct ProcessOutput {
     pub status: ExitStatus,
@@ -63,6 +72,16 @@ pub fn run_checked_streaming(command_path: &Path, args: &[String], cwd: &Path) -
 }
 
 fn build_command(command_path: &Path) -> Command {
+    let mut command = build_bare_command(command_path);
+    if env::var_os("GODOT_EXE").is_none()
+        && let Some(godot) = GODOT_EXE.get()
+    {
+        command.env("GODOT_EXE", godot);
+    }
+    command
+}
+
+fn build_bare_command(command_path: &Path) -> Command {
     if is_script(command_path) {
         let mut command = Command::new("cmd");
         command.arg("/C").arg(command_path);

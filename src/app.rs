@@ -619,7 +619,9 @@ fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
 
 fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchain> {
     let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
-    resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)
+    let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)?;
+    process::set_godot_exe(&toolchain.godot_exe);
+    Ok(toolchain)
 }
 
 fn load_manifest_or_error(context: &ProjectContext, code: u8) -> Result<Manifest> {
@@ -1187,7 +1189,8 @@ fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
 fn run_typecheck_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let args = vec![".".to_string()];
+    // Warnings would not be shown here, and reporting them takes a second Godot run.
+    let args = vec!["--no-warnings".to_string(), ".".to_string()];
     let output = process::run(&toolchain.gdtypecheck, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let duration_ms = started.elapsed().as_millis();
@@ -1427,9 +1430,15 @@ fn lint_failure_summary(report: &JsonLintReport) -> String {
 }
 
 fn typecheck_failure_summary(diagnostics: &[String]) -> String {
-    let count = diagnostics.len();
-    let noun = if count == 1 { "error" } else { "errors" };
-    format!("Found {count} type {noun}. Fix the reported issue and rerun `gdsuite check`.")
+    let count = diagnostics
+        .iter()
+        .filter(|line| line.contains(": error["))
+        .count();
+    match count {
+        0 => "gdtypecheck could not run. See the message above.".to_string(),
+        1 => "Found 1 error. Fix it and rerun `gdsuite check`.".to_string(),
+        _ => format!("Found {count} errors. Fix them and rerun `gdsuite check`."),
+    }
 }
 
 fn print_and_store_report(

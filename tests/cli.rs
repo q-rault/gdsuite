@@ -158,11 +158,38 @@ fn check_runs_configured_steps_in_order_and_stops_on_failure() {
     fixture.seed_installed_toolchain();
     fixture.write_flag("typecheck-fail.flag");
 
-    fixture.cmd().arg("check").assert().failure().code(12);
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .code(12)
+        .stdout(predicate::str::contains("Found 1 error."));
 
+    assert_eq!(fixture.read_log("gdtypecheck-args.txt"), "--no-warnings .");
     assert_eq!(fixture.read_log("step-order.txt"), "fmt\nlint\ntypecheck");
     assert!(!fixture.root.join("logs/gdtest-args.txt").exists());
     assert!(!fixture.root.join("logs/gdhealth-args.txt").exists());
+}
+
+#[test]
+fn delegated_tools_receive_the_godot_chosen_at_setup() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .env_remove("GODOT_EXE")
+        .arg("typecheck")
+        .assert()
+        .success();
+
+    assert!(
+        fixture
+            .read_log("gdtypecheck-godot.txt")
+            .contains("godot.cmd")
+    );
 }
 
 #[test]
@@ -290,15 +317,15 @@ impl Fixture {
                 )]),
             ),
             (
-                "/q-rault/gdtypecheck/releases/download/v0.1.1/gdtypecheck-v0.1.1-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtypecheck/releases/download/v0.2.0/gdtypecheck-v0.2.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtypecheck-v0.1.1-x86_64-pc-windows-msvc/gdtypecheck.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.1.1\r\n",
+                        "gdtypecheck-v0.2.0-x86_64-pc-windows-msvc/gdtypecheck.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.2.0\r\n",
                     ),
                     (
-                        "gdtypecheck-v0.1.1-x86_64-pc-windows-msvc/README.md",
+                        "gdtypecheck-v0.2.0-x86_64-pc-windows-msvc/README.md",
                         "gdtypecheck\n",
                     ),
                 ]),
@@ -444,13 +471,15 @@ if exist "%CD%\mock-state\health-fail.flag" (
             &gdsuite_dir.join("tools/gdtypecheck/bin/gdtypecheck.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtypecheck 0.1.0
+  echo gdtypecheck 0.2.0
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtypecheck-args.txt"
+echo %GODOT_EXE%> "%CD%\logs\gdtypecheck-godot.txt"
 >> "%CD%\logs\step-order.txt" echo typecheck
 if exist "%CD%\mock-state\typecheck-fail.flag" (
-  >&2 echo test/sample.gd:41 type error
+  echo test/sample.gd:41: error[gdscript]: type error
+  echo gdtypecheck: 1 error^(s^), 0 warning^(s^) ^(1 scripts^)
   exit /b 1
 )
 echo gdtypecheck ok
