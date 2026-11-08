@@ -31,11 +31,11 @@ When tools are missing, each missing entry says exactly what to run to fix it, a
 [gdsuite:doctor] warn  godot not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml
 [gdsuite:doctor] warn  python not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdformat not found; run `gdsuite setup` to install the toolchain
-[gdsuite:doctor] warn  gdlint not found; run `gdsuite setup` to install the toolchain
+[gdsuite:doctor] warn  gdtidy not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdtest not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdhealth not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] status error
-error: missing tools: godot, python, gdformat, gdlint, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
+error: missing tools: godot, python, gdformat, gdtidy, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
 ```
 
 Use `gdsuite doctor --output plain` when you want stable `key=value` lines for shell scripts, or `gdsuite doctor --output json` for a structured report.
