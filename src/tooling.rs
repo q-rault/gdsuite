@@ -1582,8 +1582,10 @@ pub fn convert_tool_configs(
                 .unwrap_or_default()
         })
         .collect();
+    // Bare names, run from the project root: gdtidy names the converted files
+    // in the header of gdtidy.toml, which is committed.
     let mut args = vec!["migrate".to_string()];
-    args.extend(files.iter().map(|path| path.display().to_string()));
+    args.extend(names.iter().cloned());
     let output = process::run(gdtidy, &args, &context.root)?;
     if !output.status.success() {
         return Err(anyhow!(
