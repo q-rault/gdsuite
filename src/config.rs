@@ -269,9 +269,16 @@ impl GdsuiteConfig {
             .with_context(|| format!("failed to parse config {}", path.display()))
     }
 
-    pub fn write(&self, path: &Path) -> Result<()> {
-        fs::write(path, render_gdsuite_config(self))
-            .with_context(|| format!("failed to write config {}", path.display()))
+    /// Write gdsuite's own sections, then `tool_sections` (the tools'
+    /// `[test]`, `[health]`, `[lint]` and `[fmt]`) as given.
+    pub fn write_with_sections(&self, path: &Path, tool_sections: &str) -> Result<()> {
+        let mut body = render_gdsuite_config(self);
+        if !tool_sections.trim().is_empty() {
+            body.push('\n');
+            body.push_str(tool_sections.trim_end());
+            body.push('\n');
+        }
+        fs::write(path, body).with_context(|| format!("failed to write config {}", path.display()))
     }
 
     pub fn write_if_missing(path: &Path, godot_exe: Option<&Path>) -> Result<()> {
@@ -346,6 +353,39 @@ impl ToolAcquireSpec {
     }
 }
 
+/// The sections of `gdsuite.toml` that belong to the tools, which read them
+/// themselves with the keys of their own file: `[test]` (gdtest.toml),
+/// `[health]` (gdhealth.toml), `[lint]` and `[fmt]` (gdtidy.toml).
+pub const TOOL_SECTIONS: &[&str] = &["test", "health", "lint", "fmt"];
+
+/// The keys of gdtidy's `[lint]` section.
+const LINT_KEYS: &[&str] = &["disable", "enable", "exclude", "rules"];
+
+/// The keys of gdhealth's `[health]` section: gdhealth.toml's sections.
+const HEALTH_KEYS: &[&str] = &[
+    "project",
+    "discovery",
+    "groups",
+    "thresholds",
+    "policy",
+    "git",
+    "refactoring",
+    "duplication",
+];
+
+/// Whether a `[lint]` or `[health]` section has the shape gdsuite 0.1 gave
+/// it (`[lint] line_length`, `[health] command`), not the tool's.
+pub fn is_legacy_tool_section(name: &str, value: &toml::Value) -> bool {
+    let known = match name {
+        "lint" => LINT_KEYS,
+        "health" => HEALTH_KEYS,
+        _ => return false,
+    };
+    value
+        .as_table()
+        .is_some_and(|table| table.keys().any(|key| !known.contains(&key.as_str())))
+}
+
 fn reject_legacy_sections(path: &Path, value: &toml::Value) -> Result<()> {
     let Some(table) = value.as_table() else {
         return Ok(());
@@ -354,11 +394,11 @@ fn reject_legacy_sections(path: &Path, value: &toml::Value) -> Result<()> {
     let legacy = [
         (
             "lint",
-            "create `gdtidy.toml` with your gdtidy lint settings",
+            "[lint] now holds gdtidy's settings (`disable`, `enable`, `exclude`, `rules`)",
         ),
         (
             "health",
-            "remove suite-owned health settings; use gdhealth CLI args or `gdhealth.toml`",
+            "[health] now holds gdhealth's settings, with the sections of gdhealth.toml",
         ),
         (
             "gdtest",
@@ -378,7 +418,11 @@ fn reject_legacy_sections(path: &Path, value: &toml::Value) -> Result<()> {
         ),
     ]
     .into_iter()
-    .filter(|(key, _)| table.contains_key(*key))
+    .filter(|(key, _)| {
+        table.get(*key).is_some_and(|section| {
+            !matches!(*key, "lint" | "health") || is_legacy_tool_section(key, section)
+        })
+    })
     .collect::<Vec<_>>();
 
     if legacy.is_empty() {

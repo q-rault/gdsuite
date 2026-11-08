@@ -1,33 +1,22 @@
 ---
-title: gdhealth.toml compatibility
-description: When gdhealth.toml is still useful and how that stays separate from the suite contract.
+title: gdhealth.toml
+description: gdhealth's settings, in gdhealth.toml or in gdsuite.toml's [health] section.
 ---
 
-`gdhealth.toml` remains a normal `gdhealth` config file. For `gdsuite`, it is
-now a compatibility file rather than part of the normal suite runtime contract.
+gdhealth reads its settings from the `[health]` section of `gdsuite.toml`, or
+from `gdhealth.toml` when `gdsuite.toml` has no `[health]` section. Each
+section of `gdhealth.toml` goes under `[health]`:
 
-## What `gdsuite` uses instead
+| gdhealth.toml | gdsuite.toml |
+|---|---|
+| `[groups]` | `[health.groups]` |
+| `[thresholds]` | `[health.thresholds]` |
+| `[discovery]` | `[health.discovery]` |
 
-`gdsuite` should read `gdsuite.toml` for suite workflows, including the
-`gdhealth`-related settings that matter to `gdsuite health`.
+Keep its settings in one of the two files: with a `[health]` section in
+`gdsuite.toml`, `gdhealth.toml` is ignored, with a warning. Unlike
+`gdhealth.toml`, the `[health]` section rejects unknown keys, so a section
+written for gdsuite 0.1 is never taken for gdhealth's settings.
 
-## When `gdhealth.toml` still matters
-
-- when you run `gdhealth` directly
-- when `gdsuite init` imports settings from an older repository
-
-## What `gdsuite` does not assume
-
-- it does not require `gdhealth.toml` to exist
-- it does not keep `gdhealth.toml` aligned with `gdsuite.toml`
-- it does not use delegated-config drift as part of the target architecture
-
-## Ownership boundary
-
-`gdhealth` is the architecture and policy layer. `gdtidy lint` owns per-file and per-function maintainability metrics.
-
-Treat local metric thresholds that overlap with `gdtidy lint` as compatibility-era product detail, not as the preferred long-term ownership model for suite documentation.
-
-## Next step
-
-Next step: visit [gdhealth](/gdhealth) for report interpretation and product recipes.
+See [gdhealth's configuration reference](https://github.com/q-rault/gdhealth#configuration)
+for every key.

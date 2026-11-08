@@ -1,36 +1,35 @@
 ---
-title: Product Config Generation
-description: How delegated product configs relate to the suite-first model and when they still matter.
+title: Tool config files
+description: What init, setup and migrate write, and how gdtest.toml, gdhealth.toml and gdtidy.toml fit in.
 ---
 
-The suite-first model does not depend on generated `gdtest.toml` or
-`gdhealth.toml` files.
+## What `init` and `setup` write
 
-`gdsuite` should use `gdsuite.toml` for normal operation. Delegated product
-configs remain relevant only for direct `gdtest` or `gdhealth` CLI usage, or
-as import inputs when adopting an older repository.
+- `gdsuite.toml`, with gdsuite's own sections, if it is missing.
+- Nothing for the tools: no `gdtest.toml`, `gdhealth.toml` or `gdtidy.toml`,
+  and no tool section. The tools' defaults apply until you add a section.
+- One exception: gdtidy reads neither `gdlintrc` nor `gdformatrc`, so when a
+  project has them, setup converts them into `[lint]` and `[fmt]` sections of
+  `gdsuite.toml` (with `gdtidy migrate`), so their settings are not lost. The
+  original files are left in place; delete them once you no longer need
+  gdlint or gdformat.
 
-## What `init` does
+## What `migrate` does
 
-- writes the top-level `gdsuite.toml`
-- detects existing `gdtest.toml` or `gdhealth.toml`
-- imports relevant settings from those files into `gdsuite.toml`
-- leaves delegated product configs untouched after import
+`gdsuite migrate` brings a project to the current format, in one file:
 
-## What the suite does not do
+- rewrites `gdsuite.toml`'s own sections and removes sections from gdsuite 0.1;
+- keeps the tool sections already in `gdsuite.toml`;
+- moves `gdtest.toml` into `[test]`, `gdhealth.toml` into `[health]` and
+  `gdtidy.toml` into `[lint]` and `[fmt]`, with their comments, then deletes
+  them. A file whose section `gdsuite.toml` already has stays where it is, and
+  migrate warns that it is ignored;
+- converts `gdlintrc` and `gdformatrc`, as setup does.
 
-- it does not create `gdtest.toml`
-- it does not create `gdhealth.toml`
-- it does not synchronize delegated product configs with `gdsuite.toml`
-- it does not treat drift between delegated product configs and `gdsuite.toml`
-  as part of the intended architecture
+Review the result with `git diff` before committing.
 
-## When delegated product configs still matter
+## When to keep a tool file
 
-- keep `gdtest.toml` only if you run `gdtest` directly
-- keep `gdhealth.toml` only if you run `gdhealth` directly
-- otherwise, prefer a repository shape centered on `gdsuite.toml`
-
-## Next step
-
-Next step: compare the compatibility notes for [gdtest](/config/gdtest-compatibility) and [gdhealth](/config/gdhealth-compatibility).
+A tool file is the right choice when the project uses that tool without
+gdsuite. It also works in a gdsuite project, as long as `gdsuite.toml` has no
+section for the same tool: each tool's settings belong in one file.

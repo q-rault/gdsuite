@@ -4,21 +4,168 @@ use anyhow::{Context, Result, anyhow};
 use globwalk::GlobWalkerBuilder;
 
 use crate::{
-    config::GdsuiteConfig,
+    config::{self, GdsuiteConfig},
     tooling::{self, ProjectContext},
 };
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
     let (config, warnings) = migrate_suite_config(context, cli_godot)?;
+    let tool_sections = collect_tool_sections(context)?;
     rewrite_entrypoints(context)?;
     for warning in warnings {
         println!("warning: {warning}");
     }
+    // Written before converting gdlintrc, which gdtidy adds to gdsuite.toml.
+    config.write_with_sections(&context.config_path, &tool_sections.text)?;
+    for moved in &tool_sections.moved {
+        fs::remove_file(context.root.join(moved.file))
+            .with_context(|| format!("failed to remove {}", moved.file))?;
+        println!("moved {} into gdsuite.toml {}", moved.file, moved.sections);
+    }
+    for (file, sections) in &tool_sections.kept_apart {
+        println!(
+            "warning: gdsuite.toml already has {sections}, so {file} is ignored; \
+             keep these settings in one file and delete the other"
+        );
+    }
     convert_tool_configs(context)?;
     println!("migrate complete");
-    config.write(&context.config_path)?;
     Ok(())
+}
+
+/// A tool's own configuration file, and the `gdsuite.toml` sections that
+/// hold the same settings.
+struct ToolFile {
+    file: &'static str,
+    /// The section its settings go under; `None` for gdtidy.toml, whose
+    /// `[lint]` and `[fmt]` already are gdsuite.toml's sections.
+    section: Option<&'static str>,
+    sections: &'static str,
+}
+
+const TOOL_FILES: &[ToolFile] = &[
+    ToolFile {
+        file: "gdtest.toml",
+        section: Some("test"),
+        sections: "[test]",
+    },
+    ToolFile {
+        file: "gdhealth.toml",
+        section: Some("health"),
+        sections: "[health]",
+    },
+    ToolFile {
+        file: "gdtidy.toml",
+        section: None,
+        sections: "[lint] and [fmt]",
+    },
+];
+
+#[derive(Default)]
+struct ToolSections {
+    /// The tool sections to write after gdsuite's own.
+    text: String,
+    /// Tool files whose settings moved into `text`.
+    moved: Vec<&'static ToolFile>,
+    /// Tool files left in place because gdsuite.toml already has their
+    /// sections: (file, sections).
+    kept_apart: Vec<(&'static str, &'static str)>,
+}
+
+/// The tool sections gdsuite.toml keeps, then the tool files that move into
+/// it, so a project ends with its settings in one file, as `vp migrate`
+/// does for Vite+. Sections in gdsuite 0.1's shape are dropped (see the
+/// migration warnings).
+fn collect_tool_sections(context: &ProjectContext) -> Result<ToolSections> {
+    let existing: toml::Table = fs::read_to_string(&context.config_path)
+        .ok()
+        .and_then(|body| body.parse().ok())
+        .unwrap_or_default();
+    let mut result = ToolSections::default();
+    let mut kept = toml::Table::new();
+    for name in config::TOOL_SECTIONS {
+        if let Some(value) = existing.get(*name)
+            && !config::is_legacy_tool_section(name, value)
+        {
+            kept.insert(name.to_string(), value.clone());
+        }
+    }
+    if !kept.is_empty() {
+        result
+            .text
+            .push_str(&toml::to_string(&kept).context("failed to write the tool sections")?);
+    }
+
+    for tool in TOOL_FILES {
+        let path = context.root.join(tool.file);
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let has_section = match tool.section {
+            Some(section) => kept.contains_key(section),
+            None => kept.contains_key("lint") || kept.contains_key("fmt"),
+        };
+        if has_section {
+            result.kept_apart.push((tool.file, tool.sections));
+            continue;
+        }
+        let value: toml::Table = text
+            .parse()
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        let section_text = match tool.section {
+            Some(section) => nest_under(&text, &value, section).map_or_else(
+                // A file the line-based nesting cannot handle keeps its
+                // values, without its comments.
+                || {
+                    let mut wrapped = toml::Table::new();
+                    wrapped.insert(section.to_string(), toml::Value::Table(value.clone()));
+                    toml::to_string(&wrapped)
+                },
+                Ok,
+            )?,
+            None => text.clone(),
+        };
+        if !result.text.is_empty() {
+            result.text.push('\n');
+        }
+        result.text.push_str(section_text.trim_end());
+        result.text.push('\n');
+        result.moved.push(tool);
+    }
+    Ok(result)
+}
+
+/// A tool file's text with every key under `[section]`: its top-level keys
+/// get the section header, and each table header gets the section as
+/// prefix (`[profile.ci]` becomes `[test.profile.ci]`), so comments stay.
+/// `None` when the result does not hold exactly the file's values.
+fn nest_under(text: &str, value: &toml::Table, section: &str) -> Option<String> {
+    let mut nested = format!("[{section}]\n");
+    for line in text.lines() {
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("[[") {
+            nested.push_str(&format!("{indent}[[{section}.{}", rest.trim_start()));
+        } else if let Some(rest) = trimmed.strip_prefix('[') {
+            nested.push_str(&format!("{indent}[{section}.{}", rest.trim_start()));
+        } else {
+            nested.push_str(line);
+        }
+        nested.push('\n');
+    }
+    // A file with only tables needs no bare `[section]` header.
+    let starts_with_table = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .is_some_and(|line| line.starts_with('['));
+    if starts_with_table {
+        nested = nested.split_once('\n').map(|(_, rest)| rest.to_string())?;
+    }
+    let parsed: toml::Table = nested.parse().ok()?;
+    (parsed.len() == 1 && parsed.get(section) == Some(&toml::Value::Table(value.clone())))
+        .then_some(nested)
 }
 
 fn migrate_suite_config(
@@ -118,26 +265,31 @@ fn collect_migration_warnings(value: &toml::Value) -> Vec<String> {
         return warnings;
     };
 
-    if table.contains_key("lint") {
+    if table
+        .get("lint")
+        .is_some_and(|lint| config::is_legacy_tool_section("lint", lint))
+    {
         warnings.push(
-            "Moved out of suite contract: create `gdtidy.toml` with your lint rules.".to_string(),
+            "[lint] in gdsuite 0.1's format is dropped: [lint] now holds gdtidy's settings; `gdsuite setup` converts a gdlintrc into it.".to_string(),
         );
     }
     if table.contains_key("gdtest") {
         warnings.push(
-            "Moved out of suite contract: create `gdtest.toml` with your gdtest settings."
+            "[gdtest] is dropped: gdtest's settings go in [test], with the keys of gdtest.toml."
                 .to_string(),
         );
     }
     if table.contains_key("gdhealth") {
         warnings.push(
-            "Moved out of suite contract: create `gdhealth.toml` with your gdhealth settings."
-                .to_string(),
+            "[gdhealth] is dropped: gdhealth's settings go in [health], with the sections of gdhealth.toml.".to_string(),
         );
     }
-    if table.contains_key("health") {
+    if table
+        .get("health")
+        .is_some_and(|health| config::is_legacy_tool_section("health", health))
+    {
         warnings.push(
-            "Moved out of suite contract: remove suite-owned health settings and use gdhealth native config or explicit CLI args.".to_string(),
+            "[health] in gdsuite 0.1's format is dropped: [health] now holds gdhealth's settings, with the sections of gdhealth.toml.".to_string(),
         );
     }
     if table.contains_key("fix") {
@@ -161,8 +313,9 @@ fn collect_migration_warnings(value: &toml::Value) -> Vec<String> {
     warnings
 }
 
-/// Convert gdlintrc and gdformatrc into gdtidy.toml when gdtidy is installed;
-/// otherwise say that setup will do it, since it installs gdtidy first.
+/// Convert gdlintrc and gdformatrc into gdsuite.toml when gdtidy is
+/// installed; otherwise say that setup will do it, since it installs gdtidy
+/// first.
 fn convert_tool_configs(context: &ProjectContext) -> Result<()> {
     let unconverted = tooling::unconverted_configs(context);
     if unconverted.is_empty() {
@@ -175,15 +328,19 @@ fn convert_tool_configs(context: &ProjectContext) -> Result<()> {
     let Some(gdtidy) = gdtidy else {
         for path in unconverted {
             println!(
-                "warning: {} is not read by gdtidy; run `gdsuite setup`, which installs gdtidy and converts it into gdtidy.toml",
+                "warning: {} is not read by gdtidy; run `gdsuite setup`, which installs gdtidy and converts it into gdsuite.toml",
                 path.display()
             );
         }
         return Ok(());
     };
-    if let Some((files, notes)) = tooling::convert_tool_configs(context, &gdtidy)? {
-        println!("converted {} into gdtidy.toml", files.join(" and "));
-        for note in notes {
+    if let Some(conversion) = tooling::convert_tool_configs(context, &gdtidy)? {
+        println!(
+            "converted {} into {}",
+            conversion.files.join(" and "),
+            conversion.target
+        );
+        for note in conversion.notes {
             println!("gdtidy migrate: {note}");
         }
     }

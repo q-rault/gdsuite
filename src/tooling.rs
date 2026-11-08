@@ -1558,10 +1558,18 @@ fn normalize_version(version: &str) -> String {
 /// a gdlintrc without `[lint]`, a gdformatrc without `[fmt]`. gdtidy reads
 /// neither file, so each is converted once.
 pub fn unconverted_configs(context: &ProjectContext) -> Vec<PathBuf> {
-    let sections: Option<toml::Table> = fs::read_to_string(context.root.join("gdtidy.toml"))
-        .ok()
-        .and_then(|text| text.parse().ok());
-    let has = |section: &str| sections.as_ref().is_some_and(|t| t.contains_key(section));
+    let read = |name: &str| -> Option<toml::Table> {
+        fs::read_to_string(context.root.join(name))
+            .ok()
+            .and_then(|text| text.parse().ok())
+    };
+    let files = [read("gdtidy.toml"), read("gdsuite.toml")];
+    let has = |section: &str| {
+        files
+            .iter()
+            .flatten()
+            .any(|table| table.contains_key(section))
+    };
     let mut found = Vec::new();
     for (names, section) in [
         (["gdlintrc", ".gdlintrc"], "lint"),
@@ -1581,15 +1589,23 @@ pub fn unconverted_configs(context: &ProjectContext) -> Vec<PathBuf> {
     found
 }
 
-/// Convert the project's gdlintrc and gdformatrc into `gdtidy.toml` with
-/// `gdtidy migrate`, which only adds the sections the file does not have, so
-/// lint and fmt keep the project's settings. Returns the converted files and
-/// gdtidy's notes (such as rules that moved to Godot), or `None` when there
-/// was nothing to convert.
+/// What `gdtidy migrate` converted, and where it wrote the result.
+pub struct ToolConfigConversion {
+    pub files: Vec<String>,
+    /// `gdsuite.toml` when the project has one and no `gdtidy.toml`.
+    pub target: String,
+    /// gdtidy's notes, such as rules that moved to Godot.
+    pub notes: Vec<String>,
+}
+
+/// Convert the project's gdlintrc and gdformatrc with `gdtidy migrate`, which
+/// adds `[lint]` and `[fmt]` to gdsuite.toml (or to an existing gdtidy.toml)
+/// and only the sections it does not have, so lint and fmt keep the
+/// project's settings. `None` when there was nothing to convert.
 pub fn convert_tool_configs(
     context: &ProjectContext,
     gdtidy: &Path,
-) -> Result<Option<(Vec<String>, Vec<String>)>> {
+) -> Result<Option<ToolConfigConversion>> {
     let files = unconverted_configs(context);
     if files.is_empty() {
         return Ok(None);
@@ -1617,17 +1633,27 @@ pub fn convert_tool_configs(
     // Converting gdlintrc and gdformatrc together, gdtidy notes an exclusion
     // both files share once per file; show each note once.
     let mut notes: Vec<String> = Vec::new();
+    let mut target = "gdtidy.toml".to_string();
     for note in output
         .stderr
         .lines()
         .filter_map(|line| line.trim().strip_prefix("gdtidy: "))
-        .filter(|note| !note.starts_with("wrote "))
     {
+        if let Some(wrote) = note.strip_prefix("wrote ") {
+            if let Some((path, _)) = wrote.split_once(" from ") {
+                target = path.to_string();
+            }
+            continue;
+        }
         if !notes.iter().any(|seen| seen == note) {
             notes.push(note.to_string());
         }
     }
-    Ok(Some((names, notes)))
+    Ok(Some(ToolConfigConversion {
+        files: names,
+        target,
+        notes,
+    }))
 }
 
 pub fn install_gdtest_addons(

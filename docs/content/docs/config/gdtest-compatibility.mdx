@@ -1,30 +1,21 @@
 ---
-title: gdtest.toml compatibility
-description: When gdtest.toml is still useful and why gdsuite no longer depends on it.
+title: gdtest.toml
+description: gdtest's settings, in gdtest.toml or in gdsuite.toml's [test] section.
 ---
 
-`gdtest.toml` remains a normal `gdtest` config file. Users can still run
-`gdtest` directly.
+gdtest reads its settings from the `[test]` section of `gdsuite.toml`, or
+from `gdtest.toml` when `gdsuite.toml` has no `[test]` section. The keys are
+the same; profiles move from `[profile.ci]` to `[test.profile.ci]`.
 
-For `gdsuite`, it is a compatibility file rather than part of the normal suite
-contract.
+| gdtest.toml | gdsuite.toml |
+|---|---|
+| `exclude = ["test/helpers/**"]` | `[test]`<br/>`exclude = ["test/helpers/**"]` |
+| `[profile.ci]`<br/>`fail_fast = true` | `[test.profile.ci]`<br/>`fail_fast = true` |
 
-## What `gdsuite` uses instead
+gdtest reads the same file whether it runs through `gdsuite test`, from a
+terminal, or from the editor panel. Keep its settings in one of the two
+files: with a `[test]` section in `gdsuite.toml`, `gdtest.toml` is ignored,
+with a warning.
 
-`gdsuite` should read `gdsuite.toml` for suite workflows, including the
-`gdtest`-related settings that matter to `gdsuite test` and `gdsuite check`.
-
-## When `gdtest.toml` still matters
-
-- when you run `gdtest` directly
-- when `gdsuite init` imports settings from an older repository
-
-## What `gdsuite` does not assume
-
-- it does not require `gdtest.toml` to exist
-- it does not keep `gdtest.toml` aligned with `gdsuite.toml`
-- it does not read `gdtest.toml` as a runtime fallback during normal suite use
-
-## Next step
-
-Next step: visit [gdtest](/gdtest) for the deeper product docs.
+See [gdtest's configuration reference](https://github.com/q-rault/gdtest#configuration)
+for every key.

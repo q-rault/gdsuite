@@ -48,17 +48,13 @@ The project was never bootstrapped. Run:
 gdsuite init
 ```
 
-### Old delegated product configs still exist
+### A tool warns that its config file is ignored
 
-If the repository still has `gdtest.toml` or `gdhealth.toml`, remember that
-those files are for direct `gdtest` or `gdhealth` CLI usage, not for normal
-`gdsuite` runtime behavior.
-
-```bash
-gdsuite init
-```
-
-Then review whether the imported settings now belong in `gdsuite.toml`.
+`gdtest.toml`, `gdhealth.toml` or `gdtidy.toml` sits next to a `gdsuite.toml`
+that has a section for the same tool (`[test]`, `[health]`, `[lint]` or
+`[fmt]`). The section wins and the file is ignored: the two are not merged.
+Keep the settings in one place; `gdsuite migrate` moves a tool file into
+`gdsuite.toml` when `gdsuite.toml` has no section for it yet.
 
 ### CI aggregation fails
 
@@ -70,8 +66,9 @@ Then review whether the imported settings now belong in `gdsuite.toml`.
 
 ### Health seems to ignore config exclusions
 
-Check the `gdhealth`-related settings in `gdsuite.toml`. In the suite-first
-model, `gdsuite health` should not depend on project-root `gdhealth.toml`.
+gdhealth reads the `[health]` section of `gdsuite.toml` if there is one, and
+`gdhealth.toml` otherwise, never both. Check that the exclusions are in the
+file gdhealth actually reads.
 
 ## Next step
 

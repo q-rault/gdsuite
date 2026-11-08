@@ -146,14 +146,15 @@ fn setup_impl(
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    if let Some((files, notes)) = tooling::convert_tool_configs(context, &toolchain.gdtidy)
+    if let Some(conversion) = tooling::convert_tool_configs(context, &toolchain.gdtidy)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?
     {
         output.step(format!(
-            "converted {} into gdtidy.toml",
-            files.join(" and ")
+            "converted {} into {}",
+            conversion.files.join(" and "),
+            conversion.target
         ));
-        for note in notes {
+        for note in conversion.notes {
             output.info(format!("gdtidy migrate: {note}"));
         }
     }
@@ -447,7 +448,7 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
 fn warn_unconverted_configs(context: &ProjectContext) {
     for path in tooling::unconverted_configs(context) {
         eprintln!(
-            "warning: {} is not read by gdtidy; run `gdsuite setup` or `gdsuite migrate` to convert it into gdtidy.toml",
+            "warning: {} is not read by gdtidy; run `gdsuite setup` or `gdsuite migrate` to convert it into gdsuite.toml",
             path.display()
         );
     }

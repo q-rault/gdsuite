@@ -947,7 +947,7 @@ fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "converted gdlintrc into gdtidy.toml",
+            "converted gdlintrc into gdsuite.toml",
         ))
         .stdout(predicate::str::contains("gdtidy migrate: unused-argument"));
 
@@ -956,7 +956,13 @@ fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
             .read_log("gdtidy-migrate-args.txt")
             .ends_with("gdlintrc")
     );
-    assert!(fixture.root.join("gdtidy.toml").exists());
+    // By default, everything is in gdsuite.toml.
+    assert!(!fixture.root.join("gdtidy.toml").exists());
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(
+        config.contains("[lint]") && config.contains("[fmt]"),
+        "{config}"
+    );
     assert_eq!(
         fs::read_to_string(fixture.root.join("gdlintrc")).unwrap(),
         "custom: true\n"
@@ -1034,12 +1040,18 @@ fn migrate_converts_gdlintrc_once_gdtidy_is_installed() {
         .arg("migrate")
         .assert()
         .success()
-        .stdout(predicate::str::contains("into gdtidy.toml"));
-    assert!(fixture.root.join("gdtidy.toml").exists());
+        .stdout(predicate::str::contains(
+            "converted gdlintrc into gdsuite.toml",
+        ));
+    assert!(!fixture.root.join("gdtidy.toml").exists());
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    // Written after gdsuite.toml itself, so the sections are not lost.
+    assert!(config.contains("[lint]"), "{config}");
     assert!(fixture.root.join("gdlintrc").exists());
 }
 
-/// Stands in for gdtidy: `--version`, `migrate` (writes gdtidy.toml), `fmt`,
+/// Stands in for gdtidy: `--version`, `migrate` (adds [lint] and [fmt] to
+/// gdsuite.toml, or to gdtidy.toml when the project has one), `fmt`,
 /// and `lint --format json`, whose reports depend on flags in mock-state.
 const GDTIDY_CMD: &str = r#"@echo off
 if "%1"=="--version" (
@@ -1048,6 +1060,13 @@ if "%1"=="--version" (
 )
 if "%1"=="migrate" (
   echo %*> "%CD%\logs\gdtidy-migrate-args.txt"
+  if not exist "%CD%\gdtidy.toml" if exist "%CD%\gdsuite.toml" (
+    >> "%CD%\gdsuite.toml" echo [lint]
+    >> "%CD%\gdsuite.toml" echo [fmt]
+    >&2 echo gdtidy: unused-argument: no longer gdtidy's
+    >&2 echo gdtidy: wrote gdsuite.toml from gdlintrc
+    exit /b 0
+  )
   > "%CD%\gdtidy.toml" echo [lint]
   >> "%CD%\gdtidy.toml" echo [fmt]
   >&2 echo gdtidy: unused-argument: no longer gdtidy's
@@ -1179,4 +1198,133 @@ fn setup_replaces_a_tool_binary_cargo_has_no_record_of() {
     let cargo_args = fixture.read_log("cargo-args.txt");
     assert!(cargo_args.contains("install --path"), "{cargo_args}");
     assert!(cargo_args.contains("--force"), "{cargo_args}");
+}
+
+#[test]
+fn tool_sections_in_gdsuite_toml_are_accepted() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    let config = format!(
+        "{}\n[test]\nexclude = [\"test/manual/**\"]\n\n[health.groups]\ncore = [\"core/**\"]\n\n[lint]\ndisable = [\"max-returns\"]\n\n[fmt]\ntrailing-commas = false\n",
+        fixture.default_gdsuite_config()
+    );
+    fs::write(fixture.root.join("gdsuite.toml"), config).unwrap();
+
+    fixture.cmd().arg("test").assert().success();
+}
+
+#[test]
+fn migrate_moves_tool_files_into_gdsuite_toml() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.legacy_gdsuite_config(),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdtest.toml"),
+        "# Manual tests run by hand.\nexclude = [\"test/manual/**\"]\ntimeout = 15000\n\n[profile.ci]\nfail_fast = true\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdhealth.toml"),
+        "[groups]\ncore = [\"core/**\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdtidy.toml"),
+        "[fmt]\n# gdformat's style.\ndict-brace-spaces = false\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("migrate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "moved gdtest.toml into gdsuite.toml [test]",
+        ))
+        .stdout(predicate::str::contains(
+            "moved gdhealth.toml into gdsuite.toml [health]",
+        ))
+        .stdout(predicate::str::contains(
+            "moved gdtidy.toml into gdsuite.toml [lint] and [fmt]",
+        ))
+        // gdsuite 0.1's [lint] and [health] are not the tools' sections.
+        .stdout(predicate::str::contains(
+            "[lint] in gdsuite 0.1's format is dropped",
+        ))
+        .stdout(predicate::str::contains(
+            "[health] in gdsuite 0.1's format is dropped",
+        ));
+
+    for file in ["gdtest.toml", "gdhealth.toml", "gdtidy.toml"] {
+        assert!(!fixture.root.join(file).exists(), "{file}");
+    }
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(
+        config.contains("[test]\n# Manual tests run by hand.\nexclude = [\"test/manual/**\"]"),
+        "{config}"
+    );
+    assert!(
+        config.contains("[test.profile.ci]\nfail_fast = true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("[health.groups]\ncore = [\"core/**\"]"),
+        "{config}"
+    );
+    assert!(
+        config.contains("[fmt]\n# gdformat's style.\ndict-brace-spaces = false"),
+        "{config}"
+    );
+    assert!(!config.contains("line_length"), "{config}");
+    assert!(!config.contains("\ncommand = "), "{config}");
+    assert!(!config.contains("[health]\n"), "{config}");
+    let parsed: toml::Table = config.parse().unwrap();
+    assert_eq!(parsed["test"]["timeout"].as_integer(), Some(15000));
+
+    // Running it again keeps the same settings.
+    fixture.cmd().arg("migrate").assert().success();
+    let again: toml::Table = fs::read_to_string(fixture.root.join("gdsuite.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(again["test"], parsed["test"]);
+    assert_eq!(again["health"], parsed["health"]);
+    assert_eq!(again["fmt"], parsed["fmt"]);
+}
+
+#[test]
+fn migrate_keeps_a_tool_file_whose_section_gdsuite_toml_already_has() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        format!(
+            "{}\n[test]\ntimeout = 5\n",
+            fixture.default_gdsuite_config()
+        ),
+    )
+    .unwrap();
+    fs::write(fixture.root.join("gdtest.toml"), "timeout = 15000\n").unwrap();
+
+    fixture
+        .cmd()
+        .arg("migrate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "gdsuite.toml already has [test], so gdtest.toml is ignored",
+        ));
+
+    assert!(fixture.root.join("gdtest.toml").exists());
+    let parsed: toml::Table = fs::read_to_string(fixture.root.join("gdsuite.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(parsed["test"]["timeout"].as_integer(), Some(5));
 }
