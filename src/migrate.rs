@@ -254,36 +254,104 @@ fn rewrite_markdown_entrypoints(contents: &str) -> String {
     body
 }
 
+/// A tool command gdsuite now runs, and how to call it through gdsuite.
+struct CommandRewrite {
+    source: &'static str,
+    target: &'static str,
+    /// What goes after `--` before the original arguments, since
+    /// `gdsuite health -- ...` replaces gdhealth's subcommand.
+    forwarded_prefix: &'static str,
+}
+
+const COMMAND_REWRITES: &[CommandRewrite] = &[
+    CommandRewrite {
+        source: "gdhealth health",
+        target: "gdsuite health",
+        forwarded_prefix: "health ",
+    },
+    CommandRewrite {
+        source: "gdtest",
+        target: "gdsuite test",
+        forwarded_prefix: "",
+    },
+];
+
+/// Rewrites commands in a prose line's code spans. A span that is only a
+/// tool's name (`` `gdtest` ``) names the tool, as in "put `gdtest` on PATH",
+/// so it is left alone.
 fn rewrite_inline_code_spans(line: &str) -> String {
-    line.replace("`gdhealth health`", "`gdsuite health`")
-        .replace("`gdtest`", "`gdsuite test`")
+    let pieces: Vec<&str> = line.split('`').collect();
+    pieces
+        .iter()
+        .enumerate()
+        .map(|(index, piece)| {
+            let is_span = index % 2 == 1 && index + 1 < pieces.len();
+            if is_span && piece.trim() != "gdtest" {
+                rewrite_command_lines(piece)
+            } else {
+                (*piece).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("`")
 }
 
+/// Rewrites the tool commands in a shell line. Only a command in command
+/// position is rewritten (not `cargo install gdtest` or `/path/to/gdtest`),
+/// and its arguments go after `--`, which gdsuite needs to forward them.
 fn rewrite_command_lines(line: &str) -> String {
-    let after_gdhealth = rewrite_command(line, &["gdhealth", "health"], &["gdsuite", "health"]);
-    rewrite_command(&after_gdhealth, &["gdtest"], &["gdsuite", "test"])
-}
-
-fn rewrite_command(contents: &str, source: &[&str], target: &[&str]) -> String {
-    let source_text = source.join(" ");
-    let target_text = target.join(" ");
-    let mut output = String::with_capacity(contents.len());
+    let mut output = String::with_capacity(line.len());
     let mut index = 0usize;
 
-    while index < contents.len() {
-        if contents[index..].starts_with(&source_text)
-            && command_boundary(contents, index, source_text.len())
-        {
-            output.push_str(&target_text);
-            index += source_text.len();
+    while index < line.len() {
+        let rest = &line[index..];
+        let rewrite = COMMAND_REWRITES.iter().find(|rewrite| {
+            rest.starts_with(rewrite.source)
+                && is_command_right_boundary(rest[rewrite.source.len()..].chars().next())
+        });
+        if let Some(rewrite) = rewrite.filter(|_| at_command_position(&line[..index])) {
+            let after = &rest[rewrite.source.len()..];
+            let raw_args = &after[..command_args_len(after)];
+            let args = raw_args.trim();
+            output.push_str(rewrite.target);
+            if !args.is_empty() {
+                output.push_str(" -- ");
+                output.push_str(rewrite.forwarded_prefix);
+                output.push_str(args);
+            }
+            output.push_str(&raw_args[raw_args.trim_end().len()..]);
+            index += rewrite.source.len() + raw_args.len();
         } else {
-            let ch = contents[index..].chars().next().unwrap();
+            let ch = rest.chars().next().unwrap();
             output.push(ch);
             index += ch.len_utf8();
         }
     }
 
     output
+}
+
+/// Whether a command starting after `before` is the one a shell runs.
+fn at_command_position(before: &str) -> bool {
+    let trimmed = before.trim_end();
+    if trimmed.len() == before.len() && !before.is_empty() {
+        // Glued to what comes before, as in `my-gdtest` or `bin/gdtest`.
+        return before.ends_with(['(', ';', '|', '&']);
+    }
+    trimmed.is_empty()
+        || ["$", "run:", "&&", "||", ";", "|", "("]
+            .iter()
+            .any(|marker| trimmed.ends_with(marker))
+}
+
+/// Where a command's arguments end: at the next shell operator, the end of
+/// an inline code span, or a comment.
+fn command_args_len(after: &str) -> usize {
+    ["&&", "||", ";", "|", "`", ")", " #"]
+        .iter()
+        .filter_map(|terminator| after.find(terminator))
+        .min()
+        .unwrap_or(after.len())
 }
 
 fn looks_like_command_line(trimmed: &str) -> bool {
@@ -295,20 +363,85 @@ fn looks_like_command_line(trimmed: &str) -> bool {
         || trimmed.starts_with("$ ")
 }
 
-fn command_boundary(text: &str, start: usize, len: usize) -> bool {
-    let prev = text[..start].chars().next_back();
-    let next = text[start + len..].chars().next();
-    is_command_left_boundary(prev) && is_command_right_boundary(next)
-}
-
-fn is_command_left_boundary(ch: Option<char>) -> bool {
-    ch.is_none_or(|byte| !is_command_name_char(byte))
-}
-
 fn is_command_right_boundary(ch: Option<char>) -> bool {
     ch.is_none_or(|byte| !is_command_name_char(byte))
 }
 
 fn is_command_name_char(byte: char) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, '/' | '_' | '-' | '.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_get_their_arguments_after_a_double_dash() {
+        assert_eq!(
+            rewrite_command_lines("gdtest test/cases/"),
+            "gdsuite test -- test/cases/"
+        );
+        assert_eq!(rewrite_command_lines("gdtest"), "gdsuite test");
+        assert_eq!(
+            rewrite_command_lines("  gdtest --help  "),
+            "  gdsuite test -- --help  "
+        );
+        assert_eq!(rewrite_command_lines("gdhealth health"), "gdsuite health");
+        assert_eq!(
+            rewrite_command_lines("gdhealth health --root ."),
+            "gdsuite health -- health --root ."
+        );
+    }
+
+    #[test]
+    fn commands_are_rewritten_in_any_command_position() {
+        assert_eq!(
+            rewrite_command_lines("      - run: gdtest test/ && gdhealth health"),
+            "      - run: gdsuite test -- test/ && gdsuite health"
+        );
+        assert_eq!(
+            rewrite_command_lines("$ gdtest a.gd | tee out.txt # run one file"),
+            "$ gdsuite test -- a.gd | tee out.txt # run one file"
+        );
+        assert_eq!(
+            rewrite_command_lines("(gdtest a.gd)"),
+            "(gdsuite test -- a.gd)"
+        );
+    }
+
+    #[test]
+    fn a_tool_name_that_is_not_a_command_is_kept() {
+        for line in [
+            r#"ln -sf "/path/to/gdtest" "$HOME/.local/bin/gdtest""#,
+            "cargo install gdtest",
+            "export GDTEST_BIN=gdtest",
+            "echo run gdtest-analysis",
+            "gdhealth metrics",
+        ] {
+            assert_eq!(rewrite_command_lines(line), line);
+        }
+    }
+
+    #[test]
+    fn markdown_rewrites_code_blocks_and_command_spans_but_not_prose() {
+        let before = "\
+Put `gdtest` on PATH, then run `gdtest test/cases/` or `gdhealth health`.
+
+```bash
+gdtest --help
+cargo install gdtest
+```
+";
+        let after = "\
+Put `gdtest` on PATH, then run `gdsuite test -- test/cases/` or `gdsuite health`.
+
+```bash
+gdsuite test -- --help
+cargo install gdtest
+```
+";
+        assert_eq!(rewrite_markdown_entrypoints(before), after);
+        // Running migrate again changes nothing.
+        assert_eq!(rewrite_markdown_entrypoints(after), after);
+    }
 }
