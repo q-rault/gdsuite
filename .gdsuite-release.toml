@@ -10,13 +10,31 @@ tested = "==4.5.0"
 acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.0" }
 tested = "==0.2.0"
 
+[tools.gdtest.sha256]
+"aarch64-apple-darwin" = "407210a251e75b2268df32e0da929d88d27f16f382c0d6b672df6b7116502cff"
+"x86_64-apple-darwin" = "42d7d1be6eabf795740aee3cad6d38edca20ebcf55ff132bbb0e05db8b5ac464"
+"x86_64-pc-windows-msvc" = "bf09dee978645a5f90a4876b31c4d21b90b555345f6f7bed7d4854154e43d124"
+"x86_64-unknown-linux-musl" = "00d9ddfadb3e38355a56e0c2b161de23124ea4e1d5b6e65a87b603906b0425b5"
+
 [tools.gdhealth]
 acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.2.0" }
 tested = "==0.2.0"
 
+[tools.gdhealth.sha256]
+"aarch64-apple-darwin" = "4f692a00b69e1be72aa0325d6c25ae07de48855884baf551244be415365ee0f6"
+"x86_64-apple-darwin" = "2ece651102f8c7070b277c0d3bb0a40a1df3566cc13a6f06ee60b9974af42d26"
+"x86_64-pc-windows-msvc" = "f96f3f561aae4a665805659963230c7ed73171a0ac64e77a88a154c86181a846"
+"x86_64-unknown-linux-musl" = "a1d4e69ada3d7dc460c0bec8cace04b88bab8edb24e5181786fc1478df3048b9"
+
 [tools.gdtypecheck]
 acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.2.0" }
 tested = "==0.2.0"
+
+[tools.gdtypecheck.sha256]
+"aarch64-apple-darwin" = "20e37f4f3539f1f72bacbf4db52cdfac2c98260df09c926f077829568a4d20e0"
+"x86_64-apple-darwin" = "910a3f40803b1f29f438421ab866d81794e6298b33daca31126f45cc11b68531"
+"x86_64-pc-windows-msvc" = "53368a05b7457558b85b544ccd178fa8d66ddd38a0174457d4181f575ad705ce"
+"x86_64-unknown-linux-musl" = "ab132bf33f2d11f2ed0b29387f16be582bb6b36019946d936e4b5854841caa53"
 
 [contracts.gdtest]
 required_harness = "==0.2.0"

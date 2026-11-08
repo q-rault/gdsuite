@@ -678,6 +678,9 @@ fn install_tool(
                     &tool_download_cache_dir(context, name).join(download_name),
                 )?
             };
+            if let Some(expected) = expected_release_sha256(name, requested, target)? {
+                verify_sha256(&archive_path, &expected)?;
+            }
             install_binary_archive(&archive_path, &root, name)?;
         }
         ToolAcquireSpec::Pip { .. } => {
@@ -934,6 +937,55 @@ fn download_github_release_asset(
     io::copy(&mut response, &mut file)
         .with_context(|| format!("failed to write {}", destination.display()))?;
     Ok(destination.to_path_buf())
+}
+
+/// The checksum the bundled release manifest records for `name`'s archive on
+/// `target`. Only the suite-pinned release is checked: a source the project
+/// chose itself has no recorded checksum.
+fn expected_release_sha256(
+    name: &str,
+    requested: &ToolAcquireSpec,
+    target: &str,
+) -> Result<Option<String>> {
+    if env::var_os("GDSUITE_SKIP_RELEASE_CHECKSUMS").is_some() {
+        return Ok(None);
+    }
+    let Some(tool) = ReleaseManifest::bundled().tool(name) else {
+        return Ok(None);
+    };
+    if &tool.acquire != requested || tool.sha256.is_empty() {
+        return Ok(None);
+    }
+    tool.sha256
+        .get(target)
+        .map(|digest| Some(digest.to_ascii_lowercase()))
+        .ok_or_else(|| {
+            anyhow!(
+                "the gdsuite release manifest has no checksum for {name} on {target}; \
+                 refusing to install an unverified archive"
+            )
+        })
+}
+
+fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    let mut file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    io::copy(&mut file, &mut hasher)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(anyhow!(
+            "checksum mismatch for {}: expected sha256 {expected}, got {actual}. \
+             The release archive differs from the one this gdsuite version was tested with.",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 fn http_client() -> Result<Client> {

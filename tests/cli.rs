@@ -382,7 +382,10 @@ impl Fixture {
                 "GDSUITE_CRATES_DOWNLOAD_BASE_URL",
                 self.release_server.url(),
             )
-            .env("GDSUITE_GITHUB_RELEASE_BASE_URL", self.release_server.url());
+            .env("GDSUITE_GITHUB_RELEASE_BASE_URL", self.release_server.url())
+            // The mock server's archives are not the real releases the bundled
+            // manifest has checksums for.
+            .env("GDSUITE_SKIP_RELEASE_CHECKSUMS", "1");
         command
     }
 
@@ -798,6 +801,22 @@ fn write_cmd(path: &Path, body: &str) {
 
 fn escape(path: PathBuf) -> String {
     path.display().to_string().replace('\\', "\\\\")
+}
+
+#[test]
+fn init_rejects_a_release_archive_whose_checksum_does_not_match() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture
+        .cmd()
+        .env_remove("GDSUITE_SKIP_RELEASE_CHECKSUMS")
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("checksum mismatch"));
 }
 
 #[test]
