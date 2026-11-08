@@ -27,16 +27,18 @@ model.
 cd path/to/existing-project
 ```
 
-2. Run the adoption command.
+2. Run the adoption command. In a project without `gdsuite.toml`, start with
+   `gdsuite init`; in a project set up by an older gdsuite, run
+   `gdsuite migrate`.
 
 ```bash
-gdsuite init
+gdsuite migrate
 ```
 
-3. Review the resulting suite config and any obvious doc changes.
+3. Review the resulting config and doc changes.
 
 ```bash
-git diff -- gdsuite.toml README.md docs
+git diff -- gdsuite.toml gdtest.toml gdhealth.toml gdtidy.toml README.md docs
 ```
 
 4. Run the normal suite checks.
@@ -51,15 +53,18 @@ gdsuite health
 
 Success means:
 
-- `gdsuite.toml` reflects the current suite contract
-- relevant settings from older product configs are imported into `gdsuite.toml`
-- obvious old `gdtest` and `gdhealth health` entrypoints in docs or CI are rewritten toward suite entrypoints
-- runtime `gdsuite` commands no longer depend on delegated product configs
+- `gdsuite.toml` holds gdsuite's settings and each tool's section:
+  `gdtest.toml`, `gdhealth.toml` and `gdtidy.toml` were moved into `[test]`,
+  `[health]`, `[lint]` and `[fmt]`, and `gdlintrc`/`gdformatrc` converted
+- sections from gdsuite 0.1 are gone
+- old `gdtest` and `gdhealth health` commands in docs or CI are rewritten to
+  `gdsuite test -- ...` and `gdsuite health`
 
 ## Common mistakes
 
-- Treating `migrate` or delegated-config sync as the main adoption path instead of `init`
-- Expecting `gdsuite` to keep `gdtest.toml` or `gdhealth.toml` aligned after import
+- Keeping a tool file next to a `gdsuite.toml` section for the same tool: the
+  file is ignored, and migrate leaves it in place with a warning so you can
+  merge the two by hand
 - Leaving stale CI wording that still implies a nonexistent `gdsuite ci` command
 
 ## Where to go next
