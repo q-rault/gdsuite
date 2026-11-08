@@ -1,0 +1,51 @@
+# Keeps one PR open that pins every tool to its latest release and bumps
+# gdsuite's version, on the `auto/pin-tools` branch. When several tools are
+# released one after another, the same PR is updated. Merging it is a
+# release: tag-release.yml then tags the new version.
+#
+# Needs the PIN_TOOLS_TOKEN secret (see RELEASING.md):
+# a PR pushed with the default token would not run CI.
+name: pin-tools
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-tools
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pin the latest tool releases
+        id: pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/pin_tools.py --github-output "$GITHUB_OUTPUT"
+
+      - name: Open or update the pin PR
+        if: steps.pin.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.PIN_TOOLS_TOKEN }}
+          branch: auto/pin-tools
+          base: main
+          title: ${{ steps.pin.outputs.title }}
+          body: ${{ steps.pin.outputs.body }}
+          commit-message: ${{ steps.pin.outputs.title }}
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          add-paths: |
+            .gdsuite-release.toml
+            Cargo.toml
+            Cargo.lock
+            docs/content/docs/config/gdsuite-toml.mdx
+          delete-branch: true
