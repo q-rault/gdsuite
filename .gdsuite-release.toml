@@ -3,14 +3,14 @@ version = "0.4.0"
 manifest_version = 1
 
 [tools.gdtest]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.2" }
-tested = "==0.2.2"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.3" }
+tested = "==0.2.3"
 
 [tools.gdtest.sha256]
-"aarch64-apple-darwin" = "c31d234d1429b7f0227b29aea45b1eec61816a5299ea57ceaba87617818b7809"
-"x86_64-apple-darwin" = "4e0bb6c5277328c5320b51a3a01dfc3f00659dd84684f01710cc19aa5f797fc1"
-"x86_64-pc-windows-msvc" = "72899b53de0b4836a52e1d5e5f524ffd002fbfe0fd2383d21b6b4d1a94300dda"
-"x86_64-unknown-linux-musl" = "fadb547449fb74ec3dea563c11ac0db426f535fc60c179dc962e214cd8667c3c"
+"aarch64-apple-darwin" = "0032e9688e3f6fcc106a2c893ada7bd4f9eaab1f1395c43f13c8782250c15884"
+"x86_64-apple-darwin" = "4d88bbe18c6a4a622d251e59d7eec3b9a3cc8e745f3bcc26faeb00e4ed382499"
+"x86_64-pc-windows-msvc" = "546ac3b8f911de46af37aec6532db233f1140bddf29993152f068dd8b4de6c1d"
+"x86_64-unknown-linux-musl" = "e8e39bbb69b03d7a8dd380862a670aced8fad8904790d4baf5a6f3305b2adc45"
 
 [tools.gdhealth]
 acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.3.1" }
@@ -43,7 +43,7 @@ tested = "==0.3.0"
 "x86_64-unknown-linux-musl" = "6b712c1f67bc8f5be59a4bdda7494c674c0f786d4e2db77319280dc21d8657de"
 
 [contracts.gdtest]
-required_harness = "==0.2.2"
+required_harness = "==0.2.3"
 
 [contracts.gdhealth]
 required_schema_version = 1
