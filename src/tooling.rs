@@ -40,8 +40,6 @@ pub struct ProjectContext {
 #[derive(Debug, Clone)]
 pub struct Toolchain {
     pub godot_exe: PathBuf,
-    pub python: PathBuf,
-    pub gdformat: PathBuf,
     pub gdtidy: PathBuf,
     pub gdtest: PathBuf,
     pub gdhealth: PathBuf,
@@ -50,7 +48,6 @@ pub struct Toolchain {
 
 #[derive(Debug, Clone)]
 pub struct InstallPlan {
-    pub gdtoolkit: ToolAcquireSpec,
     pub gdtest: ToolAcquireSpec,
     pub gdhealth: ToolAcquireSpec,
     pub gdtypecheck: ToolAcquireSpec,
@@ -65,7 +62,6 @@ pub struct InstallOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CompatibilityReport {
-    pub gdtoolkit: ToolCompatibility,
     pub gdtest: ToolCompatibility,
     pub gdhealth: ToolCompatibility,
     pub gdtypecheck: ToolCompatibility,
@@ -83,7 +79,6 @@ pub struct ToolCompatibility {
 
 #[derive(Debug, Clone)]
 struct ProbedToolchain {
-    gdtoolkit_version: Option<String>,
     gdtest_version: Option<String>,
     gdtest_harness_version: Option<String>,
     gdhealth_version: Option<String>,
@@ -129,7 +124,6 @@ impl ProjectContext {
 
     pub fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(self.gdsuite_dir.join("bin"))?;
-        fs::create_dir_all(self.gdsuite_dir.join("python"))?;
         fs::create_dir_all(self.gdsuite_dir.join("tools"))?;
         fs::create_dir_all(&self.state_dir)?;
         Ok(())
@@ -272,14 +266,6 @@ pub fn release_manifest() -> &'static ReleaseManifest {
 pub fn install_plan(config: &GdsuiteConfig) -> InstallPlan {
     let release = release_manifest();
     InstallPlan {
-        gdtoolkit: if config.tools.gdtoolkit == default_gdtoolkit_requested() {
-            release.tools.gdtoolkit.acquire.clone()
-        } else {
-            ToolAcquireSpec::Pip {
-                package: "gdtoolkit".to_string(),
-                spec: config.tools.gdtoolkit.clone(),
-            }
-        },
         gdtest: if config.tools.gdtest_source == default_gdtest_requested() {
             release.tools.gdtest.acquire.clone()
         } else {
@@ -305,16 +291,6 @@ pub fn install_plan(config: &GdsuiteConfig) -> InstallPlan {
 
 fn default_gdtidy_requested() -> String {
     release_manifest().tools.gdtidy.acquire.render_requested()
-}
-
-fn default_gdtoolkit_requested() -> String {
-    release_manifest()
-        .tools
-        .gdtoolkit
-        .acquire
-        .gdtoolkit_spec()
-        .expect("gdtoolkit release manifest must use pip")
-        .to_string()
 }
 
 fn default_gdtest_requested() -> String {
@@ -402,14 +378,6 @@ pub fn resolve_toolchain(
         godot_exe: manifest
             .godot_exe
             .ok_or_else(|| anyhow!("missing Godot path in manifest"))?,
-        python: manifest
-            .python
-            .or_else(|| find_python_in_venv(context))
-            .ok_or_else(|| anyhow!("missing project Python in manifest"))?,
-        gdformat: manifest
-            .gdformat
-            .or_else(|| find_binary(context, &["gdformat"]))
-            .ok_or_else(|| anyhow!("missing gdformat in manifest"))?,
         gdtidy: manifest
             .gdtidy
             .or_else(|| find_binary(context, &["gdtidy"]))
@@ -435,20 +403,14 @@ pub fn install_toolchain(
     godot_exe: &Path,
 ) -> Result<InstallOutcome> {
     let requested = install_plan(config);
-    let python = ensure_venv(context)?;
-    install_gdtoolkit(&python, &requested.gdtoolkit, context)?;
     let gdtest = install_tool(context, &requested.gdtest, "gdtest")?;
     let gdhealth = install_tool(context, &requested.gdhealth, "gdhealth")?;
     let gdtypecheck = install_tool(context, &requested.gdtypecheck, "gdtypecheck")?;
     let gdtidy = install_tool(context, &requested.gdtidy, "gdtidy")?;
-    let gdformat =
-        find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
 
     Ok(InstallOutcome {
         manifest: Manifest {
             godot_exe: Some(godot_exe.to_path_buf()),
-            python: Some(python),
-            gdformat: Some(gdformat),
             gdtidy: Some(gdtidy),
             gdtest: Some(gdtest),
             gdhealth: Some(gdhealth),
@@ -464,8 +426,6 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
         &["--version".to_string()],
         &context.root,
     )?;
-    process::run_checked(&toolchain.python, &["--version".to_string()], &context.root)?;
-    process::run_checked(&toolchain.gdformat, &["--help".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtidy, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdhealth, &["--help".to_string()], &context.root)?;
@@ -516,8 +476,7 @@ pub fn ensure_gdtest_class_cache(
 
 pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> {
     let roots = [
-        context.gdsuite_dir.join("python").join("Scripts"),
-        context.gdsuite_dir.join("python").join("bin"),
+        context.gdsuite_dir.join("tools").join("gdtidy").join("bin"),
         context.gdsuite_dir.join("tools").join("gdtest").join("bin"),
         context
             .gdsuite_dir
@@ -543,47 +502,6 @@ pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> 
     }
 
     None
-}
-
-fn ensure_venv(context: &ProjectContext) -> Result<PathBuf> {
-    if let Some(path) = find_python_in_venv(context) {
-        return Ok(path);
-    }
-
-    let python = which::which("python")
-        .or_else(|_| which::which("python3"))
-        .or_else(|_| which::which("py"))
-        .context("python is required for setup")?;
-    process::run_checked(
-        &python,
-        &[
-            "-m".to_string(),
-            "venv".to_string(),
-            context.gdsuite_dir.join("python").display().to_string(),
-        ],
-        &context.root,
-    )?;
-
-    find_python_in_venv(context).ok_or_else(|| anyhow!("venv bootstrap did not produce python"))
-}
-
-fn install_gdtoolkit(
-    python: &Path,
-    requested: &ToolAcquireSpec,
-    context: &ProjectContext,
-) -> Result<()> {
-    let ToolAcquireSpec::Pip { package, spec } = requested else {
-        return Err(anyhow!("gdtoolkit must use a pip acquisition spec"));
-    };
-    let package = format!("{package}{spec}");
-    let args = vec![
-        "-m".to_string(),
-        "pip".to_string(),
-        "install".to_string(),
-        package,
-    ];
-    process::run_checked(python, &args, &context.root)?;
-    Ok(())
 }
 
 fn install_tool(
@@ -693,9 +611,6 @@ fn install_tool(
                 verify_sha256(&archive_path, &expected)?;
             }
             install_binary_archive(&archive_path, &root, name)?;
-        }
-        ToolAcquireSpec::Pip { .. } => {
-            return Err(anyhow!("{name} cannot use a pip acquisition spec"));
         }
     }
 
@@ -852,7 +767,6 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
             }
             normalize_extracted_root(&source_root)
         }
-        ToolAcquireSpec::Pip { .. } => Err(anyhow!("pip source is not valid for {}", name)),
     }
 }
 
@@ -1285,31 +1199,6 @@ fn make_executable(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn find_python_in_venv(context: &ProjectContext) -> Option<PathBuf> {
-    let bases = [
-        context
-            .gdsuite_dir
-            .join("python")
-            .join("Scripts")
-            .join("python"),
-        context
-            .gdsuite_dir
-            .join("python")
-            .join("bin")
-            .join("python"),
-    ];
-
-    for base in bases {
-        for path in process::candidate_paths(base) {
-            if path.exists() {
-                return Some(path);
-            }
-        }
-    }
-
-    None
-}
-
 pub fn probe_installation_state(
     context: &ProjectContext,
     config: &GdsuiteConfig,
@@ -1323,10 +1212,6 @@ pub fn probe_installation_state(
         suite_version: release_manifest().suite.version.clone(),
         manifest_version: release_manifest().suite.manifest_version,
         tools: crate::config::InstalledToolsState {
-            gdtoolkit: InstalledToolState {
-                requested: requested.gdtoolkit.clone(),
-                resolved_version: probed.gdtoolkit_version.clone(),
-            },
             gdtest: InstalledToolState {
                 requested: requested.gdtest.clone(),
                 resolved_version: probed.gdtest_version.clone(),
@@ -1353,24 +1238,6 @@ pub fn probe_installation_state(
 
 pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
     let release = release_manifest();
-
-    let gdtoolkit = match &state.tools.gdtoolkit.resolved_version {
-        Some(version) => evaluate_versioned_tool(
-            "gdtoolkit",
-            &state.tools.gdtoolkit.requested,
-            version,
-            &release.tools.gdtoolkit.acquire,
-            &release.tools.gdtoolkit.tested,
-            Vec::new(),
-        ),
-        None => ToolCompatibility {
-            requested: state.tools.gdtoolkit.requested.render_requested(),
-            resolved_version: None,
-            verdict: CompatibilityVerdict::Error,
-            reason: "gdtoolkit is not installed in the project venv".to_string(),
-            extra: Vec::new(),
-        },
-    };
 
     let gdtest = match (
         &state.tools.gdtest.resolved_version,
@@ -1501,7 +1368,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
     };
 
     CompatibilityReport {
-        gdtoolkit,
         gdtest,
         gdhealth,
         gdtypecheck,
@@ -1511,7 +1377,6 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
 
 pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
     let verdicts = [
-        &report.gdtoolkit.verdict,
         &report.gdtest.verdict,
         &report.gdhealth.verdict,
         &report.gdtypecheck.verdict,
@@ -1583,34 +1448,12 @@ fn probe_toolchain(
     toolchain: &Toolchain,
 ) -> Result<ProbedToolchain> {
     Ok(ProbedToolchain {
-        gdtoolkit_version: probe_pip_package_version(&toolchain.python, "gdtoolkit", context),
         gdtest_version: probe_command_version(&toolchain.gdtest, &["--version"], context),
         gdtest_harness_version: probe_gdtest_harness_version(context, config),
         gdhealth_version: probe_command_version(&toolchain.gdhealth, &["--version"], context),
         gdhealth_schema_version: probe_gdhealth_schema_version(&toolchain.gdhealth, context),
         gdtypecheck_version: probe_command_version(&toolchain.gdtypecheck, &["--version"], context),
         gdtidy_version: probe_command_version(&toolchain.gdtidy, &["--version"], context),
-    })
-}
-
-fn probe_pip_package_version(
-    python: &Path,
-    package: &str,
-    context: &ProjectContext,
-) -> Option<String> {
-    let args = vec![
-        "-m".to_string(),
-        "pip".to_string(),
-        "show".to_string(),
-        package.to_string(),
-    ];
-    let output = process::run(python, &args, &context.root).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    output.stdout.lines().find_map(|line| {
-        line.strip_prefix("Version:")
-            .map(|value| value.trim().to_string())
     })
 }
 
@@ -1691,45 +1534,61 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
-/// Keep `gdformat` out of addons and generated directories, so that `gdsuite
-/// check` does not report files the project did not write. A config the project
-/// already has, under either name gdtoolkit accepts, is left alone. gdtidy needs
-/// no such file: it skips hidden folders and addons itself.
-pub fn write_gdformat_config_if_missing(context: &ProjectContext) -> Result<()> {
-    const EXCLUDES: &str = "excluded_directories: !!set\n  .git: null\n  .godot: null\n  .gdsuite: null\n  addons: null\n";
-    let dotted = context.root.join(".gdformatrc");
-    if !dotted.exists() && !context.root.join("gdformatrc").exists() {
-        fs::write(&dotted, EXCLUDES)
-            .with_context(|| format!("failed to write {}", dotted.display()))?;
+/// gdtoolkit's configuration files that `gdtidy.toml` has no section for yet:
+/// a gdlintrc without `[lint]`, a gdformatrc without `[fmt]`. gdtidy reads
+/// neither file, so each is converted once.
+pub fn unconverted_configs(context: &ProjectContext) -> Vec<PathBuf> {
+    let sections: Option<toml::Table> = fs::read_to_string(context.root.join("gdtidy.toml"))
+        .ok()
+        .and_then(|text| text.parse().ok());
+    let has = |section: &str| sections.as_ref().is_some_and(|t| t.contains_key(section));
+    let mut found = Vec::new();
+    for (names, section) in [
+        (["gdlintrc", ".gdlintrc"], "lint"),
+        (["gdformatrc", ".gdformatrc"], "fmt"),
+    ] {
+        if has(section) {
+            continue;
+        }
+        if let Some(path) = names
+            .into_iter()
+            .map(|name| context.root.join(name))
+            .find(|path| path.is_file())
+        {
+            found.push(path);
+        }
     }
-    Ok(())
+    found
 }
 
-/// The project's gdlintrc, if it has one and no `gdtidy.toml` yet: gdtidy does
-/// not read gdlintrc, so it has to be converted once.
-pub fn unconverted_gdlintrc(context: &ProjectContext) -> Option<PathBuf> {
-    if context.root.join("gdtidy.toml").exists() {
-        return None;
-    }
-    ["gdlintrc", ".gdlintrc"]
-        .into_iter()
-        .map(|name| context.root.join(name))
-        .find(|path| path.is_file())
-}
-
-/// Convert the project's gdlintrc into `gdtidy.toml` with `gdtidy migrate`, so
-/// lint keeps the project's settings. Returns gdtidy's notes (such as rules
-/// that moved to Godot), or `None` when there was nothing to convert.
-pub fn convert_gdlintrc(context: &ProjectContext, gdtidy: &Path) -> Result<Option<Vec<String>>> {
-    let Some(gdlintrc) = unconverted_gdlintrc(context) else {
+/// Convert the project's gdlintrc and gdformatrc into `gdtidy.toml` with
+/// `gdtidy migrate`, which only adds the sections the file does not have, so
+/// lint and fmt keep the project's settings. Returns the converted files and
+/// gdtidy's notes (such as rules that moved to Godot), or `None` when there
+/// was nothing to convert.
+pub fn convert_tool_configs(
+    context: &ProjectContext,
+    gdtidy: &Path,
+) -> Result<Option<(Vec<String>, Vec<String>)>> {
+    let files = unconverted_configs(context);
+    if files.is_empty() {
         return Ok(None);
-    };
-    let args = vec!["migrate".to_string(), gdlintrc.display().to_string()];
+    }
+    let names: Vec<String> = files
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+        .collect();
+    let mut args = vec!["migrate".to_string()];
+    args.extend(files.iter().map(|path| path.display().to_string()));
     let output = process::run(gdtidy, &args, &context.root)?;
     if !output.status.success() {
         return Err(anyhow!(
             "could not convert {}: {}",
-            gdlintrc.display(),
+            names.join(" and "),
             output.stderr.trim()
         ));
     }
@@ -1740,7 +1599,7 @@ pub fn convert_gdlintrc(context: &ProjectContext, gdtidy: &Path) -> Result<Optio
         .filter(|note| !note.starts_with("wrote "))
         .map(ToString::to_string)
         .collect();
-    Ok(Some(notes))
+    Ok(Some((names, notes)))
 }
 
 pub fn install_gdtest_addons(

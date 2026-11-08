@@ -117,8 +117,6 @@ fn setup_impl(
     output.step("installing gdtest addons");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
-    tooling::write_gdformat_config_if_missing(context)
-        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     for skipped in &addon_report.skipped_modified {
         output.warn(format!(
             "gdtest addon install skipped modified file {}",
@@ -133,12 +131,15 @@ fn setup_impl(
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    if let Some(notes) = tooling::convert_gdlintrc(context, &toolchain.gdtidy)
+    if let Some((files, notes)) = tooling::convert_tool_configs(context, &toolchain.gdtidy)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?
     {
-        output.step("converted gdlintrc into gdtidy.toml");
+        output.step(format!(
+            "converted {} into gdtidy.toml",
+            files.join(" and ")
+        ));
         for note in notes {
-            output.info(format!("gdlintrc: {note}"));
+            output.info(format!("gdtidy migrate: {note}"));
         }
     }
     output.step("recording installation state");
@@ -149,7 +150,6 @@ fn setup_impl(
         .map_err(|error| command_error(EXIT_INTERNAL_ERROR, error.to_string()))?;
     let compatibility = tooling::compatibility_report(&installation);
     for tool in [
-        &compatibility.gdtoolkit,
         &compatibility.gdtest,
         &compatibility.gdhealth,
         &compatibility.gdtypecheck,
@@ -161,7 +161,6 @@ fn setup_impl(
     }
     if tooling::report_status(&compatibility) == CompatibilityVerdict::Error {
         let errors = [
-            &compatibility.gdtoolkit,
             &compatibility.gdtest,
             &compatibility.gdhealth,
             &compatibility.gdtypecheck,
@@ -210,48 +209,6 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         }
     };
     tool_reports.insert("godot".to_string(), godot);
-
-    let python = manifest
-        .as_ref()
-        .and_then(|m| m.python.clone())
-        .or_else(|| tooling::find_python_in_venv(context));
-    tool_reports.insert(
-        "python".to_string(),
-        match python {
-            Some(path) => {
-                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
-            }
-            None => {
-                missing.push("python".to_string());
-                DoctorToolReport::error(
-                    None,
-                    None,
-                    "not found; run `gdsuite setup` to install the toolchain",
-                )
-            }
-        },
-    );
-
-    let gdformat = manifest
-        .as_ref()
-        .and_then(|m| m.gdformat.clone())
-        .or_else(|| tooling::find_binary(context, &["gdformat"]));
-    tool_reports.insert(
-        "gdformat".to_string(),
-        match gdformat {
-            Some(path) => {
-                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
-            }
-            None => {
-                missing.push("gdformat".to_string());
-                DoctorToolReport::error(
-                    None,
-                    None,
-                    "not found; run `gdsuite setup` to install the toolchain",
-                )
-            }
-        },
-    );
 
     let gdtidy = manifest
         .as_ref()
@@ -363,10 +320,6 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         {
             let compatibility = tooling::compatibility_report(&installation);
             compatibility_reports.insert(
-                "gdtoolkit".to_string(),
-                DoctorCompatibilityReport::from_tool(&compatibility.gdtoolkit),
-            );
-            compatibility_reports.insert(
                 "gdtest".to_string(),
                 DoctorCompatibilityReport::from_tool(&compatibility.gdtest),
             );
@@ -447,8 +400,10 @@ fn finish_mutating_command(output: &OutputContext, summary: &str) {
 
 fn fmt(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
-    let cmd_args = default_or_dot_or_append_target_for_flags(args.args);
-    process::run_checked_streaming(&toolchain.gdformat, &cmd_args, &context.root)
+    warn_unconverted_configs(context);
+    let mut cmd_args = vec!["fmt".to_string()];
+    cmd_args.extend(default_or_dot_or_append_target_for_flags(args.args));
+    process::run_checked_streaming(&toolchain.gdtidy, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     Ok(())
 }
@@ -457,7 +412,7 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    warn_unconverted_gdlintrc(context);
+    warn_unconverted_configs(context);
     let output = process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let report = JsonLintReport::from_output(&output);
@@ -472,9 +427,10 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     Ok(())
 }
 
-/// gdtidy does not read gdlintrc; until it is converted, its settings are lost.
-fn warn_unconverted_gdlintrc(context: &ProjectContext) {
-    if let Some(path) = tooling::unconverted_gdlintrc(context) {
+/// gdtidy reads neither gdlintrc nor gdformatrc; until they are converted,
+/// their settings are lost.
+fn warn_unconverted_configs(context: &ProjectContext) {
+    for path in tooling::unconverted_configs(context) {
         eprintln!(
             "warning: {} is not read by gdtidy; run `gdsuite setup` or `gdsuite migrate` to convert it into gdtidy.toml",
             path.display()
@@ -940,15 +896,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
     output.kv("installation", &report.paths.installation);
     output.blank();
 
-    for name in [
-        "godot",
-        "python",
-        "gdformat",
-        "gdtidy",
-        "gdtest",
-        "gdhealth",
-        "gdtypecheck",
-    ] {
+    for name in ["godot", "gdtidy", "gdtest", "gdhealth", "gdtypecheck"] {
         if let Some(tool) = report.tools.get(name) {
             match tool.status.as_str() {
                 "ok" => {
@@ -968,7 +916,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
 
     if !report.compatibility.is_empty() {
         output.blank();
-        for name in ["gdtoolkit", "gdtest", "gdhealth", "gdtypecheck", "gdtidy"] {
+        for name in ["gdtest", "gdhealth", "gdtypecheck", "gdtidy"] {
             if let Some(tool) = report.compatibility.get(name) {
                 let installed = tool.installed.as_deref().unwrap_or("unknown");
                 let message = format!(
@@ -1213,12 +1161,14 @@ fn run_check_steps(
 fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let cmd_args = vec!["--check".to_string(), ".".to_string()];
-    let output = process::run(&toolchain.gdformat, &cmd_args, &context.root)
+    warn_unconverted_configs(context);
+    let cmd_args = ["fmt", "--check", "--format", "json", "."].map(String::from);
+    let output = process::run(&toolchain.gdtidy, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let duration_ms = started.elapsed().as_millis();
+    let diagnostics = fmt_diagnostics(&output);
 
-    if output.status.success() {
+    if diagnostics.is_empty() {
         return Ok(CheckStepResult::passed(
             StepReport::ok("fmt", duration_ms, "format check passed"),
             "Formatting check passed",
@@ -1227,7 +1177,6 @@ fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
         ));
     }
 
-    let diagnostics = collect_nonempty_lines(&output.stdout, &output.stderr);
     Ok(CheckStepResult::failed(
         StepReport::failed("fmt", duration_ms, "formatting issues found"),
         "Formatting issues found",
@@ -1244,7 +1193,7 @@ fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
 fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    warn_unconverted_gdlintrc(context);
+    warn_unconverted_configs(context);
     let output = process::run(&toolchain.gdtidy, &lint_args(Vec::new()), &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let lint_report = JsonLintReport::from_output(&output);
@@ -1504,6 +1453,42 @@ fn collect_nonempty_lines(stdout: &str, stderr: &str) -> Vec<String> {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(ToString::to_string)
+        .collect()
+}
+
+/// What fails the format check, from `gdtidy fmt --check --format json`: the
+/// files that would change, and files gdtidy could not format safely. Files
+/// with a syntax error are left to typecheck, as in lint. Output that is not
+/// gdtidy's report is shown as it is.
+fn fmt_diagnostics(output: &process::ProcessOutput) -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct Report {
+        changed: Vec<String>,
+        skipped: Vec<Skipped>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Skipped {
+        path: String,
+        reason: String,
+        message: String,
+    }
+    let Ok(report) = serde_json::from_str::<Report>(&output.stdout) else {
+        if output.status.success() {
+            return Vec::new();
+        }
+        return collect_nonempty_lines(&output.stdout, &output.stderr);
+    };
+    report
+        .changed
+        .into_iter()
+        .map(|path| format!("{path}: would be reformatted"))
+        .chain(
+            report
+                .skipped
+                .into_iter()
+                .filter(|s| s.reason != "syntax-error")
+                .map(|s| format!("{}: {}", s.path, s.message)),
+        )
         .collect()
 }
 

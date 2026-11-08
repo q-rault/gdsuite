@@ -31,8 +31,6 @@ pub struct ProjectConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsConfig {
-    #[serde(default = "default_gdtoolkit_version")]
-    pub gdtoolkit: String,
     #[serde(default = "default_gdtest_source")]
     pub gdtest_source: String,
     #[serde(default = "default_gdhealth_source")]
@@ -78,8 +76,6 @@ pub enum CheckStep {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Manifest {
     pub godot_exe: Option<PathBuf>,
-    pub python: Option<PathBuf>,
-    pub gdformat: Option<PathBuf>,
     pub gdtidy: Option<PathBuf>,
     pub gdtest: Option<PathBuf>,
     pub gdhealth: Option<PathBuf>,
@@ -101,7 +97,6 @@ pub struct ReleaseSuite {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseTools {
-    pub gdtoolkit: ReleaseTool,
     pub gdtest: ReleaseTool,
     pub gdhealth: ReleaseTool,
     pub gdtypecheck: ReleaseTool,
@@ -123,7 +118,6 @@ impl ReleaseManifest {
     /// The tool entry for `name`, or `None` for a tool the suite does not pin.
     pub fn tool(&self, name: &str) -> Option<&ReleaseTool> {
         match name {
-            "gdtoolkit" => Some(&self.tools.gdtoolkit),
             "gdtest" => Some(&self.tools.gdtest),
             "gdhealth" => Some(&self.tools.gdhealth),
             "gdtypecheck" => Some(&self.tools.gdtypecheck),
@@ -152,10 +146,6 @@ pub struct GdhealthContract {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolAcquireSpec {
-    Pip {
-        package: String,
-        spec: String,
-    },
     Crate {
         #[serde(rename = "crate")]
         crate_name: String,
@@ -195,7 +185,6 @@ pub struct InstalledState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledToolsState {
-    pub gdtoolkit: InstalledToolState,
     pub gdtest: InstalledToolState,
     pub gdhealth: InstalledToolState,
     pub gdtypecheck: InstalledToolState,
@@ -234,7 +223,6 @@ impl Default for ProjectConfig {
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
-            gdtoolkit: default_gdtoolkit_version(),
             gdtest_source: default_gdtest_source(),
             gdhealth_source: default_gdhealth_source(),
             gdtypecheck_source: default_gdtypecheck_source(),
@@ -336,16 +324,8 @@ impl InstalledState {
 }
 
 impl ToolAcquireSpec {
-    pub fn gdtoolkit_spec(&self) -> Option<&str> {
-        match self {
-            Self::Pip { spec, .. } => Some(spec),
-            _ => None,
-        }
-    }
-
     pub fn render_requested(&self) -> String {
         match self {
-            Self::Pip { spec, .. } => spec.clone(),
             Self::Crate {
                 crate_name,
                 version,
@@ -421,16 +401,6 @@ fn default_root() -> String {
     ".".to_string()
 }
 
-fn default_gdtoolkit_version() -> String {
-    ReleaseManifest::bundled()
-        .tools
-        .gdtoolkit
-        .acquire
-        .gdtoolkit_spec()
-        .expect("gdtoolkit release manifest must use pip")
-        .to_string()
-}
-
 fn default_gdtest_source() -> String {
     ReleaseManifest::bundled()
         .tools
@@ -503,7 +473,6 @@ fn default_config_template(godot_exe: Option<&Path>) -> String {
         r#"[project]
 root = "."
 {godot_exe}[tools]
-gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
 gdtypecheck_source = "{}"
@@ -520,12 +489,6 @@ artifacts_dir = "reports/gdsuite"
 [check]
 steps = ["fmt", "lint", "typecheck", "health"]
 "#,
-        release
-            .tools
-            .gdtoolkit
-            .acquire
-            .gdtoolkit_spec()
-            .expect("gdtoolkit release manifest must use pip"),
         release.tools.gdtest.acquire.render_requested(),
         release.tools.gdhealth.acquire.render_requested(),
         release.tools.gdtypecheck.acquire.render_requested(),
@@ -550,7 +513,6 @@ fn render_gdsuite_config(config: &GdsuiteConfig) -> String {
         r#"[project]
 root = "{}"
 {godot_exe}[tools]
-gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
 gdtypecheck_source = "{}"
@@ -568,7 +530,6 @@ artifacts_dir = "{}"
 steps = {}
 "#,
         escape_string(&config.project.root),
-        escape_string(&config.tools.gdtoolkit),
         escape_string(&config.tools.gdtest_source),
         escape_string(&config.tools.gdhealth_source),
         escape_string(&config.tools.gdtypecheck_source),

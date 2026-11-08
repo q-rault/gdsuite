@@ -2,10 +2,6 @@
 version = "0.2.0"
 manifest_version = 1
 
-[tools.gdtoolkit]
-acquire = { kind = "pip", package = "gdtoolkit", spec = "==4.5.0" }
-tested = "==4.5.0"
-
 [tools.gdtest]
 acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.1" }
 tested = "==0.2.1"
@@ -37,8 +33,8 @@ tested = "==0.2.1"
 "x86_64-unknown-linux-musl" = "0c1c70e09234bd2922a15334e9533b38aa271df5258e456b60f12302a54be5fc"
 
 [tools.gdtidy]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", tag = "v0.1.0" }
-tested = "==0.1.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", tag = "v0.2.0" }
+tested = "==0.2.0"
 
 [tools.gdtidy.sha256]
 "aarch64-apple-darwin" = "bf462dfebea08609507a9bda3549e784bbcbe4138fc74da67d95452a4850e060"
