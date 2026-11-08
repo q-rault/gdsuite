@@ -457,57 +457,61 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/q-rault/gdtest/releases/download/v0.2.3/gdtest-v0.2.3-x86_64-pc-windows-msvc.zip"
-                    .to_string(),
+                pin(
+                    "/q-rault/gdtest/releases/download/v{gdtest}/gdtest-v{gdtest}-x86_64-pc-windows-msvc.zip",
+                ),
                 build_zip(&[
                     (
-                        "gdtest-v0.2.3-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.3\r\n",
+                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest {gdtest}\r\n",
                     ),
                     (
-                        "gdtest-v0.2.3-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.2.3\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"{gdtest}\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.2.3-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.3-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
+                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.3-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
             ),
             (
-                "/q-rault/gdhealth/releases/download/v0.3.1/gdhealth-v0.3.1-x86_64-pc-windows-msvc.zip"
-                    .to_string(),
+                pin(
+                    "/q-rault/gdhealth/releases/download/v{gdhealth}/gdhealth-v{gdhealth}-x86_64-pc-windows-msvc.zip",
+                ),
                 build_zip(&[(
-                    "gdhealth-v0.3.1-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.3.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v{gdhealth}-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth {gdhealth}\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
             ),
             (
-                "/q-rault/gdtidy/releases/download/v0.3.0/gdtidy-v0.3.0-x86_64-pc-windows-msvc.zip"
-                    .to_string(),
+                pin(
+                    "/q-rault/gdtidy/releases/download/v{gdtidy}/gdtidy-v{gdtidy}-x86_64-pc-windows-msvc.zip",
+                ),
                 build_zip(&[(
-                    "gdtidy-v0.3.0-x86_64-pc-windows-msvc/gdtidy.cmd",
+                    "gdtidy-v{gdtidy}-x86_64-pc-windows-msvc/gdtidy.cmd",
                     &GDTIDY_CMD.replace('\n', "\r\n"),
                 )]),
             ),
             (
-                "/q-rault/gdtypecheck/releases/download/v0.2.1/gdtypecheck-v0.2.1-x86_64-pc-windows-msvc.zip"
-                    .to_string(),
+                pin(
+                    "/q-rault/gdtypecheck/releases/download/v{gdtypecheck}/gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc.zip",
+                ),
                 build_zip(&[
                     (
-                        "gdtypecheck-v0.2.1-x86_64-pc-windows-msvc/gdtypecheck.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.2.1\r\n",
+                        "gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc/gdtypecheck.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck {gdtypecheck}\r\n",
                     ),
                     (
-                        "gdtypecheck-v0.2.1-x86_64-pc-windows-msvc/README.md",
+                        "gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc/README.md",
                         "gdtypecheck\n",
                     ),
                 ]),
@@ -563,7 +567,7 @@ impl Fixture {
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.3\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+            pin("const HARNESS_VERSION = \"{gdtest}\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n"),
         )
         .unwrap();
         fs::write(gdtest_root.join("addons/gdtest/gdunit4_chain.gd"), "").unwrap();
@@ -590,7 +594,7 @@ impl Fixture {
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtest 0.2.3
+  echo gdtest {gdtest}
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtest-args.txt"
@@ -603,7 +607,7 @@ echo gdtest ok
             &gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdhealth 0.3.1
+  echo gdhealth {gdhealth}
   exit /b 0
 )
 if "%1"=="--schema-version" (
@@ -627,7 +631,7 @@ if exist "%CD%\mock-state\health-fail.flag" (
             &gdsuite_dir.join("tools/gdtypecheck/bin/gdtypecheck.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtypecheck 0.2.1
+  echo gdtypecheck {gdtypecheck}
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtypecheck-args.txt"
@@ -667,7 +671,7 @@ echo gdtypecheck ok
         fs::create_dir_all(self.root.join("addons/gdtest")).unwrap();
         fs::write(
             self.root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.3\"\n",
+            pin("const HARNESS_VERSION = \"{gdtest}\"\n"),
         )
         .unwrap();
     }
@@ -712,9 +716,9 @@ goto scan
 if not "%ROOT%"=="" (
   mkdir "%ROOT%\bin" 2>nul
   > "%ROOT%\bin\gdtest.cmd" echo @echo off
-  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.3
+  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest {gdtest}
   > "%ROOT%\bin\gdhealth.cmd" echo @echo off
-  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.3.1
+  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth {gdhealth}
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--help" echo gdhealth help
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--schema-version" echo 1
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="schema-version" echo 1
@@ -881,8 +885,8 @@ fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {
         let mut archive = ZipWriter::new(&mut buffer);
         let options = SimpleFileOptions::default();
         for (path, contents) in entries {
-            archive.start_file(path, options).unwrap();
-            archive.write_all(contents.as_bytes()).unwrap();
+            archive.start_file(pin(path), options).unwrap();
+            archive.write_all(pin(contents).as_bytes()).unwrap();
         }
         archive.finish().unwrap();
     }
@@ -890,7 +894,28 @@ fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {
 }
 
 fn write_cmd(path: &Path, body: &str) {
-    fs::write(path, body).unwrap();
+    fs::write(path, pin(body)).unwrap();
+}
+
+/// The version `.gdsuite-release.toml` pins for `tool`, so the fixtures follow
+/// a pin without edits.
+fn pinned(tool: &str) -> String {
+    let manifest: toml::Table = include_str!("../.gdsuite-release.toml").parse().unwrap();
+    manifest["tools"][tool]["tested"]
+        .as_str()
+        .unwrap()
+        .trim_start_matches('=')
+        .to_string()
+}
+
+/// `text` with `{gdtest}`, `{gdhealth}`, `{gdtidy}` and `{gdtypecheck}`
+/// replaced by the versions `.gdsuite-release.toml` pins.
+fn pin(text: &str) -> String {
+    ["gdtest", "gdhealth", "gdtidy", "gdtypecheck"]
+        .iter()
+        .fold(text.to_string(), |text, tool| {
+            text.replace(&format!("{{{tool}}}"), &pinned(tool))
+        })
 }
 
 fn escape(path: PathBuf) -> String {
@@ -1055,7 +1080,7 @@ fn migrate_converts_gdlintrc_once_gdtidy_is_installed() {
 /// and `lint --format json`, whose reports depend on flags in mock-state.
 const GDTIDY_CMD: &str = r#"@echo off
 if "%1"=="--version" (
-  echo gdtidy 0.3.0
+  echo gdtidy {gdtidy}
   exit /b 0
 )
 if "%1"=="migrate" (
@@ -1120,13 +1145,16 @@ fn setup_upgrades_gdtest_addons_from_another_harness_version() {
         .arg("init")
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "upgraded the gdtest addons from harness 0.1.1 to 0.2.3",
-        ))
+        .stdout(predicate::str::contains(pin(
+            "upgraded the gdtest addons from harness 0.1.1 to {gdtest}",
+        )))
         .stdout(predicate::str::contains("skipped modified").not());
 
     let worker = fs::read_to_string(fixture.root.join("addons/gdtest/gdtest_worker.gd")).unwrap();
-    assert!(worker.contains("HARNESS_VERSION = \"0.2.3\""), "{worker}");
+    assert!(
+        worker.contains(&pin("HARNESS_VERSION = \"{gdtest}\"")),
+        "{worker}"
+    );
     assert_eq!(
         fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap(),
         ""
