@@ -37,10 +37,10 @@ acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", ta
 tested = "==0.2.0"
 
 [tools.gdtidy.sha256]
-"aarch64-apple-darwin" = "bf462dfebea08609507a9bda3549e784bbcbe4138fc74da67d95452a4850e060"
-"x86_64-apple-darwin" = "3730c6312da579fae6ce4714212025177897734e117c0a5372a06caa43e08b17"
-"x86_64-pc-windows-msvc" = "a5167829e87c39bbbc3700949c7f32aa6b35196b3943c5779e8d849dcfd0f399"
-"x86_64-unknown-linux-musl" = "22c377a5218fcc7ace1bb8007de8c8f669a99c3261982d629dce0dd2d111c2a6"
+"aarch64-apple-darwin" = "924d9dde589023ae95af43e8440308db9f822b4688abcae9743f416648c3d206"
+"x86_64-apple-darwin" = "fd636ec8c297431ec3a8f3d128ca39e9447c463aeb00ce36083d0e46aee44956"
+"x86_64-pc-windows-msvc" = "02ac0d4a3b882e7b403bee4d8ef4fd13f4218dc9f547e36d748f5f04fa19d10e"
+"x86_64-unknown-linux-musl" = "cb83089471c496485ff6f0f7a2d503a041d786255f163c95ce235495afc39e3d"
 
 [contracts.gdtest]
 required_harness = "==0.2.1"
