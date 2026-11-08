@@ -117,6 +117,21 @@ fn setup_impl(
     output.step("installing gdtest addons");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    if let Some(upgrade) = &addon_report.upgrade {
+        let backup = if upgrade.replaced.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; the {} replaced file(s) are backed up in {}",
+                upgrade.replaced.len(),
+                upgrade.backup_dir.display()
+            )
+        };
+        output.warn(format!(
+            "upgraded the gdtest addons from harness {} to {}{backup}",
+            upgrade.from_version, upgrade.to_version
+        ));
+    }
     for skipped in &addon_report.skipped_modified {
         output.warn(format!(
             "gdtest addon install skipped modified file {}",
@@ -260,7 +275,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         "gdhealth".to_string(),
         match gdhealth {
             Some(path) => {
-                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--help"]))
+                DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
             }
             None => {
                 missing.push("gdhealth".to_string());
@@ -481,6 +496,8 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     if step.status == "failed" {
         return Err(command_error(EXIT_VALIDATION_ERROR, step.summary));
     }
+    // gdhealth writes its bundle quietly, so say where it went.
+    println!("{}", step.summary);
     Ok(())
 }
 
@@ -758,6 +775,8 @@ struct JsonLintFinding {
     severity: String,
     message: String,
     rule: Option<String>,
+    /// `gdtidy lint --fix` can fix it.
+    fixable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -787,6 +806,8 @@ struct GdtidyDiagnostic {
     severity: String,
     rule: String,
     message: String,
+    #[serde(default)]
+    fixable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -814,8 +835,8 @@ impl JsonLintReport {
                 exit_code: output.status.code(),
                 summary: stderr.last().cloned().or_else(|| {
                     Some(format!(
-                        "gdtidy failed with exit code {:?}",
-                        output.status.code()
+                        "gdtidy {}",
+                        process::describe_exit(output.status.code())
                     ))
                 }),
                 findings: Vec::new(),
@@ -834,6 +855,7 @@ impl JsonLintReport {
                 severity: d.severity,
                 message: d.message,
                 rule: Some(d.rule),
+                fixable: d.fixable,
             })
             .collect::<Vec<_>>();
         let skipped = report
@@ -1529,9 +1551,18 @@ fn lint_failure_summary(report: &JsonLintReport) -> String {
     }
     let count = report.findings.len();
     let noun = if count == 1 { "problem" } else { "problems" };
-    format!(
-        "Found {count} lint {noun}. Fix them, or run `gdsuite lint -- --fix` for the fixable ones, and rerun `gdsuite check`."
-    )
+    let fixable = report.findings.iter().filter(|f| f.fixable).count();
+    if fixable == 0 {
+        format!("Found {count} lint {noun}. Fix them and rerun `gdsuite check`.")
+    } else if fixable == count {
+        format!(
+            "Found {count} lint {noun}. Run `gdsuite lint -- --fix` to fix them, and rerun `gdsuite check`."
+        )
+    } else {
+        format!(
+            "Found {count} lint {noun}, {fixable} fixable with `gdsuite lint -- --fix`. Fix the others and rerun `gdsuite check`."
+        )
+    }
 }
 
 fn typecheck_failure_summary(diagnostics: &[String]) -> String {

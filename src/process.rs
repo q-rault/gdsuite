@@ -39,9 +39,9 @@ pub fn run_checked(command_path: &Path, args: &[String], cwd: &Path) -> Result<P
     let output = run(command_path, args, cwd)?;
     if !output.status.success() {
         return Err(anyhow!(
-            "{} failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
+            "{} {}\nstdout:\n{}\nstderr:\n{}",
             command_path.display(),
-            output.status.code(),
+            describe_exit(output.status.code()),
             output.stdout,
             output.stderr
         ));
@@ -62,13 +62,21 @@ pub fn run_checked_streaming(command_path: &Path, args: &[String], cwd: &Path) -
 
     if !status.success() {
         return Err(anyhow!(
-            "{} failed with exit code {:?}",
+            "{} {}",
             command_path.display(),
-            status.code()
+            describe_exit(status.code())
         ));
     }
 
     Ok(())
+}
+
+/// How a failed process ended, as in "failed with exit code 1".
+pub fn describe_exit(code: Option<i32>) -> String {
+    match code {
+        Some(code) => format!("failed with exit code {code}"),
+        None => "was stopped by a signal".to_string(),
+    }
 }
 
 fn build_command(command_path: &Path) -> Command {

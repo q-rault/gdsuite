@@ -218,7 +218,12 @@ fn health_defaults_to_configured_subcommand() {
     fixture.seed_project();
     fixture.seed_installed_toolchain();
 
-    fixture.cmd().arg("health").assert().success();
+    fixture
+        .cmd()
+        .arg("health")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("health passed"));
 
     assert_eq!(fixture.read_log("gdhealth-args.txt"), "health");
     assert!(
@@ -283,6 +288,26 @@ fn check_runs_configured_steps_in_order_and_stops_on_failure() {
     assert_eq!(fixture.read_log("step-order.txt"), "fmt\nlint\ntypecheck");
     assert!(!fixture.root.join("logs/gdtest-args.txt").exists());
     assert!(!fixture.root.join("logs/gdhealth-args.txt").exists());
+}
+
+#[test]
+fn check_suggests_lint_fix_only_for_fixable_findings() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    // The mocked finding is not fixable.
+    fixture.write_flag("lint-fail.flag");
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .code(12)
+        .stdout(predicate::str::contains(
+            "Found 1 lint problem. Fix them and rerun `gdsuite check`.",
+        ))
+        .stdout(predicate::str::contains("--fix").not());
 }
 
 #[test]
@@ -1054,3 +1079,72 @@ if exist "%CD%\mock-state\lint-skip.flag" (
 )
 echo {"version":1,"files":1,"fixed":0,"diagnostics":[],"skipped":[]}
 "#;
+
+#[test]
+fn setup_upgrades_gdtest_addons_from_another_harness_version() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    // Addons committed with an older gdtest: gdtest refuses to run with them.
+    fs::create_dir_all(fixture.root.join("addons/gdtest")).unwrap();
+    fs::write(
+        fixture.root.join("addons/gdtest/gdtest_worker.gd"),
+        "const HARNESS_VERSION = \"0.1.1\"\n",
+    )
+    .unwrap();
+    fs::write(fixture.root.join("addons/gdtest/gdt.gd"), "old gdt\n").unwrap();
+
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "upgraded the gdtest addons from harness 0.1.1 to 0.2.1",
+        ))
+        .stdout(predicate::str::contains("skipped modified").not());
+
+    let worker = fs::read_to_string(fixture.root.join("addons/gdtest/gdtest_worker.gd")).unwrap();
+    assert!(worker.contains("HARNESS_VERSION = \"0.2.1\""), "{worker}");
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap(),
+        ""
+    );
+    let backup = fixture
+        .root
+        .join(".gdsuite/backups/gdtest-addons-0.1.1/addons/gdtest");
+    assert_eq!(
+        fs::read_to_string(backup.join("gdt.gd")).unwrap(),
+        "old gdt\n"
+    );
+    assert!(
+        fs::read_to_string(backup.join("gdtest_worker.gd"))
+            .unwrap()
+            .contains("0.1.1")
+    );
+}
+
+#[test]
+fn setup_keeps_edited_gdtest_addons_of_the_same_harness_version() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fixture.cmd().arg("init").assert().success();
+    fs::write(fixture.root.join("addons/gdtest/gdt.gd"), "my edit\n").unwrap();
+
+    fixture
+        .cmd()
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skipped modified file"))
+        .stdout(predicate::str::contains("upgraded").not());
+
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap(),
+        "my edit\n"
+    );
+    assert!(!fixture.root.join(".gdsuite/backups").exists());
+}
