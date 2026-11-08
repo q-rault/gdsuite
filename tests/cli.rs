@@ -44,14 +44,88 @@ fn fmt_forwards_args_and_keeps_explicit_targets() {
 }
 
 #[test]
-fn lint_defaults_to_dot() {
+fn lint_runs_gdtidy_with_its_json_report() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_installed_toolchain();
 
-    fixture.cmd().arg("lint").assert().success();
+    fixture
+        .cmd()
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("0 lint problems in 1 files"));
 
-    assert_eq!(fixture.read_log("gdlint-args.txt"), ".");
+    assert_eq!(fixture.read_log("gdtidy-args.txt"), "lint --format json");
+}
+
+#[test]
+fn lint_forwards_args_to_gdtidy() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["lint", "--", "--fix", "src"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fixture.read_log("gdtidy-args.txt"),
+        "lint --format json --fix src"
+    );
+}
+
+#[test]
+fn lint_prints_findings_and_fails() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fixture.write_flag("lint-fail.flag");
+
+    fixture
+        .cmd()
+        .arg("lint")
+        .assert()
+        .failure()
+        .code(12)
+        .stdout(predicate::str::contains(
+            "test/sample.gd:3:6: warning[function-name]: Function name",
+        ));
+}
+
+#[test]
+fn a_file_with_a_syntax_error_does_not_fail_lint() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fixture.write_flag("lint-skip.flag");
+
+    fixture
+        .cmd()
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "test/broken.gd:2:1: skipped: Expected end of statement.",
+        ))
+        .stderr(predicate::str::contains("which typecheck reports"));
+}
+
+#[test]
+fn lint_warns_about_a_gdlintrc_gdtidy_does_not_read() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(fixture.root.join("gdlintrc"), "max-line-length: 130\n").unwrap();
+
+    fixture
+        .cmd()
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("is not read by gdtidy"));
 }
 
 #[test]
@@ -68,9 +142,10 @@ fn lint_report_json_wraps_native_output() {
         .failure()
         .code(12)
         .stdout(predicate::str::contains("\"findings\""))
-        .stdout(predicate::str::contains("\"file\": \"test/sample.gd\""));
+        .stdout(predicate::str::contains("\"file\": \"test/sample.gd\""))
+        .stdout(predicate::str::contains("\"rule\": \"function-name\""));
 
-    assert_eq!(fixture.read_log("gdlint-args.txt"), "--verbose .");
+    assert_eq!(fixture.read_log("gdtidy-args.txt"), "lint --format json");
 }
 
 #[test]
@@ -293,10 +368,14 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
         gitignore.lines().any(|line| line == ".gdsuite/"),
         "{gitignore}"
     );
-    for name in [".gdformatrc", ".gdlintrc"] {
-        let rc = fs::read_to_string(fixture.root.join(name)).unwrap();
-        assert!(rc.contains("addons: null"), "{name} must exclude addons");
-    }
+    let rc = fs::read_to_string(fixture.root.join(".gdformatrc")).unwrap();
+    assert!(
+        rc.contains("addons: null"),
+        ".gdformatrc must exclude addons"
+    );
+    // gdtidy skips addons itself and reads no gdlintrc.
+    assert!(!fixture.root.join(".gdlintrc").exists());
+    assert!(!fixture.root.join("gdtidy.toml").exists());
     assert!(config.contains("[check]"));
     assert!(!config.contains("[lint]"));
     assert!(!config.contains("[health]"));
@@ -348,6 +427,14 @@ impl Fixture {
                 build_zip(&[(
                     "gdhealth-v0.3.0-x86_64-pc-windows-msvc/gdhealth.cmd",
                     "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.3.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                )]),
+            ),
+            (
+                "/q-rault/gdtidy/releases/download/v0.1.0/gdtidy-v0.1.0-x86_64-pc-windows-msvc.zip"
+                    .to_string(),
+                build_zip(&[(
+                    "gdtidy-v0.1.0-x86_64-pc-windows-msvc/gdtidy.cmd",
+                    &GDTIDY_CMD.replace('\n', "\r\n"),
                 )]),
             ),
             (
@@ -435,6 +522,7 @@ impl Fixture {
         fs::create_dir_all(gdsuite_dir.join("tools/gdtest/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdhealth/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdtypecheck/bin")).unwrap();
+        fs::create_dir_all(gdsuite_dir.join("tools/gdtidy/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("state")).unwrap();
         self.seed_path_tools();
         write_cmd(
@@ -454,19 +542,7 @@ if exist "%CD%\mock-state\fmt-fail.flag" (
 echo gdformat ok
 "#,
         );
-        write_cmd(
-            &gdsuite_dir.join("python/Scripts/gdlint.cmd"),
-            r#"@echo off
-echo %*> "%CD%\logs\gdlint-args.txt"
->> "%CD%\logs\step-order.txt" echo lint
-if exist "%CD%\mock-state\lint-fail.flag" (
-  echo test/sample.gd:3: Error: Function name "BadName" is not valid ^(function-name^)
-  >&2 echo Failure: 1 problem found
-  exit /b 1
-)
-echo Success: no problems found
-"#,
-        );
+        write_cmd(&gdsuite_dir.join("tools/gdtidy/bin/gdtidy.cmd"), GDTIDY_CMD);
         write_cmd(
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
@@ -534,7 +610,7 @@ echo gdtypecheck ok
   "godot_exe": "{}",
   "python": "{}",
   "gdformat": "{}",
-  "gdlint": "{}",
+  "gdtidy": "{}",
   "gdtest": "{}",
   "gdhealth": "{}",
   "gdtypecheck": "{}"
@@ -542,7 +618,7 @@ echo gdtypecheck ok
                 escape(self.root.join("mock-bin/godot.cmd")),
                 escape(gdsuite_dir.join("python/Scripts/python.cmd")),
                 escape(gdsuite_dir.join("python/Scripts/gdformat.cmd")),
-                escape(gdsuite_dir.join("python/Scripts/gdlint.cmd")),
+                escape(gdsuite_dir.join("tools/gdtidy/bin/gdtidy.cmd")),
                 escape(gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd")),
                 escape(gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd")),
                 escape(gdsuite_dir.join("tools/gdtypecheck/bin/gdtypecheck.cmd")),
@@ -590,8 +666,6 @@ if "%1"=="-m" if "%2"=="venv" (
   >> "%3\Scripts\python.cmd" echo @if "%%1"=="-m" if "%%2"=="pip" if "%%3"=="show" if "%%4"=="gdtoolkit" echo Version: 4.5.0
   > "%3\Scripts\gdformat.cmd" echo @echo off
   >> "%3\Scripts\gdformat.cmd" echo @if "%%1"=="--help" echo gdformat help
-  > "%3\Scripts\gdlint.cmd" echo @echo off
-  >> "%3\Scripts\gdlint.cmd" echo @if "%%1"=="--help" echo gdlint help
   exit /b 0
 )
 "#,
@@ -840,25 +914,104 @@ fn setup_extends_an_existing_gitignore_once() {
 }
 
 #[test]
-fn setup_keeps_an_existing_gdtoolkit_config() {
+fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
     let fixture = Fixture::new();
     fixture.seed_project();
     fixture.seed_tool_sources();
     fixture.seed_path_tools();
-    fs::write(
-        fixture.root.join("gdlintrc"),
-        "custom: true
-",
-    )
-    .unwrap();
+    fs::write(fixture.root.join("gdlintrc"), "custom: true\n").unwrap();
 
-    fixture.cmd().arg("init").assert().success();
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "converted gdlintrc into gdtidy.toml",
+        ))
+        .stdout(predicate::str::contains("gdlintrc: unused-argument"));
 
+    assert!(
+        fixture
+            .read_log("gdtidy-migrate-args.txt")
+            .ends_with("gdlintrc")
+    );
+    assert!(fixture.root.join("gdtidy.toml").exists());
     assert_eq!(
         fs::read_to_string(fixture.root.join("gdlintrc")).unwrap(),
-        "custom: true
-"
+        "custom: true\n"
     );
     assert!(!fixture.root.join(".gdlintrc").exists());
     assert!(fixture.root.join(".gdformatrc").exists());
+
+    // Once converted, setup leaves gdtidy.toml alone.
+    fs::write(fixture.root.join("gdtidy.toml"), "# edited\n").unwrap();
+    fixture.cmd().arg("setup").assert().success();
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("gdtidy.toml")).unwrap(),
+        "# edited\n"
+    );
 }
+
+#[test]
+fn migrate_converts_gdlintrc_once_gdtidy_is_installed() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdlintrc"),
+        "max-line-length: 130
+",
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.default_gdsuite_config(),
+    )
+    .unwrap();
+
+    // Without gdtidy, migrate says setup will do it.
+    fixture
+        .cmd()
+        .arg("migrate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("run `gdsuite setup`"));
+    assert!(!fixture.root.join("gdtidy.toml").exists());
+
+    fixture.seed_installed_toolchain();
+    fixture
+        .cmd()
+        .arg("migrate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("into gdtidy.toml"));
+    assert!(fixture.root.join("gdtidy.toml").exists());
+    assert!(fixture.root.join("gdlintrc").exists());
+}
+
+/// Stands in for gdtidy: `--version`, `migrate` (writes gdtidy.toml), and
+/// `lint --format json`, whose report depends on flags in mock-state.
+const GDTIDY_CMD: &str = r#"@echo off
+if "%1"=="--version" (
+  echo gdtidy 0.1.0
+  exit /b 0
+)
+if "%1"=="migrate" (
+  echo %*> "%CD%\logs\gdtidy-migrate-args.txt"
+  > "%CD%\gdtidy.toml" echo [lint]
+  >&2 echo gdtidy: unused-argument: no longer gdtidy's
+  >&2 echo gdtidy: wrote gdtidy.toml from gdlintrc
+  exit /b 0
+)
+echo %*> "%CD%\logs\gdtidy-args.txt"
+>> "%CD%\logs\step-order.txt" echo lint
+if exist "%CD%\mock-state\lint-fail.flag" (
+  echo {"version":1,"files":1,"fixed":0,"diagnostics":[{"path":"test/sample.gd","line":3,"column":6,"end_line":3,"end_column":13,"severity":"warning","rule":"function-name","concern":"naming:function","fixable":false,"message":"Function name \"BadName\" is not valid"}],"skipped":[]}
+  exit /b 1
+)
+if exist "%CD%\mock-state\lint-skip.flag" (
+  echo {"version":1,"files":2,"fixed":0,"diagnostics":[],"skipped":[{"path":"test/broken.gd","line":2,"column":1,"reason":"syntax-error","message":"Expected end of statement."}]}
+  exit /b 2
+)
+echo {"version":1,"files":1,"fixed":0,"diagnostics":[],"skipped":[]}
+"#;

@@ -36,6 +36,10 @@ tested = "==0.2.1"
 "x86_64-pc-windows-msvc" = "da3a9ca3d8140a32f884dc46938c3786653ff59130529d071dfca6e295377c48"
 "x86_64-unknown-linux-musl" = "0c1c70e09234bd2922a15334e9533b38aa271df5258e456b60f12302a54be5fc"
 
+[tools.gdtidy]
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", tag = "v0.1.0" }
+tested = "==0.1.0"
+
 [contracts.gdtest]
 required_harness = "==0.2.1"
 

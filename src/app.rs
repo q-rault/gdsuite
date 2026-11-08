@@ -117,7 +117,7 @@ fn setup_impl(
     output.step("installing gdtest addons");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
-    tooling::write_gdtoolkit_configs_if_missing(context)
+    tooling::write_gdformat_config_if_missing(context)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     for skipped in &addon_report.skipped_modified {
         output.warn(format!(
@@ -133,6 +133,14 @@ fn setup_impl(
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     tooling::verify_toolchain(context, &toolchain)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    if let Some(notes) = tooling::convert_gdlintrc(context, &toolchain.gdtidy)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?
+    {
+        output.step("converted gdlintrc into gdtidy.toml");
+        for note in notes {
+            output.info(format!("gdlintrc: {note}"));
+        }
+    }
     output.step("recording installation state");
     let installation =
         tooling::probe_installation_state(context, &config, &install.manifest, &install.requested)
@@ -145,6 +153,7 @@ fn setup_impl(
         &compatibility.gdtest,
         &compatibility.gdhealth,
         &compatibility.gdtypecheck,
+        &compatibility.gdtidy,
     ] {
         if tool.verdict == CompatibilityVerdict::Warning {
             output.warn(&tool.reason);
@@ -156,6 +165,7 @@ fn setup_impl(
             &compatibility.gdtest,
             &compatibility.gdhealth,
             &compatibility.gdtypecheck,
+            &compatibility.gdtidy,
         ]
         .into_iter()
         .filter(|tool| tool.verdict == CompatibilityVerdict::Error)
@@ -243,18 +253,18 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         },
     );
 
-    let gdlint = manifest
+    let gdtidy = manifest
         .as_ref()
-        .and_then(|m| m.gdlint.clone())
-        .or_else(|| tooling::find_binary(context, &["gdlint"]));
+        .and_then(|m| m.gdtidy.clone())
+        .or_else(|| tooling::find_binary(context, &["gdtidy"]));
     tool_reports.insert(
-        "gdlint".to_string(),
-        match gdlint {
+        "gdtidy".to_string(),
+        match gdtidy {
             Some(path) => {
                 DoctorToolReport::ok(Some(path.clone()), probe_version(&path, &["--version"]))
             }
             None => {
-                missing.push("gdlint".to_string());
+                missing.push("gdtidy".to_string());
                 DoctorToolReport::error(
                     None,
                     None,
@@ -368,6 +378,10 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
                 "gdtypecheck".to_string(),
                 DoctorCompatibilityReport::from_tool(&compatibility.gdtypecheck),
             );
+            compatibility_reports.insert(
+                "gdtidy".to_string(),
+                DoctorCompatibilityReport::from_tool(&compatibility.gdtidy),
+            );
             status = match (status, tooling::report_status(&compatibility)) {
                 (CompatibilityVerdict::Error, _) | (_, CompatibilityVerdict::Error) => {
                     CompatibilityVerdict::Error
@@ -443,17 +457,29 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let cmd_args = lint_args(args.args, &report_mode);
-    let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
+    warn_unconverted_gdlintrc(context);
+    let output = process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    print_lint_output(&output, &report_mode)?;
-    if !output.status.success() {
+    let report = JsonLintReport::from_output(&output);
+    print_lint_report(&report, &report_mode)?;
+    if !report.success {
+        // The summary is already printed with the report.
         return Err(command_error(
             EXIT_VALIDATION_ERROR,
-            format!("lint failed with exit code {:?}", output.status.code()),
+            "lint failed".to_string(),
         ));
     }
     Ok(())
+}
+
+/// gdtidy does not read gdlintrc; until it is converted, its settings are lost.
+fn warn_unconverted_gdlintrc(context: &ProjectContext) {
+    if let Some(path) = tooling::unconverted_gdlintrc(context) {
+        eprintln!(
+            "warning: {} is not read by gdtidy; run `gdsuite setup` or `gdsuite migrate` to convert it into gdtidy.toml",
+            path.display()
+        );
+    }
 }
 
 fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
@@ -672,16 +698,16 @@ fn resolve_report_mode(config: &GdsuiteConfig, cli_report: Option<&str>) -> Resu
     }
 }
 
-fn lint_args(args: Vec<String>, report: &str) -> Vec<String> {
-    let mut args = strip_passthrough_marker(args);
-    let needs_default_target = args.is_empty();
-    if report == "json" {
-        args.push("--verbose".to_string());
-    }
-    if needs_default_target {
-        args.push(".".to_string());
-    }
-    args
+/// `gdtidy lint` with its JSON report, which gdsuite renders itself. Arguments
+/// after `--` (paths, `--fix`) are passed on; without paths gdtidy lints `.`.
+fn lint_args(args: Vec<String>) -> Vec<String> {
+    let mut cmd_args = vec![
+        "lint".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+    cmd_args.extend(strip_passthrough_marker(args));
+    cmd_args
 }
 
 fn strip_passthrough_marker(mut args: Vec<String>) -> Vec<String> {
@@ -723,22 +749,38 @@ fn default_health_args(config: &GdsuiteConfig, args: Vec<String>) -> Vec<String>
     args
 }
 
-fn print_lint_output(output: &process::ProcessOutput, report: &str) -> Result<()> {
-    if report == "json" {
-        let report = JsonLintReport::from_output(output);
-        println!("{}", serde_json::to_string_pretty(&report)?);
+fn print_lint_report(report: &JsonLintReport, mode: &str) -> Result<()> {
+    if mode == "json" {
+        println!("{}", serde_json::to_string_pretty(report)?);
         return Ok(());
     }
-
-    if !output.stdout.is_empty() {
-        print!("{}", output.stdout);
+    for finding in &report.findings {
+        println!(
+            "{}:{}:{}: {}[{}]: {}",
+            finding.file,
+            finding.line,
+            finding.column,
+            finding.severity,
+            finding.rule.as_deref().unwrap_or("lint"),
+            finding.message
+        );
     }
-    if !output.stderr.is_empty() {
-        eprint!("{}", output.stderr);
+    for skipped in &report.skipped {
+        eprintln!(
+            "{}:{}:{}: skipped: {}",
+            skipped.file, skipped.line, skipped.column, skipped.message
+        );
+    }
+    for line in &report.stderr {
+        eprintln!("{line}");
+    }
+    if let Some(summary) = &report.summary {
+        eprintln!("{summary}");
     }
     Ok(())
 }
 
+/// What `gdtidy lint --format json` reported, as gdsuite shows it.
 #[derive(Debug, Serialize)]
 struct JsonLintReport {
     status: &'static str,
@@ -746,81 +788,140 @@ struct JsonLintReport {
     exit_code: Option<i32>,
     summary: Option<String>,
     findings: Vec<JsonLintFinding>,
+    /// Files gdtidy could not check. Syntax errors are Godot's to report, so
+    /// they are left to typecheck and do not fail lint.
+    skipped: Vec<JsonLintSkipped>,
     stderr: Vec<String>,
-    raw_stdout: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct JsonLintFinding {
     file: String,
     line: usize,
+    column: usize,
     severity: String,
     message: String,
     rule: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct JsonLintSkipped {
+    file: String,
+    line: usize,
+    column: usize,
+    reason: String,
+    message: String,
+}
+
+/// gdtidy's JSON report (version 1); only the fields gdsuite uses.
+#[derive(Debug, Deserialize)]
+struct GdtidyReport {
+    files: usize,
+    #[serde(default)]
+    fixed: usize,
+    diagnostics: Vec<GdtidyDiagnostic>,
+    skipped: Vec<GdtidySkipped>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GdtidyDiagnostic {
+    path: String,
+    line: usize,
+    column: usize,
+    severity: String,
+    rule: String,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GdtidySkipped {
+    path: String,
+    line: usize,
+    column: usize,
+    reason: String,
+    message: String,
+}
+
 impl JsonLintReport {
     fn from_output(output: &process::ProcessOutput) -> Self {
-        let mut findings = Vec::new();
-        let mut raw_stdout = Vec::new();
-
-        for line in output.stdout.lines().filter(|line| !line.trim().is_empty()) {
-            if let Some(finding) = parse_lint_finding(line) {
-                findings.push(finding);
-            } else {
-                raw_stdout.push(line.to_string());
-            }
-        }
-
         let stderr = output
             .stderr
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(ToString::to_string)
             .collect::<Vec<_>>();
+        let Ok(report) = serde_json::from_str::<GdtidyReport>(&output.stdout) else {
+            // No report: gdtidy could not run, such as with an invalid gdtidy.toml.
+            return Self {
+                status: "failed",
+                success: false,
+                exit_code: output.status.code(),
+                summary: stderr.last().cloned().or_else(|| {
+                    Some(format!(
+                        "gdtidy failed with exit code {:?}",
+                        output.status.code()
+                    ))
+                }),
+                findings: Vec::new(),
+                skipped: Vec::new(),
+                stderr,
+            };
+        };
 
-        let summary = raw_stdout
-            .iter()
-            .find(|line| {
-                line.starts_with("Success: ")
-                    || line.starts_with("Failure: ")
-                    || line.starts_with("Cannot open file ")
+        let findings = report
+            .diagnostics
+            .into_iter()
+            .map(|d| JsonLintFinding {
+                file: d.path,
+                line: d.line,
+                column: d.column,
+                severity: d.severity,
+                message: d.message,
+                rule: Some(d.rule),
             })
-            .cloned()
-            .or_else(|| stderr.last().cloned());
+            .collect::<Vec<_>>();
+        let skipped = report
+            .skipped
+            .into_iter()
+            .map(|s| JsonLintSkipped {
+                file: s.path,
+                line: s.line,
+                column: s.column,
+                reason: s.reason,
+                message: s.message,
+            })
+            .collect::<Vec<_>>();
+        let success = findings.is_empty();
+        let problems = if findings.len() == 1 {
+            "problem"
+        } else {
+            "problems"
+        };
+        let mut summary = format!(
+            "{} lint {problems} in {} files",
+            findings.len(),
+            report.files
+        );
+        if report.fixed > 0 {
+            summary += &format!(", {} fixed", report.fixed);
+        }
+        if !skipped.is_empty() {
+            summary += &format!(
+                "; {} skipped with a syntax error, which typecheck reports",
+                skipped.len()
+            );
+        }
 
         Self {
-            status: if output.status.success() {
-                "ok"
-            } else {
-                "failed"
-            },
-            success: output.status.success(),
+            status: if success { "ok" } else { "failed" },
+            success,
             exit_code: output.status.code(),
-            summary,
+            summary: Some(summary),
             findings,
+            skipped,
             stderr,
-            raw_stdout,
         }
     }
-}
-
-fn parse_lint_finding(line: &str) -> Option<JsonLintFinding> {
-    let (prefix, remainder) = line.split_once(": Error: ")?;
-    let (file, line_number) = prefix.rsplit_once(':')?;
-    let line = line_number.parse().ok()?;
-    let parsed_rule = remainder
-        .rsplit_once(" (")
-        .and_then(|(message, suffix)| suffix.strip_suffix(')').map(|rule| (message, rule)));
-    let (message, _) = parsed_rule.unwrap_or((remainder, ""));
-
-    Some(JsonLintFinding {
-        file: file.to_string(),
-        line,
-        severity: "error".to_string(),
-        message: message.to_string(),
-        rule: parsed_rule.map(|(_, value)| value.to_string()),
-    })
 }
 
 fn probe_version(path: &Path, args: &[&str]) -> Option<String> {
@@ -843,7 +944,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
         "godot",
         "python",
         "gdformat",
-        "gdlint",
+        "gdtidy",
         "gdtest",
         "gdhealth",
         "gdtypecheck",
@@ -867,7 +968,7 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
 
     if !report.compatibility.is_empty() {
         output.blank();
-        for name in ["gdtoolkit", "gdtest", "gdhealth", "gdtypecheck"] {
+        for name in ["gdtoolkit", "gdtest", "gdhealth", "gdtypecheck", "gdtidy"] {
             if let Some(tool) = report.compatibility.get(name) {
                 let installed = tool.installed.as_deref().unwrap_or("unknown");
                 let message = format!(
@@ -1143,8 +1244,8 @@ fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
 fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
-    let cmd_args = lint_args(Vec::new(), "json");
-    let output = process::run(&toolchain.gdlint, &cmd_args, &context.root)
+    warn_unconverted_gdlintrc(context);
+    let output = process::run(&toolchain.gdtidy, &lint_args(Vec::new()), &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let lint_report = JsonLintReport::from_output(&output);
     let findings = lint_report
@@ -1156,7 +1257,7 @@ fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let duration_ms = started.elapsed().as_millis();
     let report = StepReport {
         name: "lint".to_string(),
-        status: if output.status.success() {
+        status: if lint_report.success {
             "ok".to_string()
         } else {
             "failed".to_string()
@@ -1170,7 +1271,7 @@ fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
         artifacts: Vec::new(),
     };
 
-    if output.status.success() {
+    if lint_report.success {
         return Ok(CheckStepResult::passed(
             report,
             "Lint check passed",
@@ -1419,17 +1520,33 @@ fn lint_diagnostics(report: &JsonLintReport) -> Vec<String> {
     let mut diagnostics = report
         .findings
         .iter()
-        .map(|finding| format!("{}:{} {}", finding.file, finding.line, finding.message))
+        .map(|finding| {
+            format!(
+                "{}:{}:{} [{}] {}",
+                finding.file,
+                finding.line,
+                finding.column,
+                finding.rule.as_deref().unwrap_or("lint"),
+                finding.message
+            )
+        })
         .collect::<Vec<_>>();
-    diagnostics.extend(report.raw_stdout.iter().cloned());
     diagnostics.extend(report.stderr.iter().cloned());
     diagnostics
 }
 
 fn lint_failure_summary(report: &JsonLintReport) -> String {
+    if report.findings.is_empty() {
+        return format!(
+            "{}. Fix the gdtidy setup and rerun `gdsuite check`.",
+            report.summary.as_deref().unwrap_or("gdtidy failed")
+        );
+    }
     let count = report.findings.len();
-    let noun = if count == 1 { "error" } else { "errors" };
-    format!("Found {count} lint {noun}. Fix the reported issue and rerun `gdsuite check`.")
+    let noun = if count == 1 { "problem" } else { "problems" };
+    format!(
+        "Found {count} lint {noun}. Fix them, or run `gdsuite lint -- --fix` for the fixable ones, and rerun `gdsuite check`."
+    )
 }
 
 fn typecheck_failure_summary(diagnostics: &[String]) -> String {

@@ -42,7 +42,7 @@ pub struct Toolchain {
     pub godot_exe: PathBuf,
     pub python: PathBuf,
     pub gdformat: PathBuf,
-    pub gdlint: PathBuf,
+    pub gdtidy: PathBuf,
     pub gdtest: PathBuf,
     pub gdhealth: PathBuf,
     pub gdtypecheck: PathBuf,
@@ -54,6 +54,7 @@ pub struct InstallPlan {
     pub gdtest: ToolAcquireSpec,
     pub gdhealth: ToolAcquireSpec,
     pub gdtypecheck: ToolAcquireSpec,
+    pub gdtidy: ToolAcquireSpec,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,7 @@ pub struct CompatibilityReport {
     pub gdtest: ToolCompatibility,
     pub gdhealth: ToolCompatibility,
     pub gdtypecheck: ToolCompatibility,
+    pub gdtidy: ToolCompatibility,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +89,7 @@ struct ProbedToolchain {
     gdhealth_version: Option<String>,
     gdhealth_schema_version: Option<u32>,
     gdtypecheck_version: Option<String>,
+    gdtidy_version: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -292,7 +295,16 @@ pub fn install_plan(config: &GdsuiteConfig) -> InstallPlan {
         } else {
             parse_tool_source_spec(&config.tools.gdtypecheck_source, "gdtypecheck")
         },
+        gdtidy: if config.tools.gdtidy_source == default_gdtidy_requested() {
+            release.tools.gdtidy.acquire.clone()
+        } else {
+            parse_tool_source_spec(&config.tools.gdtidy_source, "gdtidy")
+        },
     }
+}
+
+fn default_gdtidy_requested() -> String {
+    release_manifest().tools.gdtidy.acquire.render_requested()
 }
 
 fn default_gdtoolkit_requested() -> String {
@@ -398,10 +410,10 @@ pub fn resolve_toolchain(
             .gdformat
             .or_else(|| find_binary(context, &["gdformat"]))
             .ok_or_else(|| anyhow!("missing gdformat in manifest"))?,
-        gdlint: manifest
-            .gdlint
-            .or_else(|| find_binary(context, &["gdlint"]))
-            .ok_or_else(|| anyhow!("missing gdlint in manifest"))?,
+        gdtidy: manifest
+            .gdtidy
+            .or_else(|| find_binary(context, &["gdtidy"]))
+            .ok_or_else(|| anyhow!("missing gdtidy in manifest"))?,
         gdtest: manifest
             .gdtest
             .or_else(|| find_binary(context, &["gdtest"]))
@@ -428,17 +440,16 @@ pub fn install_toolchain(
     let gdtest = install_tool(context, &requested.gdtest, "gdtest")?;
     let gdhealth = install_tool(context, &requested.gdhealth, "gdhealth")?;
     let gdtypecheck = install_tool(context, &requested.gdtypecheck, "gdtypecheck")?;
+    let gdtidy = install_tool(context, &requested.gdtidy, "gdtidy")?;
     let gdformat =
         find_binary(context, &["gdformat"]).ok_or_else(|| anyhow!("gdformat install missing"))?;
-    let gdlint =
-        find_binary(context, &["gdlint"]).ok_or_else(|| anyhow!("gdlint install missing"))?;
 
     Ok(InstallOutcome {
         manifest: Manifest {
             godot_exe: Some(godot_exe.to_path_buf()),
             python: Some(python),
             gdformat: Some(gdformat),
-            gdlint: Some(gdlint),
+            gdtidy: Some(gdtidy),
             gdtest: Some(gdtest),
             gdhealth: Some(gdhealth),
             gdtypecheck: Some(gdtypecheck),
@@ -455,7 +466,7 @@ pub fn verify_toolchain(context: &ProjectContext, toolchain: &Toolchain) -> Resu
     )?;
     process::run_checked(&toolchain.python, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdformat, &["--help".to_string()], &context.root)?;
-    process::run_checked(&toolchain.gdlint, &["--help".to_string()], &context.root)?;
+    process::run_checked(&toolchain.gdtidy, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdtest, &["--version".to_string()], &context.root)?;
     process::run_checked(&toolchain.gdhealth, &["--help".to_string()], &context.root)?;
     process::run_checked(
@@ -1328,6 +1339,10 @@ pub fn probe_installation_state(
                 requested: requested.gdtypecheck.clone(),
                 resolved_version: probed.gdtypecheck_version.clone(),
             },
+            gdtidy: InstalledToolState {
+                requested: requested.gdtidy.clone(),
+                resolved_version: probed.gdtidy_version.clone(),
+            },
         },
         contracts: InstalledContractsState {
             gdtest_harness_version: probed.gdtest_harness_version,
@@ -1467,11 +1482,30 @@ pub fn compatibility_report(state: &InstalledState) -> CompatibilityReport {
         },
     };
 
+    let gdtidy = match &state.tools.gdtidy.resolved_version {
+        Some(version) => evaluate_versioned_tool(
+            "gdtidy",
+            &state.tools.gdtidy.requested,
+            version,
+            &release.tools.gdtidy.acquire,
+            &release.tools.gdtidy.tested,
+            Vec::new(),
+        ),
+        None => ToolCompatibility {
+            requested: state.tools.gdtidy.requested.render_requested(),
+            resolved_version: None,
+            verdict: CompatibilityVerdict::Error,
+            reason: "gdtidy version probe failed".to_string(),
+            extra: Vec::new(),
+        },
+    };
+
     CompatibilityReport {
         gdtoolkit,
         gdtest,
         gdhealth,
         gdtypecheck,
+        gdtidy,
     }
 }
 
@@ -1481,6 +1515,7 @@ pub fn report_status(report: &CompatibilityReport) -> CompatibilityVerdict {
         &report.gdtest.verdict,
         &report.gdhealth.verdict,
         &report.gdtypecheck.verdict,
+        &report.gdtidy.verdict,
     ];
     if verdicts
         .iter()
@@ -1554,6 +1589,7 @@ fn probe_toolchain(
         gdhealth_version: probe_command_version(&toolchain.gdhealth, &["--version"], context),
         gdhealth_schema_version: probe_gdhealth_schema_version(&toolchain.gdhealth, context),
         gdtypecheck_version: probe_command_version(&toolchain.gdtypecheck, &["--version"], context),
+        gdtidy_version: probe_command_version(&toolchain.gdtidy, &["--version"], context),
     })
 }
 
@@ -1655,19 +1691,56 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
-/// Keep `gdformat` and `gdlint` out of addons and generated directories, so that
-/// `gdsuite check` does not report files the project did not write. A config the
-/// project already has, under either name gdtoolkit accepts, is left alone.
-pub fn write_gdtoolkit_configs_if_missing(context: &ProjectContext) -> Result<()> {
+/// Keep `gdformat` out of addons and generated directories, so that `gdsuite
+/// check` does not report files the project did not write. A config the project
+/// already has, under either name gdtoolkit accepts, is left alone. gdtidy needs
+/// no such file: it skips hidden folders and addons itself.
+pub fn write_gdformat_config_if_missing(context: &ProjectContext) -> Result<()> {
     const EXCLUDES: &str = "excluded_directories: !!set\n  .git: null\n  .godot: null\n  .gdsuite: null\n  addons: null\n";
-    for name in ["gdformatrc", "gdlintrc"] {
-        let dotted = context.root.join(format!(".{name}"));
-        if !dotted.exists() && !context.root.join(name).exists() {
-            fs::write(&dotted, EXCLUDES)
-                .with_context(|| format!("failed to write {}", dotted.display()))?;
-        }
+    let dotted = context.root.join(".gdformatrc");
+    if !dotted.exists() && !context.root.join("gdformatrc").exists() {
+        fs::write(&dotted, EXCLUDES)
+            .with_context(|| format!("failed to write {}", dotted.display()))?;
     }
     Ok(())
+}
+
+/// The project's gdlintrc, if it has one and no `gdtidy.toml` yet: gdtidy does
+/// not read gdlintrc, so it has to be converted once.
+pub fn unconverted_gdlintrc(context: &ProjectContext) -> Option<PathBuf> {
+    if context.root.join("gdtidy.toml").exists() {
+        return None;
+    }
+    ["gdlintrc", ".gdlintrc"]
+        .into_iter()
+        .map(|name| context.root.join(name))
+        .find(|path| path.is_file())
+}
+
+/// Convert the project's gdlintrc into `gdtidy.toml` with `gdtidy migrate`, so
+/// lint keeps the project's settings. Returns gdtidy's notes (such as rules
+/// that moved to Godot), or `None` when there was nothing to convert.
+pub fn convert_gdlintrc(context: &ProjectContext, gdtidy: &Path) -> Result<Option<Vec<String>>> {
+    let Some(gdlintrc) = unconverted_gdlintrc(context) else {
+        return Ok(None);
+    };
+    let args = vec!["migrate".to_string(), gdlintrc.display().to_string()];
+    let output = process::run(gdtidy, &args, &context.root)?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "could not convert {}: {}",
+            gdlintrc.display(),
+            output.stderr.trim()
+        ));
+    }
+    let notes = output
+        .stderr
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("gdtidy: "))
+        .filter(|note| !note.starts_with("wrote "))
+        .map(ToString::to_string)
+        .collect();
+    Ok(Some(notes))
 }
 
 pub fn install_gdtest_addons(

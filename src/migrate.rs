@@ -3,7 +3,10 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow};
 use globwalk::GlobWalkerBuilder;
 
-use crate::{config::GdsuiteConfig, tooling::ProjectContext};
+use crate::{
+    config::GdsuiteConfig,
+    tooling::{self, ProjectContext},
+};
 
 pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Result<()> {
     context.ensure_dirs()?;
@@ -12,6 +15,7 @@ pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Re
     for warning in warnings {
         println!("warning: {warning}");
     }
+    convert_gdlintrc(context)?;
     println!("migrate complete");
     config.write(&context.config_path)?;
     Ok(())
@@ -63,6 +67,9 @@ fn migrate_suite_config(
             .and_then(|value| value.as_str())
         {
             config.tools.gdtypecheck_source = source.into();
+        }
+        if let Some(source) = tools.get("gdtidy_source").and_then(|value| value.as_str()) {
+            config.tools.gdtidy_source = source.into();
         }
     }
     if let Some(commands) = value.get("commands").and_then(|value| value.as_table()) {
@@ -116,7 +123,7 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
 
     if table.contains_key("lint") {
         warnings.push(
-            "Moved out of suite contract: create `gdlintrc` with your lint rules.".to_string(),
+            "Moved out of suite contract: create `gdtidy.toml` with your lint rules.".to_string(),
         );
     }
     if table.contains_key("gdtest") {
@@ -152,6 +159,32 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
         );
     }
     warnings
+}
+
+/// Convert gdlintrc into gdtidy.toml when gdtidy is installed; otherwise say
+/// that setup will do it, since it installs gdtidy first.
+fn convert_gdlintrc(context: &ProjectContext) -> Result<()> {
+    let Some(gdlintrc) = tooling::unconverted_gdlintrc(context) else {
+        return Ok(());
+    };
+    let gdtidy = tooling::load_manifest(context)
+        .ok()
+        .and_then(|manifest| manifest.gdtidy)
+        .or_else(|| tooling::find_binary(context, &["gdtidy"]));
+    let Some(gdtidy) = gdtidy else {
+        println!(
+            "warning: {} is not read by gdtidy; run `gdsuite setup`, which installs gdtidy and converts it into gdtidy.toml",
+            gdlintrc.display()
+        );
+        return Ok(());
+    };
+    if let Some(notes) = tooling::convert_gdlintrc(context, &gdtidy)? {
+        println!("converted {} into gdtidy.toml", gdlintrc.display());
+        for note in notes {
+            println!("gdlintrc: {note}");
+        }
+    }
+    Ok(())
 }
 
 fn path_exists_any(context: &ProjectContext, paths: &[&str]) -> bool {

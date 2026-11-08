@@ -29,7 +29,7 @@ pub enum Commands {
     Doctor(DoctorArgs),
     #[command(about = "Forward arguments to gdformat")]
     Fmt(ForwardArgs),
-    #[command(about = "Forward arguments to gdlint")]
+    #[command(about = "Lint GDScript with gdtidy; arguments after -- go to `gdtidy lint`")]
     Lint(LintArgs),
     #[command(about = "Forward arguments to gdtypecheck")]
     Typecheck(ForwardArgs),

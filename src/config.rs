@@ -39,6 +39,8 @@ pub struct ToolsConfig {
     pub gdhealth_source: String,
     #[serde(default = "default_gdtypecheck_source")]
     pub gdtypecheck_source: String,
+    #[serde(default = "default_gdtidy_source")]
+    pub gdtidy_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +80,7 @@ pub struct Manifest {
     pub godot_exe: Option<PathBuf>,
     pub python: Option<PathBuf>,
     pub gdformat: Option<PathBuf>,
-    pub gdlint: Option<PathBuf>,
+    pub gdtidy: Option<PathBuf>,
     pub gdtest: Option<PathBuf>,
     pub gdhealth: Option<PathBuf>,
     pub gdtypecheck: Option<PathBuf>,
@@ -103,6 +105,7 @@ pub struct ReleaseTools {
     pub gdtest: ReleaseTool,
     pub gdhealth: ReleaseTool,
     pub gdtypecheck: ReleaseTool,
+    pub gdtidy: ReleaseTool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +127,7 @@ impl ReleaseManifest {
             "gdtest" => Some(&self.tools.gdtest),
             "gdhealth" => Some(&self.tools.gdhealth),
             "gdtypecheck" => Some(&self.tools.gdtypecheck),
+            "gdtidy" => Some(&self.tools.gdtidy),
             _ => None,
         }
     }
@@ -195,6 +199,7 @@ pub struct InstalledToolsState {
     pub gdtest: InstalledToolState,
     pub gdhealth: InstalledToolState,
     pub gdtypecheck: InstalledToolState,
+    pub gdtidy: InstalledToolState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +238,7 @@ impl Default for ToolsConfig {
             gdtest_source: default_gdtest_source(),
             gdhealth_source: default_gdhealth_source(),
             gdtypecheck_source: default_gdtypecheck_source(),
+            gdtidy_source: default_gdtidy_source(),
         }
     }
 }
@@ -368,7 +374,7 @@ fn reject_legacy_sections(path: &Path, value: &toml::Value) -> Result<()> {
     let legacy = [
         (
             "lint",
-            "create `gdlintrc` with your native gdlint settings",
+            "create `gdtidy.toml` with your gdtidy lint settings",
         ),
         (
             "health",
@@ -449,6 +455,14 @@ fn default_gdtypecheck_source() -> String {
         .render_requested()
 }
 
+fn default_gdtidy_source() -> String {
+    ReleaseManifest::bundled()
+        .tools
+        .gdtidy
+        .acquire
+        .render_requested()
+}
+
 fn default_test_target() -> String {
     "test/".to_string()
 }
@@ -493,6 +507,7 @@ gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
 gdtypecheck_source = "{}"
+gdtidy_source = "{}"
 
 [commands]
 default_test_target = "test/"
@@ -514,6 +529,7 @@ steps = ["fmt", "lint", "typecheck", "health"]
         release.tools.gdtest.acquire.render_requested(),
         release.tools.gdhealth.acquire.render_requested(),
         release.tools.gdtypecheck.acquire.render_requested(),
+        release.tools.gdtidy.acquire.render_requested(),
     )
 }
 
@@ -538,6 +554,7 @@ gdtoolkit = "{}"
 gdtest_source = "{}"
 gdhealth_source = "{}"
 gdtypecheck_source = "{}"
+gdtidy_source = "{}"
 
 [commands]
 default_test_target = "{}"
@@ -555,6 +572,7 @@ steps = {}
         escape_string(&config.tools.gdtest_source),
         escape_string(&config.tools.gdhealth_source),
         escape_string(&config.tools.gdtypecheck_source),
+        escape_string(&config.tools.gdtidy_source),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
         escape_string(&config.reports.default),
@@ -592,7 +610,7 @@ mod tests {
     #[test]
     fn bundled_github_releases_have_a_checksum_for_every_target() {
         let manifest = ReleaseManifest::bundled();
-        for name in ["gdtest", "gdhealth", "gdtypecheck"] {
+        for name in ["gdtest", "gdhealth", "gdtypecheck", "gdtidy"] {
             let tool = manifest.tool(name).unwrap();
             if !matches!(tool.acquire, ToolAcquireSpec::GithubReleaseRepo { .. }) {
                 continue;
