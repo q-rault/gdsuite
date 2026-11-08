@@ -91,6 +91,17 @@ struct ProbedToolchain {
 pub struct AddonInstallReport {
     pub installed_files: usize,
     pub skipped_modified: Vec<PathBuf>,
+    /// Set when the project had another gdtest harness version: its files
+    /// were replaced, and the ones that differed backed up first.
+    pub upgrade: Option<AddonUpgrade>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AddonUpgrade {
+    pub from_version: String,
+    pub to_version: String,
+    pub backup_dir: PathBuf,
+    pub replaced: Vec<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1594,13 +1605,19 @@ pub fn convert_tool_configs(
             output.stderr.trim()
         ));
     }
-    let notes = output
+    // Converting gdlintrc and gdformatrc together, gdtidy notes an exclusion
+    // both files share once per file; show each note once.
+    let mut notes: Vec<String> = Vec::new();
+    for note in output
         .stderr
         .lines()
         .filter_map(|line| line.trim().strip_prefix("gdtidy: "))
         .filter(|note| !note.starts_with("wrote "))
-        .map(ToString::to_string)
-        .collect();
+    {
+        if !notes.iter().any(|seen| seen == note) {
+            notes.push(note.to_string());
+        }
+    }
     Ok(Some((names, notes)))
 }
 
@@ -1618,11 +1635,36 @@ pub fn install_gdtest_addons(
     }
 
     let mut report = AddonInstallReport::default();
+    // A project's addon files from another harness version are not user
+    // edits: gdtest refuses to run with them. Replace them, after a backup.
+    let harness_name = Path::new(GDTEST_HARNESS_PATH).file_name().unwrap();
+    let source_version = harness_version_of(&runtime_source.join(harness_name));
+    let project_version = harness_version_of(&context.root.join(GDTEST_HARNESS_PATH));
+    let backup_dir = match (&project_version, &source_version) {
+        (Some(from), Some(to)) if from != to => {
+            let backup_dir = context
+                .gdsuite_dir
+                .join("backups")
+                .join(format!("gdtest-addons-{from}"));
+            report.upgrade = Some(AddonUpgrade {
+                from_version: from.clone(),
+                to_version: to.clone(),
+                backup_dir: backup_dir.clone(),
+                replaced: Vec::new(),
+            });
+            Some(backup_dir)
+        }
+        _ => None,
+    };
     let runtime_target_dir = harness_parent_dir(GDTEST_HARNESS_PATH);
     let runtime_res_dir = res_dir_from_rel_path(&runtime_target_dir);
     install_addon_dir(
         &runtime_source,
         &context.root.join(&runtime_target_dir),
+        AddonTarget {
+            project_root: &context.root,
+            backup_dir: backup_dir.as_deref(),
+        },
         &mut report,
         |relative, contents| rewrite_runtime_asset(relative, contents, &runtime_res_dir),
     )?;
@@ -1638,6 +1680,10 @@ pub fn install_gdtest_addons(
     install_addon_dir(
         &editor_source,
         &context.root.join(GDTEST_EDITOR_PLUGIN_DIR),
+        AddonTarget {
+            project_root: &context.root,
+            backup_dir: backup_dir.as_deref(),
+        },
         &mut report,
         |relative, contents| rewrite_editor_asset(relative, contents, &editor_res_dir),
     )?;
@@ -1645,9 +1691,23 @@ pub fn install_gdtest_addons(
     Ok(report)
 }
 
+fn harness_version_of(harness: &Path) -> Option<String> {
+    let body = fs::read_to_string(harness).ok()?;
+    extract_quoted_assignment(&body, "HARNESS_VERSION")
+}
+
+/// Where addon files go, and where to back up the files an upgrade replaces
+/// (`None` keeps files that differ, as the user's edits).
+#[derive(Clone, Copy)]
+struct AddonTarget<'a> {
+    project_root: &'a Path,
+    backup_dir: Option<&'a Path>,
+}
+
 fn install_addon_dir(
     source_dir: &Path,
     target_dir: &Path,
+    target: AddonTarget<'_>,
     report: &mut AddonInstallReport,
     rewrite: impl Fn(&Path, &str) -> String + Copy,
 ) -> Result<()> {
@@ -1662,7 +1722,7 @@ fn install_addon_dir(
         if entry.file_type()?.is_dir() {
             fs::create_dir_all(&target_path)
                 .with_context(|| format!("failed to create {}", target_path.display()))?;
-            install_addon_dir(&source_path, &target_path, report, rewrite)?;
+            install_addon_dir(&source_path, &target_path, target, report, rewrite)?;
             continue;
         }
 
@@ -1680,8 +1740,23 @@ fn install_addon_dir(
             if current == rewritten {
                 continue;
             }
-            report.skipped_modified.push(target_path);
-            continue;
+            let Some(backup_dir) = target.backup_dir else {
+                report.skipped_modified.push(target_path);
+                continue;
+            };
+            let relative_to_project = target_path
+                .strip_prefix(target.project_root)
+                .unwrap_or(&target_path);
+            let backup_path = backup_dir.join(relative_to_project);
+            if let Some(parent) = backup_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&backup_path, current)
+                .with_context(|| format!("failed to back up {}", target_path.display()))?;
+            if let Some(upgrade) = report.upgrade.as_mut() {
+                upgrade.replaced.push(target_path.clone());
+            }
         }
 
         fs::write(&target_path, rewritten)
