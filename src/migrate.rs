@@ -15,7 +15,7 @@ pub fn migrate_project(context: &ProjectContext, cli_godot: Option<&Path>) -> Re
     for warning in warnings {
         println!("warning: {warning}");
     }
-    convert_gdlintrc(context)?;
+    convert_tool_configs(context)?;
     println!("migrate complete");
     config.write(&context.config_path)?;
     Ok(())
@@ -39,7 +39,7 @@ fn migrate_suite_config(
     };
 
     let mut config = GdsuiteConfig::default();
-    let warnings = collect_migration_warnings(context, &value);
+    let warnings = collect_migration_warnings(&value);
 
     if let Some(project) = value.get("project").and_then(|value| value.as_table()) {
         if let Some(root) = project.get("root").and_then(|value| value.as_str()) {
@@ -50,9 +50,6 @@ fn migrate_suite_config(
         }
     }
     if let Some(tools) = value.get("tools").and_then(|value| value.as_table()) {
-        if let Some(version) = tools.get("gdtoolkit").and_then(|value| value.as_str()) {
-            config.tools.gdtoolkit = version.to_string();
-        }
         if let Some(source) = tools.get("gdtest_source").and_then(|value| value.as_str()) {
             config.tools.gdtest_source = source.into();
         }
@@ -115,7 +112,7 @@ fn migrate_suite_config(
     Ok((config, warnings))
 }
 
-fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> Vec<String> {
+fn collect_migration_warnings(value: &toml::Value) -> Vec<String> {
     let mut warnings = Vec::new();
     let Some(table) = value.as_table() else {
         return warnings;
@@ -152,43 +149,45 @@ fn collect_migration_warnings(context: &ProjectContext, value: &toml::Value) -> 
             "Moved out of suite contract: install and configure the delegated typecheck tool directly.".to_string(),
         );
     }
-    if !path_exists_any(context, &["gdformatrc", ".gdformatrc"]) {
+    if table
+        .get("tools")
+        .and_then(|tools| tools.as_table())
+        .is_some_and(|tools| tools.contains_key("gdtoolkit"))
+    {
         warnings.push(
-            "Moved out of suite contract: create `gdformatrc` if you need formatter settings."
-                .to_string(),
+            "gdsuite no longer installs gdtoolkit: gdtidy formats and lints, so `gdtoolkit` is dropped from [tools]. The `.gdsuite/python` folder can be deleted.".to_string(),
         );
     }
     warnings
 }
 
-/// Convert gdlintrc into gdtidy.toml when gdtidy is installed; otherwise say
-/// that setup will do it, since it installs gdtidy first.
-fn convert_gdlintrc(context: &ProjectContext) -> Result<()> {
-    let Some(gdlintrc) = tooling::unconverted_gdlintrc(context) else {
+/// Convert gdlintrc and gdformatrc into gdtidy.toml when gdtidy is installed;
+/// otherwise say that setup will do it, since it installs gdtidy first.
+fn convert_tool_configs(context: &ProjectContext) -> Result<()> {
+    let unconverted = tooling::unconverted_configs(context);
+    if unconverted.is_empty() {
         return Ok(());
-    };
+    }
     let gdtidy = tooling::load_manifest(context)
         .ok()
         .and_then(|manifest| manifest.gdtidy)
         .or_else(|| tooling::find_binary(context, &["gdtidy"]));
     let Some(gdtidy) = gdtidy else {
-        println!(
-            "warning: {} is not read by gdtidy; run `gdsuite setup`, which installs gdtidy and converts it into gdtidy.toml",
-            gdlintrc.display()
-        );
+        for path in unconverted {
+            println!(
+                "warning: {} is not read by gdtidy; run `gdsuite setup`, which installs gdtidy and converts it into gdtidy.toml",
+                path.display()
+            );
+        }
         return Ok(());
     };
-    if let Some(notes) = tooling::convert_gdlintrc(context, &gdtidy)? {
-        println!("converted {} into gdtidy.toml", gdlintrc.display());
+    if let Some((files, notes)) = tooling::convert_tool_configs(context, &gdtidy)? {
+        println!("converted {} into gdtidy.toml", files.join(" and "));
         for note in notes {
-            println!("gdlintrc: {note}");
+            println!("gdtidy migrate: {note}");
         }
     }
     Ok(())
-}
-
-fn path_exists_any(context: &ProjectContext, paths: &[&str]) -> bool {
-    paths.iter().any(|path| context.root.join(path).exists())
 }
 
 fn rewrite_entrypoints(context: &ProjectContext) -> Result<()> {

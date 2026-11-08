@@ -20,8 +20,8 @@ When all tools are installed, pretty output ends with `[gdsuite:doctor] status o
 [gdsuite:doctor] info  config        /your/project/gdsuite.toml
 [gdsuite:doctor] info  godot         /usr/local/bin/godot
 [gdsuite:doctor] info  version       4.7.stable.official
-[gdsuite:doctor] info  python        /your/project/.gdsuite/python/bin/python
-[gdsuite:doctor] info  version       Python 3.12.3
+[gdsuite:doctor] info  gdtidy        /your/project/.gdsuite/tools/gdtidy/bin/gdtidy
+[gdsuite:doctor] info  version       gdtidy 0.2.0
 [gdsuite:doctor] status ok
 ```
 
@@ -29,13 +29,11 @@ When tools are missing, each missing entry says exactly what to run to fix it, a
 
 ```
 [gdsuite:doctor] warn  godot not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml
-[gdsuite:doctor] warn  python not found; run `gdsuite setup` to install the toolchain
-[gdsuite:doctor] warn  gdformat not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdtidy not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdtest not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] warn  gdhealth not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] status error
-error: missing tools: godot, python, gdformat, gdtidy, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
+error: missing tools: godot, gdtidy, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
 ```
 
 Use `gdsuite doctor --output plain` when you want stable `key=value` lines for shell scripts, or `gdsuite doctor --output json` for a structured report.

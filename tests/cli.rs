@@ -25,7 +25,7 @@ fn fmt_defaults_to_dot() {
 
     fixture.cmd().arg("fmt").assert().success();
 
-    assert_eq!(fixture.read_log("gdformat-args.txt"), ".");
+    assert_eq!(fixture.read_log("gdtidy-fmt-args.txt"), "fmt .");
 }
 
 #[test]
@@ -40,7 +40,45 @@ fn fmt_forwards_args_and_keeps_explicit_targets() {
         .assert()
         .success();
 
-    assert_eq!(fixture.read_log("gdformat-args.txt"), "--check src test");
+    assert_eq!(
+        fixture.read_log("gdtidy-fmt-args.txt"),
+        "fmt --check src test"
+    );
+}
+
+#[test]
+fn check_fails_on_files_gdtidy_would_reformat() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fixture.write_flag("fmt-fail.flag");
+
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "test/sample_a.gd: would be reformatted",
+        ))
+        .stdout(predicate::str::contains(
+            "Found formatting issues in 2 files",
+        ));
+
+    assert_eq!(
+        fixture.read_log("gdtidy-fmt-args.txt"),
+        "fmt --check --format json ."
+    );
+}
+
+#[test]
+fn a_file_with_a_syntax_error_does_not_fail_the_format_check() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fixture.write_flag("fmt-skip.flag");
+
+    fixture.cmd().arg("check").assert().success();
 }
 
 #[test]
@@ -368,13 +406,11 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
         gitignore.lines().any(|line| line == ".gdsuite/"),
         "{gitignore}"
     );
-    let rc = fs::read_to_string(fixture.root.join(".gdformatrc")).unwrap();
-    assert!(
-        rc.contains("addons: null"),
-        ".gdformatrc must exclude addons"
-    );
-    // gdtidy skips addons itself and reads no gdlintrc.
+    // gdtidy skips addons itself and needs no gdtoolkit configuration.
+    assert!(!fixture.root.join(".gdformatrc").exists());
     assert!(!fixture.root.join(".gdlintrc").exists());
+    assert!(!fixture.root.join(".gdsuite/python").exists());
+    assert!(!config.contains("gdtoolkit"), "{config}");
     assert!(!fixture.root.join("gdtidy.toml").exists());
     assert!(config.contains("[check]"));
     assert!(!config.contains("[lint]"));
@@ -430,10 +466,10 @@ impl Fixture {
                 )]),
             ),
             (
-                "/q-rault/gdtidy/releases/download/v0.1.0/gdtidy-v0.1.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtidy/releases/download/v0.2.0/gdtidy-v0.2.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdtidy-v0.1.0-x86_64-pc-windows-msvc/gdtidy.cmd",
+                    "gdtidy-v0.2.0-x86_64-pc-windows-msvc/gdtidy.cmd",
                     &GDTIDY_CMD.replace('\n', "\r\n"),
                 )]),
             ),
@@ -518,30 +554,12 @@ impl Fixture {
 
     fn seed_installed_toolchain(&self) {
         let gdsuite_dir = self.root.join(".gdsuite");
-        fs::create_dir_all(gdsuite_dir.join("python/Scripts")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdtest/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdhealth/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdtypecheck/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("tools/gdtidy/bin")).unwrap();
         fs::create_dir_all(gdsuite_dir.join("state")).unwrap();
         self.seed_path_tools();
-        write_cmd(
-            &gdsuite_dir.join("python/Scripts/python.cmd"),
-            "@echo off\r\nif \"%1\"==\"--version\" echo Python 3.12.0\r\nif \"%1\"==\"-m\" if \"%2\"==\"pip\" if \"%3\"==\"show\" if \"%4\"==\"gdtoolkit\" echo Version: 4.5.0\r\n",
-        );
-        write_cmd(
-            &gdsuite_dir.join("python/Scripts/gdformat.cmd"),
-            r#"@echo off
-echo %*> "%CD%\logs\gdformat-args.txt"
->> "%CD%\logs\step-order.txt" echo fmt
-if exist "%CD%\mock-state\fmt-fail.flag" (
-  echo test/sample_a.gd
-  echo test/sample_b.gd
-  exit /b 1
-)
-echo gdformat ok
-"#,
-        );
         write_cmd(&gdsuite_dir.join("tools/gdtidy/bin/gdtidy.cmd"), GDTIDY_CMD);
         write_cmd(
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
@@ -608,16 +626,12 @@ echo gdtypecheck ok
             format!(
                 r#"{{
   "godot_exe": "{}",
-  "python": "{}",
-  "gdformat": "{}",
   "gdtidy": "{}",
   "gdtest": "{}",
   "gdhealth": "{}",
   "gdtypecheck": "{}"
 }}"#,
                 escape(self.root.join("mock-bin/godot.cmd")),
-                escape(gdsuite_dir.join("python/Scripts/python.cmd")),
-                escape(gdsuite_dir.join("python/Scripts/gdformat.cmd")),
                 escape(gdsuite_dir.join("tools/gdtidy/bin/gdtidy.cmd")),
                 escape(gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd")),
                 escape(gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd")),
@@ -649,25 +663,6 @@ if "%1"=="--headless" (
   exit /b 0
 )
 echo Godot 4.4.1
-"#,
-        );
-        write_cmd(
-            &bin.join("python.cmd"),
-            r#"@echo off
-if "%1"=="--version" (
-  echo Python 3.12.0
-  exit /b 0
-)
-if "%1"=="-m" if "%2"=="venv" (
-  mkdir "%3\Scripts" 2>nul
-  > "%3\Scripts\python.cmd" echo @echo off
-  >> "%3\Scripts\python.cmd" echo @if "%%1"=="--version" echo Python 3.12.0
-  >> "%3\Scripts\python.cmd" echo @if "%%1"=="-m" if "%%2"=="pip" if "%%3"=="install" echo pip ok
-  >> "%3\Scripts\python.cmd" echo @if "%%1"=="-m" if "%%2"=="pip" if "%%3"=="show" if "%%4"=="gdtoolkit" echo Version: 4.5.0
-  > "%3\Scripts\gdformat.cmd" echo @echo off
-  >> "%3\Scripts\gdformat.cmd" echo @if "%%1"=="--help" echo gdformat help
-  exit /b 0
-)
 "#,
         );
         write_cmd(
@@ -709,7 +704,6 @@ if not "%ROOT%"=="" (
 root = "."
 
 [tools]
-gdtoolkit = "==4.5.0"
 gdtest_source = "github:q-rault/gdtest@v0.1.1"
 gdhealth_source = "github:q-rault/gdhealth@v0.1.1"
 gdtypecheck_source = "github:q-rault/gdtypecheck@v0.1.1"
@@ -929,7 +923,7 @@ fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
         .stdout(predicate::str::contains(
             "converted gdlintrc into gdtidy.toml",
         ))
-        .stdout(predicate::str::contains("gdlintrc: unused-argument"));
+        .stdout(predicate::str::contains("gdtidy migrate: unused-argument"));
 
     assert!(
         fixture
@@ -942,15 +936,45 @@ fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
         "custom: true\n"
     );
     assert!(!fixture.root.join(".gdlintrc").exists());
-    assert!(fixture.root.join(".gdformatrc").exists());
 
     // Once converted, setup leaves gdtidy.toml alone.
-    fs::write(fixture.root.join("gdtidy.toml"), "# edited\n").unwrap();
+    fs::write(fixture.root.join("gdtidy.toml"), "[lint]\n# edited\n").unwrap();
     fixture.cmd().arg("setup").assert().success();
     assert_eq!(
         fs::read_to_string(fixture.root.join("gdtidy.toml")).unwrap(),
-        "# edited\n"
+        "[lint]\n# edited\n"
     );
+}
+
+#[test]
+fn setup_converts_a_gdformatrc_that_gdtidy_toml_has_no_section_for() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    // A project set up by an earlier gdsuite: lint converted, gdformatrc not.
+    fs::write(fixture.root.join("gdtidy.toml"), "[lint]\n").unwrap();
+    fs::write(
+        fixture.root.join(".gdformatrc"),
+        "excluded_directories: !!set\n  addons: null\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "converted .gdformatrc into gdtidy.toml",
+        ));
+
+    assert!(
+        fixture
+            .read_log("gdtidy-migrate-args.txt")
+            .ends_with(".gdformatrc")
+    );
+    assert!(fixture.root.join(".gdformatrc").exists());
 }
 
 #[test]
@@ -989,18 +1013,33 @@ fn migrate_converts_gdlintrc_once_gdtidy_is_installed() {
     assert!(fixture.root.join("gdlintrc").exists());
 }
 
-/// Stands in for gdtidy: `--version`, `migrate` (writes gdtidy.toml), and
-/// `lint --format json`, whose report depends on flags in mock-state.
+/// Stands in for gdtidy: `--version`, `migrate` (writes gdtidy.toml), `fmt`,
+/// and `lint --format json`, whose reports depend on flags in mock-state.
 const GDTIDY_CMD: &str = r#"@echo off
 if "%1"=="--version" (
-  echo gdtidy 0.1.0
+  echo gdtidy 0.2.0
   exit /b 0
 )
 if "%1"=="migrate" (
   echo %*> "%CD%\logs\gdtidy-migrate-args.txt"
   > "%CD%\gdtidy.toml" echo [lint]
+  >> "%CD%\gdtidy.toml" echo [fmt]
   >&2 echo gdtidy: unused-argument: no longer gdtidy's
   >&2 echo gdtidy: wrote gdtidy.toml from gdlintrc
+  exit /b 0
+)
+if "%1"=="fmt" (
+  echo %*> "%CD%\logs\gdtidy-fmt-args.txt"
+  >> "%CD%\logs\step-order.txt" echo fmt
+  if exist "%CD%\mock-state\fmt-fail.flag" (
+    echo {"version":1,"files":2,"changed":["test/sample_a.gd","test/sample_b.gd"],"skipped":[]}
+    exit /b 1
+  )
+  if exist "%CD%\mock-state\fmt-skip.flag" (
+    echo {"version":1,"files":2,"changed":[],"skipped":[{"path":"test/broken.gd","line":2,"column":1,"reason":"syntax-error","message":"Expected end of statement."}]}
+    exit /b 2
+  )
+  echo {"version":1,"files":1,"changed":[],"skipped":[]}
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtidy-args.txt"

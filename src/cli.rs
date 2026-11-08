@@ -27,7 +27,7 @@ pub enum Commands {
     Setup(SetupArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor(DoctorArgs),
-    #[command(about = "Forward arguments to gdformat")]
+    #[command(about = "Format GDScript with `gdtidy fmt` (arguments are forwarded)")]
     Fmt(ForwardArgs),
     #[command(about = "Lint GDScript with gdtidy; arguments after -- go to `gdtidy lint`")]
     Lint(LintArgs),
