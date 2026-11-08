@@ -693,6 +693,7 @@ echo Godot 4.4.1
         write_cmd(
             &bin.join("cargo.cmd"),
             r#"@echo off
+>> "%CD%\logs\cargo-args.txt" echo %*
 set ROOT=
 set VERSION=0.1.0
 :scan
@@ -1147,4 +1148,35 @@ fn setup_keeps_edited_gdtest_addons_of_the_same_harness_version() {
         "my edit\n"
     );
     assert!(!fixture.root.join(".gdsuite/backups").exists());
+}
+
+#[test]
+fn setup_replaces_a_tool_binary_cargo_has_no_record_of() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fixture.cmd().arg("init").assert().success();
+    // Switch gdtypecheck to a local checkout: a binary an earlier setup
+    // downloaded is already in place, and cargo has no record of it.
+    fs::create_dir_all(fixture.root.join("../gdtypecheck")).unwrap();
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    let config = config
+        .lines()
+        .map(|line| {
+            if line.starts_with("gdtypecheck_source") {
+                "gdtypecheck_source = \"../gdtypecheck\"".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(fixture.root.join("gdsuite.toml"), config).unwrap();
+
+    fixture.cmd().arg("setup").assert().success();
+
+    let cargo_args = fixture.read_log("cargo-args.txt");
+    assert!(cargo_args.contains("install --path"), "{cargo_args}");
+    assert!(cargo_args.contains("--force"), "{cargo_args}");
 }

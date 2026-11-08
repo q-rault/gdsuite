@@ -533,6 +533,9 @@ fn install_tool(
                 package_root.display().to_string(),
                 "--root".to_string(),
                 root.display().to_string(),
+                // setup installs or repairs: replace a binary cargo has no
+                // record of, such as one an earlier gdsuite downloaded.
+                "--force".to_string(),
             ];
             process::run_checked(&cargo, &args, &context.root)?;
         }
@@ -556,6 +559,9 @@ fn install_tool(
                 version.clone(),
                 "--root".to_string(),
                 root.display().to_string(),
+                // setup installs or repairs: replace a binary cargo has no
+                // record of, such as one an earlier gdsuite downloaded.
+                "--force".to_string(),
             ];
             process::run_checked(&cargo, &args, &context.root)?;
         }
@@ -584,6 +590,9 @@ fn install_tool(
                 package_root.display().to_string(),
                 "--root".to_string(),
                 root.display().to_string(),
+                // setup installs or repairs: replace a binary cargo has no
+                // record of, such as one an earlier gdsuite downloaded.
+                "--force".to_string(),
             ];
             process::run_checked(&cargo, &args, &context.root)?;
         }
