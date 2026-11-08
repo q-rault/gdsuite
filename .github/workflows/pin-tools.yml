@@ -3,14 +3,22 @@
 # released one after another, the same PR is updated. Merging it is a
 # release: tag-release.yml then tags the new version.
 #
+# Each tool's release.yml starts this workflow once its GitHub release exists
+# (with that repository's GDSUITE_TRIGGER_TOKEN secret). It can also be run
+# from the Actions tab.
+#
 # Needs the PIN_TOOLS_TOKEN secret (see RELEASING.md):
 # a PR pushed with the default token would not run CI.
 name: pin-tools
+run-name: pin-tools${{ inputs.release && format(' after {0}', inputs.release) || '' }}
 
 on:
-  schedule:
-    - cron: '17,47 * * * *'
   workflow_dispatch:
+    inputs:
+      release:
+        description: The tool release that started this run (only names the run)
+        required: false
+        default: ''
 
 permissions:
   contents: read

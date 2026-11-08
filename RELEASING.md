@@ -15,8 +15,9 @@ Do not push the tag yourself: `tag-release.yml` does it.
 `.gdsuite-release.toml` pins each tool's release and its archive checksums.
 The CLI tests read the versions from it.
 
-`pin-tools.yml` runs every 30 minutes (and on demand from the Actions tab).
-When a tool has a newer release, it runs `scripts/pin_tools.py`, which:
+`pin-tools.yml` runs when a tool is released: the last job of each tool's
+`release.yml` starts it once the GitHub release exists. It can also be run by
+hand from the Actions tab. It runs `scripts/pin_tools.py`, which:
 
 - pins the latest release of each tool, with its checksums and gdtest's
   harness contract;
@@ -51,3 +52,27 @@ release. Both workflows use a token of yours instead:
    → New repository secret, named `PIN_TOOLS_TOKEN`, with the token as value.
 7. Check it: Actions → pin-tools → Run workflow. With every tool up to date,
    the run ends with "every tool is pinned to its latest release".
+
+## One-time setup: the `GDSUITE_TRIGGER_TOKEN` secret
+
+The tool repositories (gdtest, gdtidy, gdhealth, gdtypecheck) start
+`pin-tools.yml` at the end of their release. That takes a second token, which
+can only start workflows in gdsuite and cannot push code:
+
+1. Account settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token.
+2. Name it `gdsuite trigger`, owner `q-rault`, with an expiration.
+3. Repository access: **Only select repositories** → `q-rault/gdsuite`.
+4. Repository permissions: **Actions: Read and write** (nothing else).
+5. Store it as the `GDSUITE_TRIGGER_TOKEN` secret in each tool repository:
+
+   ```sh
+   for repo in gdtest gdtidy gdhealth gdtypecheck; do
+     gh secret set GDSUITE_TRIGGER_TOKEN -R q-rault/$repo
+   done
+   ```
+
+   `gh secret set` asks for the value each time; paste the token.
+
+Without the secret, a tool release still succeeds and warns that gdsuite was
+not told; run pin-tools by hand then.
