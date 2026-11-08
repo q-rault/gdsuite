@@ -317,49 +317,49 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/q-rault/gdtest/releases/download/v0.2.0/gdtest-v0.2.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtest/releases/download/v0.2.1/gdtest-v0.2.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.0\r\n",
+                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.1\r\n",
                     ),
                     (
-                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.2.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.2.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
+                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.0-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
             ),
             (
-                "/q-rault/gdhealth/releases/download/v0.2.0/gdhealth-v0.2.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdhealth/releases/download/v0.3.0/gdhealth-v0.3.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdhealth-v0.2.0-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.2.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.3.0-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.3.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
             ),
             (
-                "/q-rault/gdtypecheck/releases/download/v0.2.0/gdtypecheck-v0.2.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtypecheck/releases/download/v0.2.1/gdtypecheck-v0.2.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtypecheck-v0.2.0-x86_64-pc-windows-msvc/gdtypecheck.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.2.0\r\n",
+                        "gdtypecheck-v0.2.1-x86_64-pc-windows-msvc/gdtypecheck.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck 0.2.1\r\n",
                     ),
                     (
-                        "gdtypecheck-v0.2.0-x86_64-pc-windows-msvc/README.md",
+                        "gdtypecheck-v0.2.1-x86_64-pc-windows-msvc/README.md",
                         "gdtypecheck\n",
                     ),
                 ]),
@@ -415,7 +415,7 @@ impl Fixture {
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.0\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+            "const HARNESS_VERSION = \"0.2.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
         )
         .unwrap();
         fs::write(gdtest_root.join("addons/gdtest/gdunit4_chain.gd"), "").unwrap();
@@ -471,7 +471,7 @@ echo Success: no problems found
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtest 0.2.0
+  echo gdtest 0.2.1
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtest-args.txt"
@@ -484,7 +484,7 @@ echo gdtest ok
             &gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdhealth 0.2.0
+  echo gdhealth 0.3.0
   exit /b 0
 )
 if "%1"=="--schema-version" (
@@ -508,7 +508,7 @@ if exist "%CD%\mock-state\health-fail.flag" (
             &gdsuite_dir.join("tools/gdtypecheck/bin/gdtypecheck.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtypecheck 0.2.0
+  echo gdtypecheck 0.2.1
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtypecheck-args.txt"
@@ -552,7 +552,7 @@ echo gdtypecheck ok
         fs::create_dir_all(self.root.join("addons/gdtest")).unwrap();
         fs::write(
             self.root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.0\"\n",
+            "const HARNESS_VERSION = \"0.2.1\"\n",
         )
         .unwrap();
     }
@@ -617,9 +617,9 @@ goto scan
 if not "%ROOT%"=="" (
   mkdir "%ROOT%\bin" 2>nul
   > "%ROOT%\bin\gdtest.cmd" echo @echo off
-  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.0
+  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.1
   > "%ROOT%\bin\gdhealth.cmd" echo @echo off
-  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.2.0
+  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.3.0
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--help" echo gdhealth help
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--schema-version" echo 1
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="schema-version" echo 1

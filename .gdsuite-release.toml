@@ -1,5 +1,5 @@
 [suite]
-version = "0.1.2"
+version = "0.1.3"
 manifest_version = 1
 
 [tools.gdtoolkit]
@@ -7,37 +7,37 @@ acquire = { kind = "pip", package = "gdtoolkit", spec = "==4.5.0" }
 tested = "==4.5.0"
 
 [tools.gdtest]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.0" }
-tested = "==0.2.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.1" }
+tested = "==0.2.1"
 
 [tools.gdtest.sha256]
-"aarch64-apple-darwin" = "407210a251e75b2268df32e0da929d88d27f16f382c0d6b672df6b7116502cff"
-"x86_64-apple-darwin" = "42d7d1be6eabf795740aee3cad6d38edca20ebcf55ff132bbb0e05db8b5ac464"
-"x86_64-pc-windows-msvc" = "bf09dee978645a5f90a4876b31c4d21b90b555345f6f7bed7d4854154e43d124"
-"x86_64-unknown-linux-musl" = "00d9ddfadb3e38355a56e0c2b161de23124ea4e1d5b6e65a87b603906b0425b5"
+"aarch64-apple-darwin" = "f6181dfd75404f0746ef97125d2c2c69cbf0f1320ac60620e010a08989dbec92"
+"x86_64-apple-darwin" = "f49751eeaf7373582651100e8c2589b5189b96861fb03a607a050f71bcd7589c"
+"x86_64-pc-windows-msvc" = "e9fc2ce7a5aca2a06b386ade20dea8d3367d9d912ce23b793c278164b57ed2c0"
+"x86_64-unknown-linux-musl" = "9f4a83c091a52185ac2bd182fb9bd58b27c338683fd683e320b74aae39ea8a5c"
 
 [tools.gdhealth]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.2.0" }
-tested = "==0.2.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.3.0" }
+tested = "==0.3.0"
 
 [tools.gdhealth.sha256]
-"aarch64-apple-darwin" = "4f692a00b69e1be72aa0325d6c25ae07de48855884baf551244be415365ee0f6"
-"x86_64-apple-darwin" = "2ece651102f8c7070b277c0d3bb0a40a1df3566cc13a6f06ee60b9974af42d26"
-"x86_64-pc-windows-msvc" = "f96f3f561aae4a665805659963230c7ed73171a0ac64e77a88a154c86181a846"
-"x86_64-unknown-linux-musl" = "a1d4e69ada3d7dc460c0bec8cace04b88bab8edb24e5181786fc1478df3048b9"
+"aarch64-apple-darwin" = "09f776ade32ce39ab30b6baa603ee4b49c41f94e9bc9e1d61a0b7551f886deed"
+"x86_64-apple-darwin" = "288941c46616ea7536526200434b39c9e5307656d07d231156ec9c79ce5c4298"
+"x86_64-pc-windows-msvc" = "885b082fc66e8e10add8dd40a304d156e1164365f3e7c19d00fdafbcac5aecde"
+"x86_64-unknown-linux-musl" = "638785eac168e72587ea5dc5f93154dce59a189ba5eb07d4df85263f955b198f"
 
 [tools.gdtypecheck]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.2.0" }
-tested = "==0.2.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.2.1" }
+tested = "==0.2.1"
 
 [tools.gdtypecheck.sha256]
-"aarch64-apple-darwin" = "20e37f4f3539f1f72bacbf4db52cdfac2c98260df09c926f077829568a4d20e0"
-"x86_64-apple-darwin" = "910a3f40803b1f29f438421ab866d81794e6298b33daca31126f45cc11b68531"
-"x86_64-pc-windows-msvc" = "53368a05b7457558b85b544ccd178fa8d66ddd38a0174457d4181f575ad705ce"
-"x86_64-unknown-linux-musl" = "ab132bf33f2d11f2ed0b29387f16be582bb6b36019946d936e4b5854841caa53"
+"aarch64-apple-darwin" = "f1d9f48a5feb4ead2c9293b1ebaf4e762d86e5cdc74d1a761140b1f5e0c3ede9"
+"x86_64-apple-darwin" = "c77c7198ca026879d4270e35dafaa1f4595580cb8e2c829eae0d544cab134cc0"
+"x86_64-pc-windows-msvc" = "da3a9ca3d8140a32f884dc46938c3786653ff59130529d071dfca6e295377c48"
+"x86_64-unknown-linux-musl" = "0c1c70e09234bd2922a15334e9533b38aa271df5258e456b60f12302a54be5fc"
 
 [contracts.gdtest]
-required_harness = "==0.2.0"
+required_harness = "==0.2.1"
 
 [contracts.gdhealth]
 required_schema_version = 1

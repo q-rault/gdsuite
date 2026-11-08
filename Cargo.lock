@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "gdsuite"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anstream",
  "anstyle",
