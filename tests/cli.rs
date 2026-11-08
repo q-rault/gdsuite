@@ -457,44 +457,44 @@ impl Fixture {
         fs::create_dir_all(&root).unwrap();
         let release_server = TestHttpServer::new(HashMap::from([
             (
-                "/q-rault/gdtest/releases/download/v0.2.1/gdtest-v0.2.1-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtest/releases/download/v0.2.2/gdtest-v0.2.2-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[
                     (
-                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.1\r\n",
+                        "gdtest-v0.2.2-x86_64-pc-windows-msvc/gdtest.cmd",
+                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest 0.2.2\r\n",
                     ),
                     (
-                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"0.2.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
+                        "gdtest-v0.2.2-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
+                        "const HARNESS_VERSION = \"0.2.2\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
                     ),
                     (
-                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
+                        "gdtest-v0.2.2-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
+                        "gdtest-v0.2.2-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
                         "",
                     ),
                     (
-                        "gdtest-v0.2.1-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
+                        "gdtest-v0.2.2-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
                         "_panel = null\n",
                     ),
                 ]),
             ),
             (
-                "/q-rault/gdhealth/releases/download/v0.3.0/gdhealth-v0.3.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdhealth/releases/download/v0.3.1/gdhealth-v0.3.1-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdhealth-v0.3.0-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.3.0\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
+                    "gdhealth-v0.3.1-x86_64-pc-windows-msvc/gdhealth.cmd",
+                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth 0.3.1\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
                 )]),
             ),
             (
-                "/q-rault/gdtidy/releases/download/v0.2.0/gdtidy-v0.2.0-x86_64-pc-windows-msvc.zip"
+                "/q-rault/gdtidy/releases/download/v0.3.0/gdtidy-v0.3.0-x86_64-pc-windows-msvc.zip"
                     .to_string(),
                 build_zip(&[(
-                    "gdtidy-v0.2.0-x86_64-pc-windows-msvc/gdtidy.cmd",
+                    "gdtidy-v0.3.0-x86_64-pc-windows-msvc/gdtidy.cmd",
                     &GDTIDY_CMD.replace('\n', "\r\n"),
                 )]),
             ),
@@ -563,7 +563,7 @@ impl Fixture {
         fs::create_dir_all(gdtest_root.join("addons/gdtest_editor")).unwrap();
         fs::write(
             gdtest_root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.1\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
+            "const HARNESS_VERSION = \"0.2.2\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\nload(\"res://addons/gdtest/gdunit4_compat.gd\")\n",
         )
         .unwrap();
         fs::write(gdtest_root.join("addons/gdtest/gdunit4_chain.gd"), "").unwrap();
@@ -590,7 +590,7 @@ impl Fixture {
             &gdsuite_dir.join("tools/gdtest/bin/gdtest.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdtest 0.2.1
+  echo gdtest 0.2.2
   exit /b 0
 )
 echo %*> "%CD%\logs\gdtest-args.txt"
@@ -603,7 +603,7 @@ echo gdtest ok
             &gdsuite_dir.join("tools/gdhealth/bin/gdhealth.cmd"),
             r#"@echo off
 if "%1"=="--version" (
-  echo gdhealth 0.3.0
+  echo gdhealth 0.3.1
   exit /b 0
 )
 if "%1"=="--schema-version" (
@@ -667,7 +667,7 @@ echo gdtypecheck ok
         fs::create_dir_all(self.root.join("addons/gdtest")).unwrap();
         fs::write(
             self.root.join("addons/gdtest/gdtest_worker.gd"),
-            "const HARNESS_VERSION = \"0.2.1\"\n",
+            "const HARNESS_VERSION = \"0.2.2\"\n",
         )
         .unwrap();
     }
@@ -712,9 +712,9 @@ goto scan
 if not "%ROOT%"=="" (
   mkdir "%ROOT%\bin" 2>nul
   > "%ROOT%\bin\gdtest.cmd" echo @echo off
-  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.1
+  >> "%ROOT%\bin\gdtest.cmd" echo @if "%%1"=="--version" echo gdtest 0.2.2
   > "%ROOT%\bin\gdhealth.cmd" echo @echo off
-  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.3.0
+  >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--version" echo gdhealth 0.3.1
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--help" echo gdhealth help
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="--schema-version" echo 1
   >> "%ROOT%\bin\gdhealth.cmd" echo @if "%%1"=="schema-version" echo 1
@@ -1055,7 +1055,7 @@ fn migrate_converts_gdlintrc_once_gdtidy_is_installed() {
 /// and `lint --format json`, whose reports depend on flags in mock-state.
 const GDTIDY_CMD: &str = r#"@echo off
 if "%1"=="--version" (
-  echo gdtidy 0.2.0
+  echo gdtidy 0.3.0
   exit /b 0
 )
 if "%1"=="migrate" (
@@ -1121,12 +1121,12 @@ fn setup_upgrades_gdtest_addons_from_another_harness_version() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "upgraded the gdtest addons from harness 0.1.1 to 0.2.1",
+            "upgraded the gdtest addons from harness 0.1.1 to 0.2.2",
         ))
         .stdout(predicate::str::contains("skipped modified").not());
 
     let worker = fs::read_to_string(fixture.root.join("addons/gdtest/gdtest_worker.gd")).unwrap();
-    assert!(worker.contains("HARNESS_VERSION = \"0.2.1\""), "{worker}");
+    assert!(worker.contains("HARNESS_VERSION = \"0.2.2\""), "{worker}");
     assert_eq!(
         fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap(),
         ""
