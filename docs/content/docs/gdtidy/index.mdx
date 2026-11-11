@@ -1,0 +1,27 @@
+---
+title: gdtidy Overview
+description: How gdsuite fmt and gdsuite lint use gdtidy, and when to go to gdtidy's own options.
+---
+
+`gdtidy` formats and lints GDScript, following the official Godot style guide.
+In the suite it runs as `gdsuite fmt` and `gdsuite lint`, and as the fmt and
+lint steps of `gdsuite check`.
+
+```sh
+gdsuite fmt                       # gdtidy fmt on the project
+gdsuite fmt -- --check            # arguments after -- go to gdtidy fmt
+gdsuite lint                      # gdtidy lint on the project
+gdsuite lint -- --fix player/     # arguments after -- go to gdtidy lint
+```
+
+gdtidy reads the `[fmt]` and `[lint]` sections of `gdsuite.toml`, with the keys
+of its own `gdtidy.toml`.
+
+## Start here
+
+- [Formatting](/gdtidy/formatting): what `gdtidy fmt` changes
+- [Linting](/gdtidy/linting): fixing, silencing a rule, exit codes
+- [Lint Rules](/gdtidy/rules)
+- [Configuration](/gdtidy/configuration)
+- [Moving from gdtoolkit](/gdtidy/migrate-from-gdtoolkit)
+- [CLI Reference](/gdtidy/cli-reference)

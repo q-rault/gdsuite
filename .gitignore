@@ -1,9 +1,5 @@
 /target
 target-verification*/
-docs/.generated/
-docs/.next/
-docs/node_modules/
-docs/.source/
 
 # Local agent notes
 /.ai/

@@ -18,7 +18,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={spaceGrotesk.className} suppressHydrationWarning>
       <body className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(210,230,255,0.4),transparent_40%),linear-gradient(180deg,#fffdf8_0%,#ffffff_18%,#f8fbff_100%)] text-slate-950">
-        <RootProvider>{children}</RootProvider>
+        <RootProvider
+          search={{
+            options: {
+              type: 'static',
+              api: `${process.env.NEXT_PUBLIC_BASE_PATH}/api/search.json`,
+            },
+          }}
+        >
+          {children}
+        </RootProvider>
       </body>
     </html>
   );

@@ -1,13 +1,14 @@
 import path from 'node:path';
 
-export type ProductId = 'gdtest' | 'gdhealth';
+export type ProductId = 'gdtest' | 'gdhealth' | 'gdtidy' | 'gdtypecheck';
 
 export type ProductDocsSource = {
   id: ProductId;
   repoRoot: string;
   contentDir: string;
   metaFile: string;
-  routeBase: `/gdtest` | `/gdhealth`;
+  publicDir: string;
+  routeBase: `/${ProductId}`;
   title: string;
 };
 
@@ -28,6 +29,7 @@ export const productSources: Record<ProductId, ProductDocsSource> = {
     repoRoot: path.join(workspaceRoot, 'gdtest'),
     contentDir: path.join(workspaceRoot, 'gdtest', 'docs', 'content', 'docs'),
     metaFile: path.join(workspaceRoot, 'gdtest', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdtest', 'docs', 'public'),
     routeBase: '/gdtest',
     title: 'gdtest',
   },
@@ -36,7 +38,26 @@ export const productSources: Record<ProductId, ProductDocsSource> = {
     repoRoot: path.join(workspaceRoot, 'gdhealth'),
     contentDir: path.join(workspaceRoot, 'gdhealth', 'docs', 'content', 'docs'),
     metaFile: path.join(workspaceRoot, 'gdhealth', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdhealth', 'docs', 'public'),
     routeBase: '/gdhealth',
     title: 'gdhealth',
+  },
+  gdtidy: {
+    id: 'gdtidy',
+    repoRoot: path.join(workspaceRoot, 'gdtidy'),
+    contentDir: path.join(workspaceRoot, 'gdtidy', 'docs', 'content', 'docs'),
+    metaFile: path.join(workspaceRoot, 'gdtidy', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdtidy', 'docs', 'public'),
+    routeBase: '/gdtidy',
+    title: 'gdtidy',
+  },
+  gdtypecheck: {
+    id: 'gdtypecheck',
+    repoRoot: path.join(workspaceRoot, 'gdtypecheck'),
+    contentDir: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'content', 'docs'),
+    metaFile: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'public'),
+    routeBase: '/gdtypecheck',
+    title: 'gdtypecheck',
   },
 };

@@ -76,3 +76,5 @@ can only start workflows in gdsuite and cannot push code:
 
 Without the secret, a tool release still succeeds and warns that gdsuite was
 not told; run pin-tools by hand then.
+
+The docs site is published from release and prerelease tags; see [docs/README.md](docs/README.md#published-versions).
