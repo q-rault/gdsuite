@@ -1,6 +1,6 @@
 ---
 title: gdsuite check
-description: Understand the suite's fast local gate, what it runs, and why it does not automatically become a full CI pipeline.
+description: The suite's local gate, the steps it runs, and how to change them.
 ---
 
 ## What this page is for
@@ -18,27 +18,53 @@ Use this page when you want fast feedback during normal development or when you 
 
 ## Step-by-step instructions
 
-1. Run the default local gate.
+1. Run the gate.
 
 ```bash
 gdsuite check
 ```
 
-2. Use `--fix` when you want the suite to apply safe automatic cleanup before it verifies the remaining phases.
+2. Fix what it reports. Formatting and some lint problems fix themselves:
 
 ```bash
-gdsuite check --fix
+gdsuite fmt
+gdsuite lint -- --fix
 ```
+
+3. Choose the steps in `gdsuite.toml`, if the defaults don't suit you:
+
+```toml
+[check]
+steps = ["fmt", "lint", "typecheck", "test", "health"]
+```
+
+## The steps
+
+| Step | Runs | Fails when |
+|---|---|---|
+| `fmt` | `gdtidy fmt --check` (changes nothing) | A file is not formatted |
+| `lint` | `gdtidy lint` | A lint rule reports a problem |
+| `typecheck` | `gdtypecheck` | Godot reports an error |
+| `test` | `gdtest` on `default_test_target` | A test fails |
+| `health` | `gdhealth health` | gdhealth exits with an error |
+
+The default is `["fmt", "lint", "typecheck", "health"]`: tests are left out
+because they take longest; run them with `gdsuite test`, or add `test` to the
+steps.
 
 ## What success looks like
 
-A successful `check` run means the fixed fast pipeline passed: formatting, linting, and GDScript type checking. `check` is sequential and fail-fast, so later phases run only when earlier phases succeed. If `gdsuite.toml` is missing, `check` still runs using built-in defaults. The local toolchain still has to exist under `.gdsuite/state/manifest.json`.
+`check` runs the steps in order and stops at the first one that fails. If
+`gdsuite.toml` is missing, it uses the default steps. The local toolchain
+still has to exist, so run `gdsuite setup` first.
+
+`gdsuite check --report json` prints the result of every step it ran and saves
+it for `gdsuite report`.
 
 ## Common mistakes
 
-- Assuming `gdsuite check` runs tests or health checks — it does not; use `gdsuite test` and `gdsuite health` separately
-- Expecting `check` to change meaning based on profiles or CI context
-- Expecting report-generation options to be part of the core `check` contract
+- Expecting `check` to reformat files: its `fmt` step only checks. Run `gdsuite fmt` to format.
+- Forgetting that `health` is a default step: a project whose health report fails the build fails `check` too. Set `[health]` thresholds, or remove `health` from the steps.
 
 ## Where to go next
 

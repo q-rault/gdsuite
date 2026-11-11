@@ -44,10 +44,12 @@ function prepareGeneratedTree() {
 
 function importProductDocs(source: ProductDocsSource): ImportedDocPage[] {
   assertPathExists(source.repoRoot, `missing sibling repo for ${source.id} at ${source.repoRoot}`);
-  assertPathExists(
-    source.contentDir,
-    `missing docs content directory for ${source.id} at ${source.contentDir}`,
-  );
+  // A tool release from before its docs site has no pages to import; its
+  // section then shows only the overview written here.
+  if (!fs.existsSync(source.contentDir)) {
+    console.warn(`${source.id} has no docs at ${source.contentDir}; only its overview is shown`);
+    return [];
+  }
   assertPathExists(source.metaFile, `missing meta.json for ${source.id} at ${source.metaFile}`);
 
   const meta = JSON.parse(fs.readFileSync(source.metaFile, 'utf8')) as MetaFile;

@@ -6,6 +6,7 @@ import type * as PageTree from 'fumadocs-core/page-tree';
 import type { ReactNode } from 'react';
 import { SidebarScrollPreserver } from './sidebar-scroll-preserver';
 import { SidebarItem } from 'fumadocs-ui/components/layout/sidebar';
+import { VersionSwitcher } from '@/components/version-switcher';
 
 type StaticFolderProps = {
   item: PageTree.Folder;
@@ -47,6 +48,8 @@ const SIDEBAR_TABS = [
   { url: '/', title: 'GDSuite Docs' },
   { url: '/gdtest', title: 'gdtest' },
   { url: '/gdhealth', title: 'gdhealth' },
+  { url: '/gdtidy', title: 'gdtidy' },
+  { url: '/gdtypecheck', title: 'gdtypecheck' },
 ];
 
 type Props = BaseLayoutProps & {
@@ -63,6 +66,7 @@ export function DocsLayoutClient({ tree, children, ...props }: Props) {
         {...props}
         sidebar={{
           tabs: SIDEBAR_TABS,
+          banner: <VersionSwitcher />,
           defaultOpenLevel: Number.POSITIVE_INFINITY,
           components: {
             Folder: StaticFolder,

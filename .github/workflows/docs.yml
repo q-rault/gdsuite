@@ -1,13 +1,22 @@
 name: docs
-# The portal imports the gdtest and gdhealth docs from their repos, so those
-# are checked out next to gdsuite, the layout `npm run sync-content` expects.
-# PRs only build; main, the daily run and manual runs also publish to GitHub
-# Pages. The daily run picks up docs changes merged in gdtest or gdhealth.
+# The portal imports the gdtest, gdhealth, gdtidy and gdtypecheck docs from
+# their repos, so those are checked out next to gdsuite, the layout
+# `npm run sync-content` expects. A build from main imports each tool's main;
+# an older gdsuite version imports the tool versions it pins in
+# .gdsuite-release.toml.
+#
+# PRs build their own docs. main, release tags, the daily run (which picks up
+# docs merged in the tools' repos) and manual runs rebuild every published
+# version (stable at the root, /next, /v<major>, see
+# docs/scripts/docs-versions.mjs) and deploy them to GitHub Pages.
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths:
       - 'docs/**'
+      - Cargo.toml
+      - .gdsuite-release.toml
       - .github/workflows/docs.yml
   pull_request:
     paths:
@@ -22,33 +31,91 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.plan.outputs.builds }}
+      versions: ${{ steps.plan.outputs.versions }}
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          DOCS_MAIN_REF: ${{ github.event_name == 'pull_request' && github.sha || 'origin/main' }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          if [ "$IS_PR" = true ]; then
+            echo "builds=[{\"ref\":\"$DOCS_MAIN_REF\",\"path\":\"\",\"channel\":\"stable\",\"artifact\":\"docs-root\",\"main\":true}]" >> "$GITHUB_OUTPUT"
+            echo 'versions={"versions":[]}' >> "$GITHUB_OUTPUT"
+          else
+            node docs/scripts/docs-versions.mjs >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.builds != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ matrix.ref }}
           path: gdsuite
+      - name: Choose the tool versions to import
+        id: tools
+        working-directory: gdsuite
+        env:
+          FROM_MAIN: ${{ matrix.main }}
+        run: |
+          for tool in gdtest gdhealth gdtidy gdtypecheck; do
+            ref=main
+            if [ "$FROM_MAIN" != true ]; then
+              pinned=$(sed -n "/^\[tools\.$tool\]/,/^\[/{s/.*tag = \"\([^\"]*\)\".*/\1/p}" .gdsuite-release.toml | head -1)
+              ref=${pinned:-main}
+            fi
+            echo "$tool=$ref" >> "$GITHUB_OUTPUT"
+          done
       - uses: actions/checkout@v5
         with:
           repository: q-rault/gdtest
+          ref: ${{ steps.tools.outputs.gdtest }}
           path: gdtest
       - uses: actions/checkout@v5
         with:
           repository: q-rault/gdhealth
+          ref: ${{ steps.tools.outputs.gdhealth }}
           path: gdhealth
+      - uses: actions/checkout@v5
+        with:
+          repository: q-rault/gdtidy
+          ref: ${{ steps.tools.outputs.gdtidy }}
+          path: gdtidy
+      - uses: actions/checkout@v5
+        with:
+          repository: q-rault/gdtypecheck
+          ref: ${{ steps.tools.outputs.gdtypecheck }}
+          path: gdtypecheck
       - uses: actions/setup-node@v5
         with:
           node-version: 20
       - run: npm ci && npm run build
         working-directory: gdsuite/docs
+        env:
+          DOCS_VERSION_PATH: ${{ matrix.path }}
+          DOCS_CHANNEL: ${{ matrix.channel }}
       - if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: ${{ matrix.artifact }}
           path: gdsuite/docs/out
+          retention-days: 1
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    if: github.event_name != 'pull_request'
+    needs: [plan, build]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -57,5 +124,23 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docs-*
+          path: builds
+      - name: Assemble the versions into one site
+        env:
+          BUILDS: ${{ needs.plan.outputs.builds }}
+          VERSIONS: ${{ needs.plan.outputs.versions }}
+        run: |
+          mkdir site
+          echo "$BUILDS" | jq -r '.[] | "\(.artifact) \(.path)"' | while read -r artifact path; do
+            mkdir -p "site/$path"
+            cp -r "builds/$artifact/." "site/$path/"
+          done
+          echo "$VERSIONS" > site/versions.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v4

@@ -1,51 +1,64 @@
 ---
 title: CLI reference
-description: The documented gdsuite command surface and the intended stable meaning of the main commands.
+description: Every gdsuite command, its flags, and how arguments reach the tools.
 ---
 
-## Core commands
+## Commands
 
-- `gdsuite init [--output pretty|plain]`
-- `gdsuite migrate`
-- `gdsuite setup [--output pretty|plain]`
-- `gdsuite doctor [--output pretty|plain|json]`
-- `gdsuite fmt [--check]`
-- `gdsuite lint [--fix] [--unsafe-fixes] [--report text|json]`
-- `gdsuite typecheck`
-- `gdsuite test [--report text|json] -- ...`
-- `gdsuite health [--report text|json] -- ...`
-- `gdsuite check [--fix] [--no-fmt] [--no-lint] [--no-typecheck]`
-- `gdsuite report [latest|check|test|health|ci]`
+| Command | What it does |
+|---|---|
+| `gdsuite init` | Write `gdsuite.toml` and install the toolchain |
+| `gdsuite setup` | Install or repair the toolchain under `.gdsuite/` |
+| `gdsuite migrate` | Move old settings files (`gdlintrc`, `gdformatrc`, `gdtest.toml`, `gdhealth.toml`, gdsuite 0.1 sections) into `gdsuite.toml` |
+| `gdsuite doctor` | Print the resolved tool paths, versions and setup status |
+| `gdsuite fmt` | Format the project with [`gdtidy fmt`](/gdtidy/formatting) |
+| `gdsuite lint` | Lint the project with [`gdtidy lint`](/gdtidy/linting) |
+| `gdsuite typecheck` | Run [gdtypecheck](/gdtypecheck) |
+| `gdsuite test` | Run [gdtest](/gdtest) on `default_test_target` |
+| `gdsuite health` | Run [`gdhealth health`](/gdhealth) |
+| `gdsuite check` | Run the [check steps](/workflow-check) in order, stopping at the first failure |
+| `gdsuite report [NAME]` | Print a saved report: `latest` (default), `check`, `test`, `health`, or `ci` to combine them |
+
+## Flags
+
+Every command takes:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--project-root <DIR>` | `.` | The Godot project |
+| `--godot-exe <PATH>` | `godot_exe` in `gdsuite.toml`, then auto-discovery | Godot 4 binary |
+
+And some take:
+
+| Flag | Commands | Description |
+|---|---|---|
+| `--output pretty\|plain\|json` | `init`, `setup`, `doctor` | `pretty` (default) for people, `plain` for stable prefixed log lines, `json` for tools |
+| `--report text\|json` | `lint`, `test`, `health`, `check` | Print the suite report as text or JSON, and save it under `reports/gdsuite/` |
+
+## Passing arguments to a tool
+
+Everything after `--` goes to the tool unchanged:
+
+```bash
+gdsuite fmt -- --check                    # gdtidy fmt --check
+gdsuite lint -- --fix player/             # gdtidy lint --fix player/
+gdsuite typecheck -- --strict             # gdtypecheck --strict
+gdsuite test -- --filter combat           # gdtest --filter combat
+gdsuite health -- health --fail-on critical
+gdsuite health -- graph --format emerge-html --output graph.html
+```
+
+For `gdsuite health`, the arguments replace the default `health` subcommand, so
+name the gdhealth subcommand first.
 
 ## Common CI commands
 
 ```bash
+gdsuite setup --output plain
 gdsuite doctor --output json
-gdsuite check
+gdsuite check --report json
 gdsuite test --report json
-gdsuite health --report json
 gdsuite report ci
 ```
 
-## Check contract
-
-`gdsuite check` is the fast static gate. Its intended stable meaning is:
-
-- formatting
-- linting
-- GDScript type checking
-
-It is not the place where `test`, `health`, profiles, or CI composition are hidden.
-
-## Text output modes
-
-- `pretty` is the default for `init`, `setup`, and `doctor`
-- `plain` keeps stable prefixed text lines for logs and shell scripts
-- `json` is currently supported by `doctor`
-
-## Delegated command examples
-
-```bash
-gdsuite test -- --filter combat
-gdsuite health -- --format json
-```
+See [CI](/ci) for a full workflow.

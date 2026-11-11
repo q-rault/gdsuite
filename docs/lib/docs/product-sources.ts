@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export type ProductId = 'gdtest' | 'gdhealth';
+export type ProductId = 'gdtest' | 'gdhealth' | 'gdtidy' | 'gdtypecheck';
 
 export type ProductDocsSource = {
   id: ProductId;
@@ -8,7 +8,7 @@ export type ProductDocsSource = {
   contentDir: string;
   metaFile: string;
   publicDir: string;
-  routeBase: `/gdtest` | `/gdhealth`;
+  routeBase: `/${ProductId}`;
   title: string;
 };
 
@@ -41,5 +41,23 @@ export const productSources: Record<ProductId, ProductDocsSource> = {
     publicDir: path.join(workspaceRoot, 'gdhealth', 'docs', 'public'),
     routeBase: '/gdhealth',
     title: 'gdhealth',
+  },
+  gdtidy: {
+    id: 'gdtidy',
+    repoRoot: path.join(workspaceRoot, 'gdtidy'),
+    contentDir: path.join(workspaceRoot, 'gdtidy', 'docs', 'content', 'docs'),
+    metaFile: path.join(workspaceRoot, 'gdtidy', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdtidy', 'docs', 'public'),
+    routeBase: '/gdtidy',
+    title: 'gdtidy',
+  },
+  gdtypecheck: {
+    id: 'gdtypecheck',
+    repoRoot: path.join(workspaceRoot, 'gdtypecheck'),
+    contentDir: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'content', 'docs'),
+    metaFile: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'content', 'docs', 'meta.json'),
+    publicDir: path.join(workspaceRoot, 'gdtypecheck', 'docs', 'public'),
+    routeBase: '/gdtypecheck',
+    title: 'gdtypecheck',
   },
 };

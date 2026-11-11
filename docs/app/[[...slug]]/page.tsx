@@ -2,6 +2,7 @@ import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/page
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import { source } from '@/lib/source';
+import { VersionNotice } from '@/components/version-switcher';
 
 export default async function Page(props: {
   params: Promise<{ slug?: string[] }>;
@@ -14,6 +15,7 @@ export default async function Page(props: {
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <VersionNotice />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>

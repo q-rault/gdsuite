@@ -3,12 +3,26 @@ title: Config schema reference
 description: A concise map of the suite-owned config areas you are most likely to read or change.
 ---
 
-The current suite config surface centers on:
+`gdsuite.toml` has two kinds of sections.
 
-- tool paths and source locations
-- command defaults
-- report defaults and artifact directory
-- health enablement and fail threshold
-- named profiles and pipeline steps
+**Suite sections**, read by gdsuite:
 
-For behavior details, pair this page with [gdsuite.toml](/config/gdsuite-toml).
+| Section | Keys |
+|---|---|
+| `[project]` | `root`, `godot_exe` |
+| `[tools]` | `gdtest_source`, `gdhealth_source`, `gdtypecheck_source`, `gdtidy_source`: where `gdsuite setup` gets each tool |
+| `[commands]` | `default_test_target`, `default_health_subcommand` |
+| `[reports]` | `default` (`text` or `json`), `artifacts_dir` |
+| `[check]` | `steps`: any of `fmt`, `lint`, `typecheck`, `test`, `health` |
+
+**Tool sections**, each read by its tool with the keys of its own file:
+
+| Section | Tool | Keys from |
+|---|---|---|
+| `[test]` | gdtest | [`gdtest.toml`](/gdtest/configuration) |
+| `[health]` | gdhealth | [`gdhealth.toml`](/gdhealth/configuration) |
+| `[lint]`, `[fmt]` | gdtidy | [`gdtidy.toml`](/gdtidy/configuration) |
+
+gdtypecheck has no settings file.
+
+For defaults and examples, see [gdsuite.toml](/config/gdsuite-toml).
