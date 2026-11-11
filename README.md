@@ -4,7 +4,7 @@ Install with `cargo install gdsuite`.
 
 `gdsuite` is the workflow entrypoint for Godot projects. It installs local tooling, owns orchestration settings in `gdsuite.toml`, and delegates execution to [`gdtidy`](https://github.com/q-rault/gdtidy) (format and lint), `gdtest`, `gdhealth`, and `gdtypecheck`. Every tool is a single binary, so setup needs no Python.
 
-User documentation lives in the docs portal under [`docs/`](docs/), which covers `gdsuite`, [`gdtest`](https://github.com/q-rault/gdtest) and [`gdhealth`](https://github.com/q-rault/gdhealth).
+User documentation lives in the [docs portal](https://q-rault.github.io/gdsuite/) (source under [`docs/`](docs/)), which covers `gdsuite`, [`gdtest`](https://github.com/q-rault/gdtest) and [`gdhealth`](https://github.com/q-rault/gdhealth).
 
 Common commands:
 

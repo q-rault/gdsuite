@@ -1,0 +1,61 @@
+name: docs
+# The portal imports the gdtest and gdhealth docs from their repos, so those
+# are checked out next to gdsuite, the layout `npm run sync-content` expects.
+# PRs only build; main, the daily run and manual runs also publish to GitHub
+# Pages. The daily run picks up docs changes merged in gdtest or gdhealth.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - 'docs/**'
+      - .github/workflows/docs.yml
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: gdsuite
+      - uses: actions/checkout@v5
+        with:
+          repository: q-rault/gdtest
+          path: gdtest
+      - uses: actions/checkout@v5
+        with:
+          repository: q-rault/gdhealth
+          path: gdhealth
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - run: npm ci && npm run build
+        working-directory: gdsuite/docs
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gdsuite/docs/out
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

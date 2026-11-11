@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   AUTHORED_CONTENT_DIR,
   GENERATED_CONTENT_DIR,
+  IMPORTED_PUBLIC_DIR,
 } from './imported-docs';
 import {
   productSources,
@@ -20,6 +21,7 @@ const CODE_FENCE_WITH_FILE_RE =
   /```(\w+)([^\n`]*?)\sfile="([^"]+)"(?:\sregion="([^"]+)")?([^\n`]*)\n([\s\S]*?)```/g;
 const ABSOLUTE_DOC_LINK_RE = /\]\(\/docs\/([^)#]+)(#[^)]+)?\)/g;
 const RELATIVE_DOC_LINK_RE = /\]\(((?:\.\.\/|\.\/)?[^)#]+?)(#[^)]+)?\)/g;
+const ABSOLUTE_IMAGE_RE = /(!\[[^\]]*\]\()(\/[^)\s]+)\)/g;
 const RELATIVE_IMPORT_RE =
   /^\s*import\s.+?from\s+['"](\.\/|\.\.\/)/m;
 
@@ -36,6 +38,7 @@ function main() {
 
 function prepareGeneratedTree() {
   fs.rmSync(GENERATED_CONTENT_DIR, { recursive: true, force: true });
+  fs.rmSync(IMPORTED_PUBLIC_DIR, { recursive: true, force: true });
   copyDir(AUTHORED_CONTENT_DIR, GENERATED_CONTENT_DIR);
 }
 
@@ -48,6 +51,9 @@ function importProductDocs(source: ProductDocsSource): ImportedDocPage[] {
   assertPathExists(source.metaFile, `missing meta.json for ${source.id} at ${source.metaFile}`);
 
   const meta = JSON.parse(fs.readFileSync(source.metaFile, 'utf8')) as MetaFile;
+  if (fs.existsSync(source.publicDir)) {
+    copyDir(source.publicDir, path.join(IMPORTED_PUBLIC_DIR, source.id));
+  }
   const outputDir = path.join(GENERATED_CONTENT_DIR, source.id);
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -135,7 +141,16 @@ function rewriteImportedPage(
     },
   );
 
-  return rewrittenAbsolute.replace(RELATIVE_DOC_LINK_RE, (match, target, hash = '') => {
+  // An image at /x.png in the product's site lives at /products/<id>/x.png here.
+  const rewrittenImages = rewrittenAbsolute.replace(
+    ABSOLUTE_IMAGE_RE,
+    (match, prefix, target) => {
+      if (!fs.existsSync(path.join(source.publicDir, target))) return match;
+      return `${prefix}/products/${source.id}${target})`;
+    },
+  );
+
+  return rewrittenImages.replace(RELATIVE_DOC_LINK_RE, (match, target, hash = '') => {
     if (
       target.startsWith('http://') ||
       target.startsWith('https://') ||

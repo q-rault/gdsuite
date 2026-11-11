@@ -4,6 +4,8 @@ docs/.generated/
 docs/.next/
 docs/node_modules/
 docs/.source/
+docs/public/products/
+docs/out/
 
 # Local agent notes
 /.ai/
