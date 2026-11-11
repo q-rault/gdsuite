@@ -114,6 +114,13 @@ pub struct ReleaseTool {
     pub sha256: BTreeMap<String, String>,
 }
 
+impl ReleaseTool {
+    /// The version this gdsuite was tested with, such as `0.2.6`.
+    pub fn version(&self) -> &str {
+        self.tested.trim_start_matches("==")
+    }
+}
+
 impl ReleaseManifest {
     /// The tool entry for `name`, or `None` for a tool the suite does not pin.
     pub fn tool(&self, name: &str) -> Option<&ReleaseTool> {
@@ -167,6 +174,8 @@ pub enum ToolAcquireSpec {
         repo: String,
         tag: String,
     },
+    /// Built into gdsuite: nothing to download or build.
+    Bundled,
 }
 
 #[allow(dead_code)]
@@ -375,6 +384,7 @@ impl ToolAcquireSpec {
             Self::GithubReleaseRepo { owner, repo, tag } => {
                 format!("github:{owner}/{repo}@{tag}")
             }
+            Self::Bundled => "bundled".to_string(),
         }
     }
 }

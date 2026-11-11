@@ -1,4 +1,5 @@
 mod app;
+mod bundled;
 mod cli;
 mod config;
 mod migrate;
@@ -10,6 +11,11 @@ mod update;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    let args: Vec<_> = std::env::args_os().collect();
+    if let Some(code) = bundled::dispatch(&args) {
+        return code;
+    }
+
     match app::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

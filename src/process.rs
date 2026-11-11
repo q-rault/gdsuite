@@ -89,7 +89,27 @@ fn build_command(command_path: &Path) -> Command {
     command
 }
 
+/// Where a tool built into gdsuite "is": not a file, a name that
+/// `build_command` runs as `gdsuite tool <name>`.
+const BUNDLED_PREFIX: &str = "gdsuite tool ";
+
+/// The path standing for the built-in tool `name`.
+pub fn bundled_tool_path(name: &str) -> PathBuf {
+    PathBuf::from(format!("{BUNDLED_PREFIX}{name}"))
+}
+
+/// The tool name when `path` stands for a built-in tool.
+pub fn bundled_tool_name(path: &Path) -> Option<&str> {
+    path.to_str()?.strip_prefix(BUNDLED_PREFIX)
+}
+
 fn build_bare_command(command_path: &Path) -> Command {
+    if let Some(name) = bundled_tool_name(command_path) {
+        let gdsuite = env::current_exe().unwrap_or_else(|_| PathBuf::from("gdsuite"));
+        let mut command = Command::new(gdsuite);
+        command.arg(crate::bundled::TOOL_SUBCOMMAND).arg(name);
+        return command;
+    }
     if is_script(command_path) {
         let mut command = Command::new("cmd");
         command.arg("/C").arg(command_path);

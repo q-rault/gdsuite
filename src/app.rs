@@ -14,7 +14,7 @@ use crate::{
         Cli, Commands, DoctorArgs, ForwardArgs, ForwardReportArgs, LintArgs, OutputArgs,
         OutputModeArg, ReportArgs, RunArgs, SetupArgs,
     },
-    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest, ToolAcquireSpec},
+    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
     migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
@@ -98,10 +98,10 @@ fn update_tools(
     for change in &changes {
         match change {
             PinChange::Unpinned { tool, from } => {
-                let tested = match release.tool(tool).map(|entry| &entry.acquire) {
-                    Some(ToolAcquireSpec::GithubReleaseRepo { tag, .. }) => tag.clone(),
-                    _ => String::new(),
-                };
+                let tested = release
+                    .tool(tool)
+                    .map(|entry| format!("v{}", entry.version()))
+                    .unwrap_or_default();
                 if *from == tested {
                     output.step(format!(
                         "{tool}: removed the pin to {from}, the version gdsuite installs; it now follows gdsuite"
