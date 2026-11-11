@@ -5,7 +5,7 @@ name: docs
 # version pins in .gdsuite-release.toml (each tool's main for a build of main).
 #
 # PRs build their own docs. Release and prerelease tags, and changes on main
-# to the docs, docs/versions.config.json or the pinned tool versions, rebuild
+# to the docs or docs/versions.config.json, rebuild
 # every published version and deploy them to GitHub Pages: the latest release
 # at the root, the latest prerelease at /next while it is newer, and the
 # majors listed in docs/versions.config.json at /v<major> (see
@@ -15,9 +15,11 @@ on:
     branches: [main]
     tags: ['v*']
     paths:
+      # Until a release ships the static docs, the stable docs are built from
+      # main, so docs changes on main redeploy. After that, only
+      # docs/versions.config.json, docs/scripts/** and this file need to. A
+      # new version (Cargo.toml, .gdsuite-release.toml) redeploys from its tag.
       - 'docs/**'
-      - Cargo.toml
-      - .gdsuite-release.toml
       - .github/workflows/docs.yml
   pull_request:
     paths:

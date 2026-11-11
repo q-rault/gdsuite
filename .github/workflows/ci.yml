@@ -46,8 +46,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Caches the build too, not only the registry.
+      # Saves from main only: PR caches are not visible to other PRs.
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo fmt --check
