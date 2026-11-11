@@ -1,14 +1,15 @@
 name: docs
 # The portal imports the gdtest, gdhealth, gdtidy and gdtypecheck docs from
 # their repos, so those are checked out next to gdsuite, the layout
-# `npm run sync-content` expects. A build from main imports each tool's main;
-# an older gdsuite version imports the tool versions it pins in
-# .gdsuite-release.toml.
+# `npm run sync-content` expects, at the tool versions the built gdsuite
+# version pins in .gdsuite-release.toml (each tool's main for a build of main).
 #
-# PRs build their own docs. main, release tags, the daily run (which picks up
-# docs merged in the tools' repos) and manual runs rebuild every published
-# version (stable at the root, /next, /v<major>, see
-# docs/scripts/docs-versions.mjs) and deploy them to GitHub Pages.
+# PRs build their own docs. Release and prerelease tags, and changes on main
+# to the docs, docs/versions.config.json or the pinned tool versions, rebuild
+# every published version and deploy them to GitHub Pages: the latest release
+# at the root, the latest prerelease at /next while it is newer, and the
+# majors listed in docs/versions.config.json at /v<major> (see
+# docs/scripts/docs-versions.mjs).
 on:
   push:
     branches: [main]
@@ -22,8 +23,6 @@ on:
     paths:
       - 'docs/**'
       - .github/workflows/docs.yml
-  schedule:
-    - cron: '17 4 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -117,6 +116,11 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: [plan, build]
     runs-on: ubuntu-latest
+    # One deploy at a time: a release pushes main and a tag together, and the
+    # run for the tag, which sees the new release, must not be cancelled.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
