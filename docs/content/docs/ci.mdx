@@ -1,65 +1,100 @@
 ---
-title: CI
-description: Compose the suite's real CI flow using explicit check, test, health, and report aggregation steps.
+title: Run it in CI
+description: Check every change automatically on GitHub, before it is merged.
 ---
 
-## What this page is for
+**CI (continuous integration) is a server that runs your checks on every
+change you push.** When several people work on a game, or when you work from
+several computers, it makes sure nothing broken reaches the main branch: a
+pull request shows a red cross until the check and the tests pass.
 
-This page documents the current CI workflow that actually exists in this repo.
+GDSuite runs the same way in CI as on your computer. If `gdsuite check` and
+`gdsuite test` pass for you, they pass there.
 
-## When you should use this
+## GitHub Actions
 
-Use this page when creating or fixing CI, when you need machine-readable artifacts, or when old docs still imply a standalone `gdsuite ci` command.
+Save this as `.github/workflows/gdsuite.yml` in your project and push it:
 
-## What you need before starting
+```yaml
+name: GDSuite
 
-- A project already bootstrapped with `gdsuite`
-- CI runners that can build Rust tooling
-- A resolvable Godot executable on the runner
+on:
+  push:
+    branches: [main]
+  pull_request:
 
-## Step-by-step instructions
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
 
-1. Run the suite gate with JSON output.
+      - name: Install Godot
+        run: |
+          curl -fsSL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q godot.zip -d "$RUNNER_TEMP/godot"
+          echo "GODOT_EXE=$RUNNER_TEMP/godot/Godot_v4.7-stable_linux.x86_64" >> "$GITHUB_ENV"
 
-```bash
-gdsuite check --report json
+      - name: Install GDSuite
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Add a version after `download`, such as v0.4.1, to stay on it.
+        run: |
+          gh release download --repo q-rault/gdsuite --pattern '*-x86_64-unknown-linux-musl.tar.gz' --output gdsuite.tar.gz
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf gdsuite.tar.gz -C "$RUNNER_TEMP/bin" gdsuite
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - run: gdsuite setup --output plain
+      - run: gdsuite check
+      - run: gdsuite test
 ```
 
-2. Run delegated tests with JSON output.
+Use the same Godot version as your project: change both `4.7-stable` and the
+file name.
 
-```bash
-gdsuite test --report json
+## Make code health a gate
+
+In `gdsuite check`, [code health](/code-health) reports but never fails. To
+fail the build when a critical finding appears, add a step:
+
+```yaml
+      - run: gdsuite health -- health --fail-on critical
 ```
 
-3. Run delegated health with JSON output.
+On an existing project, fix or accept the current critical findings first
+(raise the limits in `[health.thresholds]`), so the build starts green and
+only new problems turn it red.
 
-```bash
-gdsuite health --report json
+## Keep the reports
+
+Every command accepts `--report json`, which saves its result in
+`reports/gdsuite/`. `gdsuite report ci` then combines them into one
+`ci.json`:
+
+```yaml
+      - run: gdsuite check --report json
+      - run: gdsuite test --report json
+      - run: gdsuite health --report json
+      - run: gdsuite report ci
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdsuite-reports
+          path: reports/
 ```
 
-4. Aggregate the final CI report.
+`reports/code-health/` holds code health's own report, with the interactive
+map. The JSON fields are in [Reports](/reference/reports).
 
-```bash
-gdsuite report ci
-```
+## Other CI services
 
-## What success looks like
+Any Linux, Windows or macOS machine works. The steps are always the same:
 
-Success means CI produced:
-
-- `reports/gdsuite/check.json`
-- `reports/gdsuite/test.json`
-- `reports/gdsuite/health.json`
-- `reports/gdsuite/ci.json`
-
-The final aggregated report also refreshes `latest.json`.
-
-## Common mistakes
-
-- Documenting or calling a nonexistent `gdsuite ci` command
-- Running only `check --profile ci` when the pipeline still expects separate `test.json` and `health.json`
-- Forgetting to persist `reports/code-health/` when raw `gdhealth` artifacts matter
-
-## Where to go next
-
-Next step: use [CI Workflow](/recipes/ci-workflow) for a recipe view, or [Report JSON Format](/reference/report-json-format) if you need to consume the artifacts programmatically.
+1. install Godot and set `GODOT_EXE` to its path,
+2. put the `gdsuite` program on the `PATH` (a [release
+   archive](https://github.com/q-rault/gdsuite/releases), or
+   `cargo install gdsuite`),
+3. run `gdsuite setup --output plain`, then `gdsuite check` and
+   `gdsuite test`.

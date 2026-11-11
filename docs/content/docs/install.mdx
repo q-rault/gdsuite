@@ -1,73 +1,140 @@
 ---
 title: Install
-description: Install the suite prerequisites, bootstrap a project, and confirm that gdsuite can see its delegated tools.
+description: Get GDSuite on your computer, then add it to a Godot project.
 ---
 
-## What this page is for
+Installing GDSuite takes two steps: put the `gdsuite` program on your
+computer once, then add GDSuite to each Godot project you want it to watch.
 
-This page gets a machine from zero to a working `gdsuite` project setup.
+You only install GDSuite. It downloads everything else it needs by itself
+(see [Under the hood](/under-the-hood) if you are curious).
 
-## When you should use this
+<Callout title="Coming soon: the Godot Asset Store">
 
-Use this page when you are setting up a new development machine or when a project has not been bootstrapped with `gdsuite` yet.
+GDSuite will be installable from the Godot Asset Store, inside the editor,
+with no terminal needed. Until then, use one of the two ways below.
 
-## What you need before starting
+</Callout>
 
-- Rust installed so `cargo` is available
-- Git installed when a tool source uses `git:...`
-- A Godot 4 executable installed locally
-- A Godot project directory you can work in
+## 1. Get the `gdsuite` program
 
-## Step-by-step instructions
+You need [Godot](https://godotengine.org/download) 4.5 or newer.
 
-1. Install the `gdsuite` CLI.
+<Tabs items={['Download (no Rust needed)', 'cargo (for Rust users)']}>
+
+<Tab value="Download (no Rust needed)">
+
+Download the archive for your computer from the
+[latest GitHub release](https://github.com/q-rault/gdsuite/releases/latest):
+
+| Your computer | File to download |
+| --- | --- |
+| Windows | `gdsuite-v<version>-x86_64-pc-windows-msvc.zip` |
+| macOS, Apple Silicon (M1 and later) | `gdsuite-v<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `gdsuite-v<version>-x86_64-apple-darwin.tar.gz` |
+| Linux | `gdsuite-v<version>-x86_64-unknown-linux-musl.tar.gz` |
+
+Unpack it and put the `gdsuite` program (`gdsuite.exe` on Windows) in a folder
+on your `PATH`, so a terminal finds it from anywhere:
+
+- **Windows**: create a folder such as `C:\Tools`, put `gdsuite.exe` in it,
+  then search the Start menu for "Edit environment variables for your
+  account", select `Path`, click Edit, then New, and add `C:\Tools`.
+- **macOS and Linux**: move it to `~/.local/bin` (create the folder if needed)
+  and make sure that folder is on your `PATH`.
+
+</Tab>
+
+<Tab value="cargo (for Rust users)">
+
+With [Rust](https://rustup.rs) 1.96 or newer:
 
 ```bash
 cargo install gdsuite
 ```
 
-2. Move to your Godot project root.
+</Tab>
+
+</Tabs>
+
+Open a **new** terminal and check it works:
 
 ```bash
-cd path/to/your-project
+gdsuite --version
 ```
 
-3. Bootstrap the project-owned suite state.
+## 2. Add GDSuite to your project
+
+In a terminal, go to your project's folder (the one with `project.godot`) and
+run `gdsuite init`:
 
 ```bash
+cd path/to/my-game
 gdsuite init
 ```
 
-That now defaults to readable scoped logs such as:
+It takes a minute the first time, and prints what it does:
 
 ```text
+[gdsuite:init] step  resolving project setup
+[gdsuite:init] step  resolving Godot executable
+[gdsuite:init] step  writing gdsuite config
 [gdsuite:init] step  installing local toolchain
+[gdsuite:init] step  saving tool manifest
+[gdsuite:init] step  installing gdtest addons
+[gdsuite:init] step  refreshing Godot class cache
+[gdsuite:init] step  verifying installed tools
+[gdsuite:init] step  recording installation state
 [gdsuite:init] ok    initialization complete
 ```
 
-4. Verify what the suite resolved.
+Your project now has:
+
+| What | Why | Commit it? |
+| --- | --- | --- |
+| `gdsuite.toml` | GDSuite's settings | Yes |
+| `addons/gdtest/` | Lets your tests run inside Godot | Yes |
+| `addons/gdtest_editor/` | The test panel for the Godot editor | Yes |
+| `.gdsuite/` | The programs GDSuite downloaded | No (added to `.gitignore`) |
+
+### If Godot isn't found
+
+GDSuite looks for Godot in the usual places. If yours has another name or
+lives somewhere else, tell `init` where it is:
+
+```bash
+gdsuite init --godot-exe "C:/Tools/Godot_v4.7-stable_win64.exe"
+```
+
+GDSuite remembers it for this project, on this computer (the path is not
+written in `gdsuite.toml`, so teammates keep their own). You can also set the
+`GODOT_EXE` environment variable once for all your projects.
+
+## 3. Check everything is ready
 
 ```bash
 gdsuite doctor
 ```
 
-If Godot is in a non-standard location, pass `--godot-exe`, set `GODOT_EXE`, or configure it in `gdsuite.toml` before rerunning `doctor`.
-Use `gdsuite doctor --output plain` for stable shell parsing or `gdsuite doctor --output json` for structured integrations.
+It lists Godot and each tool GDSuite installed, with its version, and ends
+with:
 
-## What success looks like
+```text
+[gdsuite:doctor] status ok
+```
 
-Success means:
+If it ends with `status error`, each line above says what is missing and how
+to fix it. See [Troubleshooting](/troubleshooting).
 
-- `.gdsuite/` exists in the project and is listed in `.gitignore`, along with other generated folders
-- `gdsuite.toml` exists
-- `gdsuite doctor` prints resolved paths and ends with `[gdsuite:doctor] status ok`
+## Updating GDSuite
 
-## Common mistakes
+1. Get the new `gdsuite` the way you got the first one (download it again, or
+   `cargo install gdsuite` again).
+2. In `gdsuite.toml`, delete the `[tools]` section, so the project uses the
+   tool versions the new GDSuite was tested with.
+3. Run `gdsuite setup` in the project.
 
-- Installing `gdsuite` globally but never running `gdsuite init` inside the project
-- Assuming Godot discovery will work if the executable has a custom name or location
-- Keeping a tool's settings both in its own file (`gdtest.toml`, `gdhealth.toml`, `gdtidy.toml`) and in its `gdsuite.toml` section: the section wins and the file is ignored
+## Next
 
-## Where to go next
-
-Next step: continue with [Quickstart](/quickstart) for the first successful run.
+[Your first 10 minutes](/first-steps) walks you through a first check, a fix
+and a test.

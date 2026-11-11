@@ -6,20 +6,20 @@ import {
   IMPORTED_PUBLIC_DIR,
 } from './imported-docs';
 import {
+  importSpecs,
   productSources,
+  type ImportSpec,
   type ImportedDocPage,
   type ProductDocsSource,
+  type ProductId,
 } from './product-sources';
-
-type MetaFile = {
-  title: string;
-  pages: string[];
-};
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const CODE_FENCE_WITH_FILE_RE =
   /```(\w+)([^\n`]*?)\sfile="([^"]+)"(?:\sregion="([^"]+)")?([^\n`]*)\n([\s\S]*?)```/g;
-const ABSOLUTE_DOC_LINK_RE = /\]\(\/docs\/([^)#]+)(#[^)]+)?\)/g;
+const SHELL_FENCE_RE = /```(?:sh|bash|shell|console)[^\n]*\n([\s\S]*?)```/g;
+// `/docs/page`, `/docs/page#a`, and the tool's home: `/docs`, `/docs#a`.
+const ABSOLUTE_DOC_LINK_RE = /\]\(\/docs(?:\/([^)#]*))?(#[^)]+)?\)/g;
 const RELATIVE_DOC_LINK_RE = /\]\(((?:\.\.\/|\.\/)?[^)#]+?)(#[^)]+)?\)/g;
 const ABSOLUTE_IMAGE_RE = /(!\[[^\]]*\]\()(\/[^)\s]+)\)/g;
 const RELATIVE_IMPORT_RE =
@@ -28,12 +28,26 @@ const RELATIVE_IMPORT_RE =
 function main() {
   prepareGeneratedTree();
 
-  const importedPages: ImportedDocPage[] = [];
+  const available = new Set<ProductId>();
   for (const source of Object.values(productSources)) {
-    importedPages.push(...importProductDocs(source));
+    // A tool release from before its docs site has no pages to import.
+    if (!fs.existsSync(source.contentDir)) {
+      console.warn(`${source.id} has no docs at ${source.contentDir}; its pages are left out`);
+      continue;
+    }
+    available.add(source.id);
+    if (fs.existsSync(source.publicDir)) {
+      copyDir(source.publicDir, path.join(IMPORTED_PUBLIC_DIR, source.id));
+    }
   }
 
-  console.log(`synced docs content: ${importedPages.length} imported product pages`);
+  const imported: ImportedDocPage[] = [];
+  for (const spec of importSpecs) {
+    if (!available.has(spec.product)) continue;
+    imported.push(importPage(spec));
+  }
+
+  console.log(`synced docs content: ${imported.length} imported tool pages`);
 }
 
 function prepareGeneratedTree() {
@@ -42,84 +56,85 @@ function prepareGeneratedTree() {
   copyDir(AUTHORED_CONTENT_DIR, GENERATED_CONTENT_DIR);
 }
 
-function importProductDocs(source: ProductDocsSource): ImportedDocPage[] {
-  assertPathExists(source.repoRoot, `missing sibling repo for ${source.id} at ${source.repoRoot}`);
-  // A tool release from before its docs site has no pages to import; its
-  // section then shows only the overview written here.
-  if (!fs.existsSync(source.contentDir)) {
-    console.warn(`${source.id} has no docs at ${source.contentDir}; only its overview is shown`);
-    return [];
-  }
-  assertPathExists(source.metaFile, `missing meta.json for ${source.id} at ${source.metaFile}`);
+function importPage(spec: ImportSpec): ImportedDocPage {
+  const source = productSources[spec.product];
+  const sourcePath = path.join(source.contentDir, `${spec.page}.mdx`);
+  assertPathExists(sourcePath, `${source.id} has no page ${spec.page}.mdx at ${sourcePath}`);
 
-  const meta = JSON.parse(fs.readFileSync(source.metaFile, 'utf8')) as MetaFile;
-  if (fs.existsSync(source.publicDir)) {
-    copyDir(source.publicDir, path.join(IMPORTED_PUBLIC_DIR, source.id));
-  }
-  const outputDir = path.join(GENERATED_CONTENT_DIR, source.id);
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const routeMap = buildRouteMap(source, meta);
-  const imported: ImportedDocPage[] = [];
-
-  for (const pageId of meta.pages) {
-    if (pageId.startsWith('---') || pageId === 'index') continue;
-    const sourcePath = path.join(source.contentDir, `${pageId}.mdx`);
-    assertPathExists(
-      sourcePath,
-      `${source.id} meta.json references missing page ${pageId}.mdx at ${sourcePath}`,
+  const original = fs.readFileSync(sourcePath, 'utf8');
+  if (RELATIVE_IMPORT_RE.test(original)) {
+    throw new Error(
+      `${source.id} page ${sourcePath} uses a relative import; imported pages must be self-contained MDX.`,
     );
-
-    const original = fs.readFileSync(sourcePath, 'utf8');
-    if (RELATIVE_IMPORT_RE.test(original)) {
-      throw new Error(
-        `${source.id} page ${sourcePath} uses a relative import. Imported docs only support self-contained MDX pages in phase 1.`,
-      );
-    }
-
-    const rewritten = rewriteImportedPage(source, original, routeMap);
-    const { title, description } = parseFrontmatter(rewritten);
-    const outputPath = path.join(outputDir, `${pageId}.mdx`);
-    fs.writeFileSync(outputPath, rewritten);
-
-    imported.push({
-      product: source.id,
-      sourcePath,
-      outputPath,
-      slug: [source.id, pageId],
-      title,
-      description,
-    });
   }
 
-  const productMetaPath = path.join(outputDir, 'meta.json');
-  const generatedMeta = {
-    title: source.title,
-    root: true,
-    pages: ['index', ...meta.pages.filter((entry) => entry !== 'index')],
-  };
-  fs.writeFileSync(productMetaPath, `${JSON.stringify(generatedMeta, null, 2)}\n`);
+  let rewritten = rewriteImportedPage(source, original, routeFor(source));
+  if (spec.title) rewritten = replaceTitle(rewritten, spec.title);
+  rewritten = addSuiteNote(source, rewritten);
 
-  return imported;
+  const outputPath = path.join(GENERATED_CONTENT_DIR, `${spec.to}.mdx`);
+  if (fs.existsSync(outputPath)) {
+    throw new Error(`${spec.to} is both an authored page and imported from ${source.id}`);
+  }
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, rewritten);
+
+  const { title, description } = parseFrontmatter(rewritten);
+  return { product: source.id, sourcePath, outputPath, route: `/${spec.to}`, title, description };
 }
 
-function buildRouteMap(source: ProductDocsSource, meta: MetaFile): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const pageId of meta.pages) {
-    if (pageId.startsWith('---')) continue;
-    if (pageId === 'index') {
-      map.set(pageId, source.routeBase);
-      continue;
-    }
-    map.set(pageId, `${source.routeBase}/${pageId}`);
-  }
-  return map;
+/** Where a page of a tool lives: in the portal when imported, else on the tool's site. */
+function routeFor(source: ProductDocsSource): (pageId: string) => string {
+  const imported = new Map(
+    importSpecs
+      .filter((spec) => spec.product === source.id)
+      .map((spec) => [spec.page, `/${spec.to}`] as const),
+  );
+  return (pageId) => {
+    if (pageId === '' || pageId === 'index') return source.siteUrl;
+    return imported.get(pageId) ?? `${source.siteUrl}/${pageId}`;
+  };
+}
+
+function replaceTitle(contents: string, title: string): string {
+  return contents.replace(FRONTMATTER_RE, (block) =>
+    block.replace(/^title:.*$/m, `title: ${JSON.stringify(title)}`),
+  );
+}
+
+/**
+ * A page that shows the tool's own commands says how to run them through
+ * gdsuite, so a GDSuite user never thinks they have to install the tool.
+ */
+function addSuiteNote(source: ProductDocsSource, contents: string): string {
+  const shell = [...contents.matchAll(SHELL_FENCE_RE)].map((match) => match[1]).join('\n');
+  const used = source.suiteCommand.filter(({ tool }) =>
+    new RegExp(`^\\s*${tool.replace(/ /g, '\\s+')}\\b`, 'm').test(shell),
+  );
+  if (used.length === 0) return contents;
+
+  const examples = used
+    .map(({ tool, suite }) => `\`${tool} <arguments>\` becomes \`${suite} <arguments>\``)
+    .join(', and ');
+  const note = [
+    '<Callout title="In a GDSuite project">',
+    '',
+    `The commands on this page call ${source.id} directly. GDSuite installs ${source.id} for you and passes it the same arguments: ${examples}.`,
+    '',
+    '</Callout>',
+    '',
+  ].join('\n');
+
+  const frontmatter = contents.match(FRONTMATTER_RE);
+  if (!frontmatter) return `${note}\n${contents}`;
+  const end = frontmatter[0].length;
+  return `${contents.slice(0, end)}\n${note}\n${contents.slice(end).replace(/^\n+/, '')}`;
 }
 
 function rewriteImportedPage(
   source: ProductDocsSource,
   contents: string,
-  routeMap: Map<string, string>,
+  route: (pageId: string) => string,
 ): string {
   const withInlineSnippets = contents.replace(
     CODE_FENCE_WITH_FILE_RE,
@@ -135,15 +150,13 @@ function rewriteImportedPage(
 
   const rewrittenAbsolute = withInlineSnippets.replace(
     ABSOLUTE_DOC_LINK_RE,
-    (_match, target, hash = '') => {
-      const normalized = target.replace(/\/+$/, '');
-      const slug = normalized.split('/').pop();
-      const mapped = routeMap.get(slug ?? '');
-      return `](${mapped ?? `${source.routeBase}/${normalized}`}${hash})`;
+    (_match, target = '', hash = '') => {
+      const pageId = target.replace(/\/+$/, '').split('/').pop() ?? '';
+      return `](${route(pageId)}${hash})`;
     },
   );
 
-  // An image at /x.png in the product's site lives at /products/<id>/x.png here.
+  // An image at /x.png in the tool's site lives at /products/<id>/x.png here.
   const rewrittenImages = rewrittenAbsolute.replace(
     ABSOLUTE_IMAGE_RE,
     (match, prefix, target) => {
@@ -165,15 +178,15 @@ function rewriteImportedPage(
 
     const normalized = target.replace(/^\.\//, '').replace(/\/index$/, '').replace(/\.mdx?$/, '');
     const pageId = path.basename(normalized);
-    const mapped = routeMap.get(pageId);
-    return mapped ? `](${mapped}${hash})` : match;
+    if (!fs.existsSync(path.join(source.contentDir, `${pageId}.mdx`))) return match;
+    return `](${route(pageId)}${hash})`;
   });
 }
 
 function resolveSnippetPath(source: ProductDocsSource, rawPath: string): string {
   const candidates = [
     path.resolve(source.repoRoot, rawPath),
-    path.resolve(path.dirname(source.metaFile), '..', '..', rawPath),
+    path.resolve(source.contentDir, '..', '..', rawPath),
   ];
 
   for (const candidate of candidates) {

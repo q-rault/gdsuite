@@ -1,0 +1,182 @@
+---
+title: Your first 10 minutes
+description: Run a first check, fix what it finds, and write your first test.
+---
+
+This page follows a tiny game, with a `player.gd` and a `hud.gd`, through its
+first check. Do the same on your own project: the problems will differ, the
+steps are the same.
+
+You need GDSuite [installed](/install), and `gdsuite init` run in the project.
+
+<Steps>
+<Step>
+
+### Run a check
+
+In a terminal, in your project's folder:
+
+```bash
+gdsuite check
+```
+
+The check runs four steps in order (formatting, lint, type check, code
+health) and stops at the first one that finds something:
+
+```text
+error: Formatting issues found (fmt, 10ms)
+hud.gd: would be reformatted
+player/player.gd: would be reformatted
+
+Found formatting issues in 2 files. Run `gdsuite fmt` to format the target.
+error: check failed
+```
+
+Don't worry about a long list on an existing project: most of it fixes itself
+in the next step.
+
+</Step>
+<Step>
+
+### Let GDSuite format your scripts
+
+```bash
+gdsuite fmt
+```
+
+This rewrites the layout of your scripts (spaces, indentation, blank lines)
+to follow Godot's style guide. It never changes what the code does: GDSuite
+checks every file it rewrites and leaves it alone if anything else would
+change. If your project uses Git, commit before, so you can review the
+change.
+
+[What formatting changes →](/formatting)
+
+</Step>
+<Step>
+
+### Fix what the linter finds
+
+Run the check again. Formatting passes; now the linter speaks:
+
+```text
+pass: Formatting check passed (fmt, 10ms)
+error: Lint check failed (lint, 9ms)
+player/player.gd:2:1 [class-definitions-order] Definition out of order in global scope: `classnames` must come before `extends`
+player/player.gd:15:1 [class-definitions-order] Definition out of order in global scope: `signals` must come before `others`
+
+Found 2 lint problems. Fix them and rerun `gdsuite check`.
+error: check failed
+```
+
+Each line gives the file, the line and column, the rule in brackets, and what
+is wrong. Here, the style guide wants `class_name` before `extends`, and
+signals at the top of the script. Move them, and run the check again.
+
+A rule you disagree with can be turned off for the whole project.
+[Linting explains how →](/linting)
+
+</Step>
+<Step>
+
+### Fix the errors Godot would have shown
+
+```text
+pass: Formatting check passed (fmt, 10ms)
+pass: Lint check passed (lint, 9ms)
+error: GDScript type check failed (typecheck, 290ms)
+hud.gd:10: error[missing-resource]: "res://levels/level_2.tscn" does not exist
+gdtypecheck: 1 error(s), 0 warning(s) (3 scripts)
+
+Found 1 error. Fix it and rerun `gdsuite check`.
+error: check failed
+```
+
+`hud.gd` loads a level that was renamed. The game would only have crashed
+when a player reached the exit. Fix the path, and check again:
+
+```text
+pass: Formatting check passed (fmt, 10ms)
+pass: Lint check passed (lint, 9ms)
+pass: GDScript type check passed (typecheck, 289ms)
+pass: Health checks passed (health, 78ms)
+```
+
+Everything passes. Run `gdsuite check` whenever you finish a change, before
+you commit.
+
+</Step>
+<Step>
+
+### Write your first test
+
+A test is a small script that uses a piece of your game and checks the
+result. Create `test/test_player.gd`:
+
+```gdscript
+extends GdTest
+
+
+func test_damage_lowers_health() -> void:
+	var player := Player.new()
+	player.take_damage(30)
+	assert_eq(player.health, 70)
+	player.free()
+
+
+func test_health_never_goes_below_zero() -> void:
+	var player := Player.new()
+	player.take_damage(500)
+	assert_eq(player.health, 0)
+	player.free()
+```
+
+Each function whose name starts with `test_` is one test. `assert_eq` checks
+that the first value equals the second. Run the tests:
+
+```bash
+gdsuite test
+```
+
+```text
+✓ res://test/test_player.gd :: test_health_never_goes_below_zero (16 µs)
+✓ res://test/test_player.gd :: test_damage_lowers_health (11 µs)
+
+2 tests  2 passed
+```
+
+Now if someone changes `take_damage` and health can go negative, the second
+test turns red and tells you, long before a player finds it.
+
+[More about testing →](/testing)
+
+</Step>
+<Step>
+
+### Run your tests from the Godot editor
+
+`gdsuite init` installed a test panel for the editor:
+
+1. Open your project in Godot.
+2. Go to **Project → Project Settings → Plugins** and enable **gdtest
+   Editor**.
+3. A **gdtest** tab appears in the bottom panel. It lists your tests; run all
+   of them, one file, or one test, and double-click a failure to open the
+   script at the right line.
+
+<Callout type="warn" title="If the panel says gdtest is not available">
+
+The panel doesn't look in `.gdsuite/` yet, where GDSuite installs it. Until
+it does, set the `GDTEST_BIN` environment variable to the gdtest path that
+`gdsuite doctor` prints, and restart Godot.
+
+</Callout>
+
+</Step>
+</Steps>
+
+## Where next
+
+- Learn what each step of the check does, starting with [Formatting](/formatting).
+- Write more tests: [Your first test](/writing-tests/first-test) goes further.
+- Working with others? [Run GDSuite in CI](/ci) so every change is checked.

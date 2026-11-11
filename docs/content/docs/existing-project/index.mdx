@@ -1,0 +1,105 @@
+---
+title: Add GDSuite to an existing project
+description: Adopt GDSuite in a project that already has code, settings, or other tools, one step at a time.
+---
+
+A project with months of code will have a lot to report the first time. That
+is normal. Adopt GDSuite one step at a time, and keep each step in its own
+commit, so your history stays readable.
+
+<Steps>
+<Step>
+
+### Set it up
+
+Commit or stash your work, then in the project's folder:
+
+```bash
+gdsuite init
+```
+
+If the project had a `gdlintrc` or `gdformatrc` from gdtoolkit, their
+settings are converted into `gdsuite.toml` for you.
+
+If it has a `gdtest.toml`, `gdhealth.toml` or `gdtidy.toml`, or was set up by
+an older GDSuite, also run:
+
+```bash
+gdsuite migrate
+```
+
+It moves those settings into `gdsuite.toml`, comments included, so you have
+one settings file. Review the result with `git diff` and commit.
+
+</Step>
+<Step>
+
+### Format everything, in one commit
+
+```bash
+gdsuite fmt
+```
+
+Run the game to make sure nothing changed (formatting never changes what code
+does, but it's a good habit), then commit this alone, with a message such as
+"Format with GDSuite". If your team uses `git blame`, add that commit to a
+`.git-blame-ignore-revs` file so it doesn't hide who wrote each line.
+
+</Step>
+<Step>
+
+### Tame the linter
+
+```bash
+gdsuite lint
+```
+
+Read the list by rule, not by line. For each rule that reports a lot:
+
+- if it catches real problems, fix them (`gdsuite lint -- --fix` repairs the
+  simple ones);
+- if your team disagrees with it, turn it off in `gdsuite.toml`:
+
+```toml
+[lint]
+disable = ["max-public-methods"]
+```
+
+Commit when `gdsuite lint` is clean.
+
+</Step>
+<Step>
+
+### Fix the errors
+
+```bash
+gdsuite typecheck
+```
+
+These are real errors: missing files, broken references, wrong calls. Fix
+them; warnings can wait.
+
+</Step>
+<Step>
+
+### Turn on the full check
+
+Code health is the last step of `gdsuite check` and never fails it, so you
+can now run the whole check before every commit:
+
+```bash
+gdsuite check
+```
+
+Then [add it to CI](/ci), so it stays clean.
+
+</Step>
+</Steps>
+
+## Coming from another tool
+
+- [Coming from gdtoolkit](/existing-project/from-gdtoolkit): gdformat and
+  gdlint settings, silencing comments, and what formats differently.
+- [Coming from GUT](/existing-project/from-gut) and [Coming from
+  gdUnit4](/existing-project/from-gdunit4): map your tests to GDSuite's.
+  gdUnit4 tests can keep running while you move them.
