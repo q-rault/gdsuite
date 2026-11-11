@@ -32,6 +32,14 @@ holds `project.godot`.
 
 </Accordion>
 
+<Accordion title="&quot;… is installed, but this project now uses …&quot;">
+
+The tools in `.gdsuite/` are not the versions the project uses, usually after
+updating GDSuite or changing `[tools]` in `gdsuite.toml`. Run `gdsuite update`
+(or `gdsuite setup`, which installs exactly what `gdsuite.toml` asks for).
+
+</Accordion>
+
 <Accordion title="&quot;gdtidy not found&quot; (or another tool) after cloning a project">
 
 The tools live in `.gdsuite/`, which is not committed. Run `gdsuite setup`
@@ -88,9 +96,9 @@ xattr -d com.apple.quarantine gdsuite
 
 <Accordion title="&quot;gdsuite report ci&quot; fails">
 
-It combines three saved reports, so run these first:
-`gdsuite check --report json`, `gdsuite test --report json` and
-`gdsuite health --report json`.
+It combines the saved reports, so run `gdsuite check --report json` first,
+and `gdsuite test --report json` and `gdsuite health --report json` unless
+the check's steps include tests and code health.
 
 </Accordion>
 

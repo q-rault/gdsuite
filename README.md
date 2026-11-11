@@ -32,6 +32,7 @@ Common commands:
 ```bash
 gdsuite init
 gdsuite setup --output plain
+gdsuite update
 gdsuite doctor --output json
 gdsuite check
 gdsuite fmt -- --check

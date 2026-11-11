@@ -12,7 +12,7 @@ With `--report json` (or `[reports] default = "json"`), `check`, `test`,
 | `check.json` | `gdsuite check --report json` |
 | `test.json` | `gdsuite test --report json` |
 | `health.json` | `gdsuite health --report json` |
-| `ci.json` | `gdsuite report ci`, which combines the three above (all three must exist) |
+| `ci.json` | `gdsuite report ci`, which combines the three above, one entry per step. `check.json` must exist; `test.json` and `health.json` too, unless the check already ran that step |
 | `latest.json` | A copy of the last report written |
 
 `gdsuite report <name>` prints one of them again.

@@ -14,13 +14,9 @@ project, and CI, uses the same settings.
 [project]
 root = "."
 
-[tools]
-# The version of each tool GDSuite installs. Delete this section to use the
-# versions your GDSuite was tested with.
-gdtest_source = "github:q-rault/gdtest@v0.2.3"
-gdhealth_source = "github:q-rault/gdhealth@v0.3.1"
-gdtypecheck_source = "github:q-rault/gdtypecheck@v0.2.1"
-gdtidy_source = "github:q-rault/gdtidy@v0.3.0"
+# Each tool's version comes with gdsuite: after updating gdsuite, run
+# `gdsuite update`. To pin a tool or build it yourself, add a [tools] section:
+# https://q-rault.github.io/gdsuite/reference/gdsuite-toml
 
 [commands]
 default_test_target = "test/"
@@ -39,6 +35,11 @@ The ones you are most likely to change:
 - `[check] steps`: the steps of [`gdsuite check`](/check), in order. Add
   `"test"` to run your tests too.
 - `[commands] default_test_target`: the folder `gdsuite test` runs.
+
+There is no tool version in it: each GDSuite release comes with the versions
+of its tools it was tested with, and [`gdsuite update`](/install#updating-gdsuite)
+installs them. To keep a tool at a version, or build it yourself, give it a
+source in `[tools]` ([tool sources](/reference/gdsuite-toml#tool-sources)).
 
 ## A section per feature
 

@@ -9,6 +9,7 @@ description: Every gdsuite command, its options, and how to pass options to the 
 | --- | --- |
 | `gdsuite init` | Add GDSuite to a project: write `gdsuite.toml`, download the tools, install the test addons |
 | `gdsuite setup` | Download or repair the tools, for example after cloning a project or deleting `.gdsuite/` |
+| `gdsuite update` | Install the tool versions this gdsuite was tested with, after [updating GDSuite](/install#updating-gdsuite). Removes old release pins from `[tools]`, moves `crate:` sources to the tested version, keeps other sources |
 | `gdsuite migrate` | Move older settings (`gdtest.toml`, `gdhealth.toml`, `gdtidy.toml`, `gdlintrc`, `gdformatrc`, settings from GDSuite 0.1) into `gdsuite.toml` |
 | `gdsuite doctor` | Show where Godot and each tool are, their versions, and what is missing |
 | `gdsuite fmt` | [Format](/formatting) the project's scripts |
@@ -32,7 +33,7 @@ Some also take:
 
 | Option | Commands | Description |
 | --- | --- | --- |
-| `--output pretty\|plain\|json` | `init`, `setup`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
+| `--output pretty\|plain\|json` | `init`, `setup`, `update`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
 | `--report text\|json` | `lint`, `test`, `health`, `check` | Print the result as text or JSON, and save it in `reports/gdsuite/` |
 
 ## Passing options to a tool

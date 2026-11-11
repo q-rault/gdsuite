@@ -70,7 +70,7 @@ only new problems turn it red.
 
 Every command accepts `--report json`, which saves its result in
 `reports/gdsuite/`. `gdsuite report ci` then combines them into one
-`ci.json`:
+`ci.json`, with one entry per step:
 
 ```yaml
       - run: gdsuite check --report json

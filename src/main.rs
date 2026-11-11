@@ -5,6 +5,7 @@ mod migrate;
 mod output;
 mod process;
 mod tooling;
+mod update;
 
 use std::process::ExitCode;
 

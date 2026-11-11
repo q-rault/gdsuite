@@ -231,6 +231,32 @@ impl Default for ToolsConfig {
     }
 }
 
+/// The tools gdsuite installs, with the key of each one's source in `[tools]`.
+pub const TOOL_NAMES: [&str; 4] = ["gdtest", "gdhealth", "gdtypecheck", "gdtidy"];
+
+impl ToolsConfig {
+    pub fn source(&self, tool: &str) -> &str {
+        match tool {
+            "gdtest" => &self.gdtest_source,
+            "gdhealth" => &self.gdhealth_source,
+            "gdtypecheck" => &self.gdtypecheck_source,
+            "gdtidy" => &self.gdtidy_source,
+            _ => panic!("unknown tool {tool}"),
+        }
+    }
+
+    /// The sources that differ from the ones this gdsuite was tested with:
+    /// a project pins or builds these tools itself. The others follow gdsuite.
+    pub fn pinned(&self) -> Vec<(&'static str, &str)> {
+        let defaults = Self::default();
+        TOOL_NAMES
+            .into_iter()
+            .filter(|tool| self.source(tool) != defaults.source(tool))
+            .map(|tool| (tool, self.source(tool)))
+            .collect()
+    }
+}
+
 impl Default for CommandsConfig {
     fn default() -> Self {
         Self {
@@ -503,7 +529,6 @@ fn default_check_steps() -> Vec<CheckStep> {
 }
 
 fn default_config_template(godot_exe: Option<&Path>) -> String {
-    let release = ReleaseManifest::bundled();
     let godot_exe = godot_exe
         .map(|path| {
             format!(
@@ -516,11 +541,10 @@ fn default_config_template(godot_exe: Option<&Path>) -> String {
     format!(
         r#"[project]
 root = "."
-{godot_exe}[tools]
-gdtest_source = "{}"
-gdhealth_source = "{}"
-gdtypecheck_source = "{}"
-gdtidy_source = "{}"
+{godot_exe}
+# Each tool's version comes with gdsuite: after updating gdsuite, run
+# `gdsuite update`. To pin a tool or build it yourself, add a [tools] section:
+# https://q-rault.github.io/gdsuite/reference/gdsuite-toml
 
 [commands]
 default_test_target = "test/"
@@ -532,15 +556,22 @@ artifacts_dir = "reports/gdsuite"
 
 [check]
 steps = ["fmt", "lint", "typecheck", "health"]
-"#,
-        release.tools.gdtest.acquire.render_requested(),
-        release.tools.gdhealth.acquire.render_requested(),
-        release.tools.gdtypecheck.acquire.render_requested(),
-        release.tools.gdtidy.acquire.render_requested(),
+"#
     )
 }
 
 fn render_gdsuite_config(config: &GdsuiteConfig) -> String {
+    // Only pinned tools are written: the others follow gdsuite's version.
+    let pinned = config.tools.pinned();
+    let tools = if pinned.is_empty() {
+        String::new()
+    } else {
+        let lines = pinned
+            .iter()
+            .map(|(tool, source)| format!("{tool}_source = \"{}\"\n", escape_string(source)))
+            .collect::<String>();
+        format!("\n[tools]\n{lines}")
+    };
     let godot_exe = config
         .project
         .godot_exe
@@ -556,12 +587,7 @@ fn render_gdsuite_config(config: &GdsuiteConfig) -> String {
     format!(
         r#"[project]
 root = "{}"
-{godot_exe}[tools]
-gdtest_source = "{}"
-gdhealth_source = "{}"
-gdtypecheck_source = "{}"
-gdtidy_source = "{}"
-
+{godot_exe}{tools}
 [commands]
 default_test_target = "{}"
 default_health_subcommand = "{}"
@@ -574,10 +600,6 @@ artifacts_dir = "{}"
 steps = {}
 "#,
         escape_string(&config.project.root),
-        escape_string(&config.tools.gdtest_source),
-        escape_string(&config.tools.gdhealth_source),
-        escape_string(&config.tools.gdtypecheck_source),
-        escape_string(&config.tools.gdtidy_source),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
         escape_string(&config.reports.default),
