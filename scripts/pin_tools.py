@@ -1,15 +1,15 @@
 """Build the latest release of every tool into gdsuite.
 
-    python scripts/pin_tools.py                # pin and bump gdsuite
+    python scripts/pin_tools.py                # pin
     python scripts/pin_tools.py --dry-run      # only say what would change
 
 The tools are built into gdsuite from crates.io, at exact versions. For each
 tool whose latest crates.io release differs from its pin, this updates the
-dependency in Cargo.toml and Cargo.lock (`cargo update --precise`), the
-tested version in .gdsuite-release.toml (and gdtest's harness contract), and
-bumps gdsuite's version in the same change, so merging it is a release: a
-minor bump when a tool's major or minor version changed, a patch bump
-otherwise. The test fixtures read the versions from the manifest.
+dependency in Cargo.toml and Cargo.lock (`cargo update --precise`) and the
+tested version in .gdsuite-release.toml (and gdtest's harness contract). The
+test fixtures read the versions from the manifest. Releasing gdsuite is a
+separate step, Cut release: the PR says which bump it suggests, minor when a
+tool's major or minor version changed, patch otherwise.
 
 With --github-output FILE (GitHub Actions), it writes `changed`, `title` and
 `body` for the pin-tools workflow.
@@ -26,7 +26,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / ".gdsuite-release.toml"
 CARGO_TOML = ROOT / "Cargo.toml"
-CARGO_LOCK = ROOT / "Cargo.lock"
 TOOL = re.compile(
     r'^\[tools\.(?P<tool>[a-z0-9_-]+)\]\s*\n'
     r'acquire = \{ kind = "bundled" \}\s*\n'
@@ -46,13 +45,6 @@ def latest_version(crate: str) -> str:
 
 def version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", version)[:3])
-
-
-def bump(version: str, minor: bool) -> str:
-    major, minor_part, patch = version_tuple(version)
-    if minor:
-        return f"{major}.{minor_part + 1}.0"
-    return f"{major}.{minor_part}.{patch + 1}"
 
 
 def replace_once(text: str, old: str, new: str, where: Path) -> str:
@@ -83,14 +75,13 @@ def main() -> int:
         return 0
 
     cargo_toml = CARGO_TOML.read_text(encoding="utf-8")
-    suite_version = re.search(r'^version = "([^"]+)"', cargo_toml, re.MULTILINE).group(1)
     minor = any(version_tuple(old)[:2] != version_tuple(new)[:2] for _, old, new in changes)
-    new_version = bump(suite_version, minor)
+    suggested = "minor" if minor else "patch"
     pins = ", ".join(f"{tool} {new}" for tool, _, new in changes)
-    title = f"release: v{new_version} (pin {pins})"
+    title = f"Build in {pins}"
     for tool, old, new in changes:
         print(f"{tool}: {old} -> {new}")
-    print(f"gdsuite: {suite_version} -> {new_version}")
+    print(f"then Cut release with bump: {suggested}")
     if args.dry_run:
         return 0
 
@@ -109,32 +100,18 @@ def main() -> int:
                 flags=re.MULTILINE,
             )
         cargo_toml = replace_once(cargo_toml, f'{tool} = "={old}"', f'{tool} = "={new}"', CARGO_TOML)
-    manifest = re.sub(
-        r'(\[suite\]\nversion = )"[^"]+"', rf'\g<1>"{new_version}"', manifest, count=1
-    )
     MANIFEST.write_text(manifest, encoding="utf-8", newline="\n")
-
-    cargo_toml = replace_once(
-        cargo_toml, f'version = "{suite_version}"', f'version = "{new_version}"', CARGO_TOML
-    )
     CARGO_TOML.write_text(cargo_toml, encoding="utf-8", newline="\n")
     # Moves the tools, and what they need, in Cargo.lock; fails when the new
     # versions can't build together.
     for tool, _, new in changes:
         subprocess.run(["cargo", "update", "-p", tool, "--precise", new], cwd=ROOT, check=True)
-    cargo_lock = CARGO_LOCK.read_text(encoding="utf-8")
-    cargo_lock = replace_once(
-        cargo_lock,
-        f'name = "gdsuite"\nversion = "{suite_version}"',
-        f'name = "gdsuite"\nversion = "{new_version}"',
-        CARGO_LOCK,
-    )
-    CARGO_LOCK.write_text(cargo_lock, encoding="utf-8", newline="\n")
 
     if args.github_output:
         lines = [
-            f"Builds the latest tool releases into gdsuite and bumps it to {new_version}. "
-            "Merging this PR tags `v" + new_version + "`, which publishes the release.",
+            "Builds the latest tool releases into gdsuite. Merging it releases nothing: "
+            f"then run **Cut release** with bump **{suggested}** "
+            "(minor when a tool's major or minor version changed, patch otherwise).",
             "",
             "| Tool | Built in | Latest |",
             "|---|---|---|",
@@ -151,7 +128,6 @@ def main() -> int:
         with args.github_output.open("a", encoding="utf-8") as out:
             out.write("changed=true\n")
             out.write(f"title={title}\n")
-            out.write(f"version={new_version}\n")
             out.write(f"body<<PIN_TOOLS_EOF\n{body}\nPIN_TOOLS_EOF\n")
     return 0
 

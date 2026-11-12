@@ -1,9 +1,13 @@
-name: release
+# Keep the file name release.yml: crates.io trusted publishing is set up for it.
+name: Publish release
 
 on:
   push:
     tags:
       - 'v[0-9]*'
+  # Cut release (cut-release.yml) starts it this way, on the tag it pushed: a
+  # tag pushed with the default token does not trigger `push`.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,6 +15,8 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    # Run by hand, it must be on a release tag, not a branch.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,9 +47,10 @@ jobs:
 
       - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        # ring (rustls's crypto, for HTTPS downloads) compiles C, so this one
-        # needs musl-gcc. Refresh the package lists and retry: a lookup
-        # failure on the Ubuntu mirrors once failed every release at once.
+        # musl-gcc, for any dependency that compiles C (none since 0.6, which
+        # dropped the HTTPS downloads; kept until a release proves it can go).
+        # Refresh the package lists and retry: a lookup failure on the Ubuntu
+        # mirrors once failed every release at once.
         run: |
           sudo apt-get -o Acquire::Retries=5 update
           sudo apt-get -o Acquire::Retries=5 install -y musl-tools
@@ -135,3 +142,5 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+          # v1.0.0-rc.1 and the like are prereleases: never marked "Latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
