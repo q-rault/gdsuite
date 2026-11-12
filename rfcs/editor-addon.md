@@ -72,7 +72,7 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
 | **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (on by default); the project on Check | No |
 | **Type check** | Same Problems dock, its own filter | In the background a moment after you save; on Check | No |
 | **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; "rerun on save" if you turn it on | **Yes**: the dock floats well on a second monitor |
-| **Code health** | A Health main screen, next to 2D, 3D, Script and Game | On request, and after a Check | **Yes**: it needs space for the overview and the graph |
+| **Code health** | A Health dock you open when you need it (content decided later) | On request, and after a Check | **Yes**: it floats, to have room for the overview |
 | **Check** | A button with a status dot in the editor's top bar | On request | No |
 
 ### Formatting
@@ -99,10 +99,13 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
   line).
 - In the script editor: an icon in the gutter and a light tint on lines with
   findings, using the editor's error and warning colors; hover for the
-  message. Godot's own errors in open scripts keep their usual display; the
-  type check adds what Godot doesn't show: errors in scripts you haven't
-  opened, missing resources, broken scene references. The dock says so in one
-  line when it lists them.
+  message.
+- The dock lists **everything the type check reports**, including errors in
+  scripts that are open, which Godot also shows in its own way. A problem
+  never disappears from the list because its script was opened: the list is
+  the project's state, whichever scripts are open. Beyond what Godot shows,
+  it adds errors in scripts you haven't opened, missing resources and broken
+  scene references.
 
 ### Tests: the Tests dock
 
@@ -117,22 +120,28 @@ on a side, or float:
   and its last result shows as an icon there.
 - **Run tests** in the FileSystem dock's context menu, on a folder or a
   script.
-- **Rerun on save** (off by default) reruns the tests of the saved test script,
-  or the tests that use the saved script when gdtest can tell (its watch mode).
+- **Rerun on save** (off by default) runs gdtest's watch mode in the
+  background while it's on: it reruns the tests of a saved test script, and
+  the tests that use a saved script when gdtest can tell. If the watch mode
+  turns out to be too heavy to keep running, the dock runs the affected tests
+  once per save instead.
 
-### Code health: a main screen
+### Code health: a dock you open when you need it
 
-A Health tab next to 2D, 3D, Script and Game:
+Code health is a review, not something to watch while you work, so it does
+not get a main screen tab next to 2D, 3D, Script and Game: that place is for
+what you use all the time. It is a dock, closed by default, opened from the
+GDSuite menu or the command palette, which can float to have room. What it
+shows is decided later, with the tool; the starting point:
 
-- **Overview**: the project's grade, and one line per area (a folder or a
-  `[health.groups]` group) with its grade.
-- **Hotspots**: the scripts most worth attention, sorted by size, complexity,
-  how often they change and how many others depend on them, each number
-  explained in plain words in a tooltip. Click to open the script.
-- **Rules**: the dependency rules between groups, and what breaks them.
-- **Graph**: "Open the dependency graph" opens gdhealth's HTML graph in the
-  browser at first; a native view can come later.
-- Runs on request, and refreshes after a Check that includes `health`.
+- the project's grade, and one line per area (a folder or a
+  `[health.groups]` group);
+- the scripts most worth attention, each number explained in plain words,
+  click to open the script;
+- the dependency rules between groups, and what breaks them;
+- "Open the dependency graph", gdhealth's HTML graph in the browser.
+
+It runs on request, and refreshes after a Check that includes `health`.
 
 ### Check: the top bar
 
@@ -215,19 +224,19 @@ it ("set by this project").
 2. **Tests.** The gdtest panel moved into the Tests dock, gutter ▶ and
    results, FileSystem "Run tests", rerun on save. `gdtest_editor` stops being
    installed.
-3. **Health.** The main screen.
+3. **Health.** The dock, once its content is decided.
 4. **GDExtension.** The same addon calls gdsuite in-process instead of
    running it, which needs each tool to offer a library API that returns its
    results rather than printing them. Then the Asset Store.
 
 Each phase ships on its own and is usable without the next.
 
-## Open questions
+## Decided
 
-- Should the Problems dock also list Godot's own GDScript warnings, so there is
-  one list? Godot doesn't expose them to plugins directly; the type check
-  reports them.
-- Should rerun on save use gdtest's watch mode (a long-running process), or run
-  the affected tests per save?
-- Is the Health screen worth a main screen tab for every project, or a dock
-  that opens it on request?
+- **Godot's own warnings and errors:** the Problems dock shows everything the
+  type check reports, including what Godot also shows for open scripts, so
+  nothing disappears from the list when a script is opened.
+- **Rerun on save:** gdtest's watch mode, with a per-save run as a fallback if
+  it proves too heavy.
+- **Code health:** a dock opened when needed, not a main screen tab. Its
+  content is decided later, with the tool.
