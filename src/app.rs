@@ -471,6 +471,10 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
             EXIT_TOOLCHAIN_ERROR,
             if missing.is_empty() {
                 "toolchain compatibility check failed".to_string()
+            } else if missing == ["godot"] {
+                // setup can't install Godot: say how to point gdsuite at it.
+                "Godot not found; install Godot and add it to PATH, set GODOT_EXE, or pass --godot-exe"
+                    .to_string()
             } else {
                 format!(
                     "missing tools: {}; run `gdsuite setup` to install the local toolchain",

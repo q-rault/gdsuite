@@ -1288,6 +1288,8 @@ fn migrate_keeps_a_tool_file_whose_section_gdsuite_toml_already_has() {
 fn commands_run_in_a_project_that_was_never_set_up() {
     let fixture = Fixture::new();
     fixture.seed_project();
+    // A stand-in Godot on PATH, so doctor doesn't depend on this machine's.
+    fixture.seed_path_tools();
     fs::write(
         fixture.root.join("player.gd"),
         "extends Node\n\n\nfunc _ready() -> void:\n\tpass\n",
