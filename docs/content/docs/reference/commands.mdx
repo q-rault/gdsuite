@@ -19,6 +19,7 @@ description: Every gdsuite command, its options, and how to pass options to the 
 | `gdsuite health` | Measure [code health](/code-health) |
 | `gdsuite check` | Run the [check](/check) steps in order, stopping at the first that fails |
 | `gdsuite report [NAME]` | Print a saved [report](/reference/reports): `latest` (the default), `check`, `test`, `health`, or `ci` to combine them |
+| `gdsuite config get\|set\|unset\|add\|remove KEY [VALUE]` | Read or change `gdsuite.toml`, keeping its comments. Keys are dotted (`lint.disable`, `editor.format_on_save`); a change gdsuite can't read is undone |
 
 ## Options
 
@@ -34,7 +35,8 @@ Some also take:
 | Option | Commands | Description |
 | --- | --- | --- |
 | `--output pretty\|plain\|json` | `init`, `setup`, `update`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
-| `--report text\|json` | `lint`, `test`, `health`, `check` | Print the result as text or JSON, and save it in `reports/gdsuite/` |
+| `--report text\|json` | `lint`, `typecheck`, `test`, `health`, `check` | Print the result as text or JSON. `lint` and `typecheck` give the same JSON shape; `test`, `health` and `check` also save it in `reports/gdsuite/` |
+| `--input <FILE>` | `fmt` | Print the file's text formatted with the project's settings, and change no file. For editors, to format unsaved text |
 
 ## Passing options to a tool
 

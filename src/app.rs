@@ -11,13 +11,12 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    bundled,
     cli::{
-        Cli, Commands, DoctorArgs, ForwardArgs, ForwardReportArgs, LintArgs, OutputArgs,
-        OutputModeArg, ReportArgs, RunArgs, SetupArgs,
+        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs, OutputModeArg,
+        ReportArgs, RunArgs, SetupArgs,
     },
     config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
-    migrate,
+    config_command, editor_addon, migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
     tooling::{self, ProjectContext},
@@ -36,6 +35,8 @@ pub struct CommandError {
     pub code: u8,
     pub message: String,
 }
+
+const EDITOR_ADDON_INSTALLED: &str = "installed the GDSuite editor addon in addons/gdsuite; turn it on in Project > Project Settings > Plugins";
 
 /// `--godot-exe`, for the commands that find Godot themselves.
 static CLI_GODOT: OnceLock<PathBuf> = OnceLock::new();
@@ -63,6 +64,7 @@ pub fn run() -> Result<()> {
         Commands::Health(args) => health(&context, args),
         Commands::Check(args) => check(&context, args),
         Commands::Report(args) => report(&context, args),
+        Commands::Config(args) => config_command::run(&context, args.action),
     }
 }
 
@@ -196,6 +198,14 @@ fn setup_impl(
             "gdtest addon install skipped modified file {}",
             skipped.display()
         ));
+    }
+    let had_editor_addon = editor_addon::is_installed(&context.root);
+    let written = editor_addon::install(&context.root)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    if !had_editor_addon {
+        output.step(EDITOR_ADDON_INSTALLED);
+    } else if written > 0 {
+        output.step("updated the GDSuite editor addon in addons/gdsuite");
     }
     output.step("refreshing Godot class cache");
     tooling::ensure_gdtest_class_cache(context, &config, &godot_path, &addon_report)
@@ -504,13 +514,44 @@ fn finish_mutating_command(output: &OutputContext, summary: &str) {
     }
 }
 
-fn fmt(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
+fn fmt(context: &ProjectContext, args: FmtArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
+    if let Some(input) = args.input {
+        return fmt_input(context, &toolchain, &input, args.args);
+    }
     warn_unconverted_configs(context);
     let mut cmd_args = vec!["fmt".to_string()];
     cmd_args.extend(default_or_dot_or_append_target_for_flags(args.args));
     process::run_checked_streaming(&toolchain.gdtidy, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    Ok(())
+}
+
+/// `gdsuite fmt --input FILE`: formats the file's text with the project's
+/// settings and prints it, changing no file. gdtidy reads standard input from
+/// the project's root, where it finds the project's settings.
+fn fmt_input(
+    context: &ProjectContext,
+    toolchain: &tooling::Toolchain,
+    input: &Path,
+    extra: Vec<String>,
+) -> Result<()> {
+    let text = fs::read(input)
+        .with_context(|| format!("failed to read {}", input.display()))
+        .map_err(|error| command_error(EXIT_USAGE_ERROR, format!("{error:#}")))?;
+    let mut cmd_args = vec!["fmt".to_string()];
+    cmd_args.extend(strip_passthrough_marker(extra));
+    cmd_args.push("-".to_string());
+    let output = process::run_with_stdin(&toolchain.gdtidy, &cmd_args, &context.root, text)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    print!("{}", output.stdout);
+    eprint!("{}", output.stderr);
+    if !output.status.success() {
+        return Err(command_error(
+            EXIT_VALIDATION_ERROR,
+            "the text was not formatted".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -593,8 +634,24 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     Ok(())
 }
 
-fn typecheck(context: &ProjectContext, args: ForwardArgs) -> Result<()> {
+fn typecheck(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
+    if args.report.as_deref() == Some("json") {
+        // The same shape as `lint --report json`, so editors read both alike.
+        let mut cmd_args = vec!["--format".to_string(), "json".to_string()];
+        cmd_args.extend(default_or_dot(args.args));
+        let output = process::run(&toolchain.gdtypecheck, &cmd_args, &context.root)
+            .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+        let report = JsonLintReport::from_typecheck_output(&output);
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if !report.success {
+            return Err(command_error(
+                EXIT_VALIDATION_ERROR,
+                "typecheck failed".to_string(),
+            ));
+        }
+        return Ok(());
+    }
     let cmd_args = default_or_dot(args.args);
     process::run_checked_streaming(&toolchain.gdtypecheck, &cmd_args, &context.root)
         .map_err(|error| command_error(EXIT_VALIDATION_ERROR, error.to_string()))?;
@@ -722,6 +779,11 @@ fn install_test_addons_if_needed(
             "gdsuite: installed the gdtest addons tests need in addons/gdtest and addons/gdtest_editor; commit them"
         ),
     }
+    if !editor_addon::is_installed(&context.root) {
+        editor_addon::install(&context.root)
+            .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
+        eprintln!("gdsuite: {EDITOR_ADDON_INSTALLED}");
+    }
     for skipped in &report.skipped_modified {
         eprintln!(
             "warning: kept {}, which you changed; it may not match this gdtest",
@@ -767,11 +829,17 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
     if !toolchain.godot_exe.as_os_str().is_empty() {
         process::set_godot_exe(&toolchain.godot_exe);
     }
-    let launcher = tooling::gdtest_launcher_path(context);
-    if process::bundled_tool_name(&toolchain.gdtest).is_some() && launcher.exists() {
-        // Keep the gdtest the editor panel runs the one built into this
-        // gdsuite. Best effort: a running panel can hold the file.
-        let _ = bundled::refresh_gdtest_launcher(&launcher);
+    if process::bundled_tool_name(&toolchain.gdtest).is_some()
+        && tooling::gdtest_launcher_path(context).exists()
+    {
+        // Keep the programs the editor addons run this gdsuite. Best effort:
+        // a running editor can hold the files.
+        let _ = tooling::refresh_editor_links(context);
+    }
+    if editor_addon::is_installed(&context.root)
+        && editor_addon::install(&context.root).is_ok_and(|written| written > 0)
+    {
+        eprintln!("gdsuite: updated the GDSuite editor addon in addons/gdsuite");
     }
     // After updating gdsuite, or editing [tools], the installed tools lag
     // behind until `gdsuite setup` runs: say so instead of running them silently.
@@ -855,7 +923,12 @@ fn default_or_dot(args: Vec<String>) -> Vec<String> {
 
 fn default_or_dot_or_append_target_for_flags(args: Vec<String>) -> Vec<String> {
     let mut args = strip_passthrough_marker(args);
-    if args.is_empty() || args.iter().all(|value| value.starts_with('-')) {
+    // `-` is standard input, a target, not an option.
+    if args.is_empty()
+        || args
+            .iter()
+            .all(|value| value.starts_with('-') && value != "-")
+    {
         args.push(".".to_string());
     }
     args
@@ -975,6 +1048,79 @@ struct GdtidySkipped {
 }
 
 impl JsonLintReport {
+    /// What `gdtypecheck --format json` reported, as lint findings.
+    fn from_typecheck_output(output: &process::ProcessOutput) -> Self {
+        #[derive(Deserialize)]
+        struct Report {
+            ok: bool,
+            files_checked: usize,
+            errors: usize,
+            warnings: usize,
+            #[serde(default)]
+            diagnostics: Vec<Diagnostic>,
+            tool_error: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Diagnostic {
+            file: String,
+            line: usize,
+            severity: String,
+            rule: String,
+            message: String,
+        }
+        let stderr = output
+            .stderr
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        let Ok(report) = serde_json::from_str::<Report>(&output.stdout) else {
+            return Self {
+                status: "failed",
+                success: false,
+                exit_code: output.status.code(),
+                summary: stderr.last().cloned().or_else(|| {
+                    Some(format!(
+                        "gdtypecheck {}",
+                        process::describe_exit(output.status.code())
+                    ))
+                }),
+                findings: Vec::new(),
+                skipped: Vec::new(),
+                stderr,
+            };
+        };
+        let summary = match &report.tool_error {
+            Some(error) => error.clone(),
+            None => format!(
+                "{} error(s), {} warning(s) in {} scripts",
+                report.errors, report.warnings, report.files_checked
+            ),
+        };
+        Self {
+            status: if report.ok { "ok" } else { "failed" },
+            success: report.ok,
+            exit_code: output.status.code(),
+            summary: Some(summary),
+            findings: report
+                .diagnostics
+                .into_iter()
+                .map(|d| JsonLintFinding {
+                    file: d.file,
+                    line: d.line,
+                    // gdtypecheck reports lines only.
+                    column: 1,
+                    severity: d.severity,
+                    message: d.message,
+                    rule: Some(d.rule),
+                    fixable: false,
+                })
+                .collect(),
+            skipped: Vec::new(),
+            stderr,
+        }
+    }
+
     fn from_output(output: &process::ProcessOutput) -> Self {
         let stderr = output
             .stderr

@@ -35,6 +35,39 @@ pub fn run(command_path: &Path, args: &[String], cwd: &Path) -> Result<ProcessOu
     })
 }
 
+/// Runs a program with `input` on its standard input.
+pub fn run_with_stdin(
+    command_path: &Path,
+    args: &[String],
+    cwd: &Path,
+    input: Vec<u8>,
+) -> Result<ProcessOutput> {
+    use std::io::Write as _;
+    let normalized_path = normalize_windows_path(command_path);
+    let mut command = build_command(&normalized_path);
+    let mut child = command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to execute {}", shown(command_path)))?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    // Written from another thread: a large input could otherwise fill the
+    // pipe while the program waits for us to read its output.
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("failed to run {}", shown(command_path)))?;
+    let _ = writer.join();
+    Ok(ProcessOutput {
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
 pub fn run_checked(command_path: &Path, args: &[String], cwd: &Path) -> Result<ProcessOutput> {
     let output = run(command_path, args, cwd)?;
     if !output.status.success() {
