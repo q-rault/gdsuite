@@ -96,11 +96,11 @@ pub fn write_gdtest_addons(dir: &Path) -> Result<PathBuf> {
     Ok(dir.to_path_buf())
 }
 
-/// Makes `launcher` a gdsuite that runs as gdtest, for the gdtest panel in
-/// Godot, which runs a `gdtest` program: a hard link to this gdsuite, or a
-/// copy where links don't work. gdsuite started under the name `gdtest`
-/// runs gdtest (see `dispatch`). Replaced when gdsuite changed since.
-pub fn refresh_gdtest_launcher(launcher: &Path) -> Result<()> {
+/// Makes `launcher` this gdsuite: a hard link, or a copy where links don't
+/// work. Named `gdtest`, it runs gdtest (see `dispatch`), for the gdtest
+/// panel in Godot; named `gdsuite`, it is gdsuite, for the GDSuite addon.
+/// Replaced when gdsuite changed since.
+pub fn refresh_link(launcher: &Path) -> Result<()> {
     let gdsuite = std::env::current_exe().context("failed to find the gdsuite program")?;
     if is_current(launcher, &gdsuite) {
         return Ok(());

@@ -1331,3 +1331,56 @@ fn a_project_that_builds_a_tool_itself_still_needs_setup() {
         .failure()
         .stderr(predicate::str::contains("gdsuite setup"));
 }
+
+#[test]
+fn fmt_input_prints_the_formatted_text_and_changes_no_file() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    let buffer = fixture.root.join("buffer.txt");
+    fs::write(&buffer, "func f():\n  pass\n").unwrap();
+
+    fixture
+        .cmd()
+        .args(["fmt", "--input"])
+        .arg(&buffer)
+        .assert()
+        .success()
+        .stdout("func f():\n\tpass\n");
+    assert_eq!(fs::read_to_string(&buffer).unwrap(), "func f():\n  pass\n");
+}
+
+#[test]
+fn config_changes_gdsuite_toml_and_reads_it_back() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        "# ours\n[check]\nsteps = [\"fmt\"]\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["config", "add", "lint.disable", "max-returns"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["config", "get", "lint.disable"])
+        .assert()
+        .success()
+        .stdout("[\"max-returns\"]\n");
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(config.starts_with("# ours\n[check]\n"), "{config}");
+
+    // A change gdsuite can't read is undone.
+    fixture
+        .cmd()
+        .args(["config", "set", "check.steps", "nope"])
+        .assert()
+        .failure();
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap(),
+        config
+    );
+}

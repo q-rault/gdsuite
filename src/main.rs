@@ -2,6 +2,7 @@ mod app;
 mod bundled;
 mod cli;
 mod config;
+mod config_command;
 mod migrate;
 mod output;
 mod process;
