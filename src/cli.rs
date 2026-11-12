@@ -33,11 +33,11 @@ pub enum Commands {
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor(DoctorArgs),
     #[command(about = "Format GDScript with `gdtidy fmt` (arguments are forwarded)")]
-    Fmt(ForwardArgs),
+    Fmt(FmtArgs),
     #[command(about = "Lint GDScript with gdtidy; arguments after -- go to `gdtidy lint`")]
     Lint(LintArgs),
-    #[command(about = "Forward arguments to gdtypecheck")]
-    Typecheck(ForwardArgs),
+    #[command(about = "Type check the project with gdtypecheck (arguments are forwarded)")]
+    Typecheck(ForwardReportArgs),
     #[command(
         about = "Forward arguments to project-local gdtest",
         long_about = "Forward arguments to project-local gdtest.\n\nUse `gdsuite test` for normal suite-owned test execution. Use `gdsuite test -- ...` when you need direct gdtest flags or subcommands."
@@ -52,6 +52,44 @@ pub enum Commands {
     Check(RunArgs),
     #[command(about = "Print a saved suite JSON report artifact")]
     Report(ReportArgs),
+    #[command(
+        about = "Read or change gdsuite.toml, keeping its comments",
+        long_about = "Read or change gdsuite.toml, keeping its comments and layout.
+
+Keys are dotted: `lint.disable`, `editor.format_on_save`, `check.steps`. Values are TOML (`true`, `100`, `[\"fmt\"]`); anything else is a string."
+    )]
+    Config(ConfigArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct FmtArgs {
+    /// Format this file's text and print the result, instead of formatting
+    /// files in place. Editors use it to format unsaved text with the
+    /// project's settings.
+    #[arg(long, value_name = "FILE")]
+    pub input: Option<PathBuf>,
+    #[arg(last = true, action = ArgAction::Append)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub action: ConfigAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigAction {
+    /// Print a value as JSON, `null` when it is not set
+    Get { key: String },
+    /// Set a value
+    Set { key: String, value: String },
+    /// Remove a value
+    Unset { key: String },
+    /// Add a value to a list, once
+    Add { key: String, value: String },
+    /// Remove a value from a list
+    Remove { key: String, value: String },
 }
 
 #[derive(Debug, Args)]

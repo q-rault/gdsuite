@@ -60,3 +60,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked
+
+      # The editor addon is GDScript: gdsuite checks it like any project's.
+      # Type checking needs Godot, so it runs locally (see editor/).
+      - name: Format and lint the editor addon
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --locked --quiet -- --project-root editor fmt -- --check addons/gdsuite
+          cargo run --locked --quiet -- --project-root editor lint -- addons/gdsuite
