@@ -86,14 +86,6 @@ the bottom panel:
 - a failed test shows its message; double-click it to open the script at the
   line.
 
-<Callout type="warn" title="If the panel says gdtest is not available">
-
-The panel doesn't look in `.gdsuite/` yet, where GDSuite installs it. Until
-it does, set the `GDTEST_BIN` environment variable to the gdtest path that
-`gdsuite doctor` prints, and restart Godot.
-
-</Callout>
-
 ## In a check
 
 Tests are not part of [`gdsuite check`](/check) by default, because they take

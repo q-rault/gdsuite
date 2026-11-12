@@ -34,16 +34,16 @@ holds `project.godot`.
 
 <Accordion title="&quot;… is installed, but this project now uses …&quot;">
 
-The tools in `.gdsuite/` are not the versions the project uses, usually after
-updating GDSuite or changing `[tools]` in `gdsuite.toml`. Run `gdsuite update`
+The project still uses tools that an older GDSuite downloaded into
+`.gdsuite/`, or `[tools]` in `gdsuite.toml` changed. Run `gdsuite update`
 (or `gdsuite setup`, which installs exactly what `gdsuite.toml` asks for).
 
 </Accordion>
 
-<Accordion title="&quot;gdtidy not found&quot; (or another tool) after cloning a project">
+<Accordion title="&quot;run gdsuite init or gdsuite setup&quot; after cloning a project">
 
-The tools live in `.gdsuite/`, which is not committed. Run `gdsuite setup`
-once after cloning.
+GDSuite keeps what it set up for the project in `.gdsuite/`, which is not
+committed. Run `gdsuite setup` once after cloning.
 
 </Accordion>
 
@@ -57,19 +57,8 @@ for all projects. See [Install](/install#if-godot-isnt-found).
 
 <Accordion title="The test panel in Godot says gdtest is not available">
 
-The panel doesn't look in `.gdsuite/` yet. Set the `GDTEST_BIN` environment
-variable to the gdtest path that `gdsuite doctor` prints, then restart Godot.
-
-</Accordion>
-
-<Accordion title="Code health lists files from .gdsuite/">
-
-Code health currently measures the scripts GDSuite downloaded. Exclude them:
-
-```toml
-[health.discovery]
-exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
-```
+The panel runs the gdtest that `gdsuite setup` puts in `.gdsuite/`. Run
+`gdsuite setup`, then restart Godot.
 
 </Accordion>
 
@@ -110,17 +99,16 @@ the check's steps include tests and code health.
 
 <Accordion title="Do I need to install gdtidy, gdtest, gdhealth or gdtypecheck?">
 
-No. GDSuite downloads them into your project's `.gdsuite/` folder, at
-versions tested together, and runs them for you. See [Under the
+No. They are built into the `gdsuite` program, at versions tested together. See [Under the
 hood](/under-the-hood).
 
 </Accordion>
 
 <Accordion title="Do I need Rust?">
 
-No. The `gdsuite` program and the tools come as ready-made programs from
-GitHub. Rust is only needed to install with `cargo`, or to build a tool from
-its source.
+No. The `gdsuite` program comes ready-made from GitHub, with the tools inside.
+Rust is only needed to install with `cargo`, or to use a tool built from its
+source.
 
 </Accordion>
 
@@ -149,8 +137,10 @@ Godot 4.5 and newer.
 
 <Accordion title="Does it send anything over the internet?">
 
-Only downloads: `gdsuite init` and `gdsuite setup` fetch the tools from
-GitHub. Nothing about your project is sent anywhere.
+No. GDSuite works offline: the tools are built in, so nothing is downloaded,
+and nothing about your project is sent anywhere. Only a tool with a
+`github:`, `crate:` or `git:` source in `[tools]` is downloaded by
+`gdsuite setup`.
 
 </Accordion>
 

@@ -13,8 +13,8 @@ gdsuite check
 the [releases](https://github.com/q-rault/gdsuite/releases) (no Rust needed),
 or `cargo install gdsuite`, then run `gdsuite init` in your project.
 
-You only install gdsuite. It downloads and runs these tools for you, at
-versions tested together; each also works on its own:
+You only install gdsuite: these tools are built into it, at versions tested
+together. Each also works on its own:
 
 | Tool | Role | Repository | Docs |
 | --- | --- | --- | --- |

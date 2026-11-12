@@ -38,7 +38,7 @@ jobs:
       - name: Install GDSuite
         env:
           GH_TOKEN: ${{ github.token }}
-        # Add a version after `download`, such as v0.4.1, to stay on it.
+        # Add a version after `download`, such as v0.5.0, to stay on it.
         run: |
           gh release download --repo q-rault/gdsuite --pattern '*-x86_64-unknown-linux-musl.tar.gz' --output gdsuite.tar.gz
           mkdir -p "$RUNNER_TEMP/bin"

@@ -12,15 +12,19 @@ Do not push the tag yourself: `tag-release.yml` does it.
 
 ## Pinning the tools
 
-`.gdsuite-release.toml` pins each tool's release and its archive checksums.
-The CLI tests read the versions from it.
+The tools are built into gdsuite from crates.io, at exact versions:
+`gdtest = "=0.2.7"` in `Cargo.toml`, and the same version as `tested` in
+`.gdsuite-release.toml`, which `doctor` and the CLI tests read.
 
 `pin-tools.yml` runs when a tool is released: the last job of each tool's
-`release.yml` starts it once the GitHub release exists. It can also be run by
-hand from the Actions tab. It runs `scripts/pin_tools.py`, which:
+`release.yml` starts it once the release is on crates.io and GitHub. It can
+also be run by hand from the Actions tab. It runs `scripts/pin_tools.py`,
+which:
 
-- pins the latest release of each tool, with its checksums and gdtest's
-  harness contract;
+- moves each tool to its latest crates.io release, in `Cargo.toml`,
+  `Cargo.lock` (`cargo update --precise`, which fails when the new versions
+  can't build together) and `.gdsuite-release.toml`, with gdtest's harness
+  contract;
 - bumps gdsuite's version: minor when a tool's major or minor version
   changed, patch otherwise.
 
@@ -28,8 +32,8 @@ It opens a PR from the `auto/pin-tools` branch, or updates the one already
 open, so tools released one after another end up in the same PR. Review it,
 wait for CI, merge: that is the release.
 
-To pin by hand: `python scripts/pin_tools.py` (set `GITHUB_TOKEN` to avoid the
-API rate limit), or `--dry-run` to see what it would change.
+To pin by hand: `python scripts/pin_tools.py`, or `--dry-run` to see what it
+would change.
 
 ## One-time setup: the `PIN_TOOLS_TOKEN` secret
 
