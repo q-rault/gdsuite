@@ -4,8 +4,8 @@ description: The four tools GDSuite runs for you. You don't need to install them
 ---
 
 GDSuite is one program you install and one command you learn. Behind it, four
-specialized tools do the work. **GDSuite downloads them, keeps their versions
-in step, and runs them for you: you never need to install them yourself.**
+specialized tools do the work. **They are built into the `gdsuite` program,
+at versions tested together: you never need to install them yourself.**
 
 | Feature | Tool | Its own site |
 | --- | --- | --- |
@@ -22,10 +22,10 @@ Godot itself, without a window.
 ## Why separate tools?
 
 Each tool can be used on its own, and released on its own, by people who only
-want one of them. GDSuite picks a version of each that was tested with the
-others, installs it in your project's `.gdsuite/` folder (so two projects can
-use different versions), and gives them one command, one settings file and
-one place to read about them: this site.
+want one of them. GDSuite builds in a version of each that was tested with
+the others, and gives them one command, one settings file and one place to
+read about them: this site. Each GDSuite release says which tool versions it
+contains, and `gdsuite doctor` shows them.
 
 ## When to read a tool's own site
 
@@ -47,7 +47,7 @@ my-game/
 │   ├── gdtest/           lets your tests run inside Godot
 │   └── gdtest_editor/    the test panel for the Godot editor
 ├── .gdsuite/             not committed
-│   ├── tools/            the four tools, one folder each
+│   ├── tools/gdtest/     the test addons' source, and the gdtest the panel runs
 │   └── state/            what was installed, and where Godot is
 └── reports/              not committed: JSON reports and code health's report
 ```

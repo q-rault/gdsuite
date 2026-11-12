@@ -78,16 +78,8 @@ Limits and folders live in `gdsuite.toml`:
 cyclomatic_warn = 12
 
 [health.discovery]
-exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
+exclude = ["addons/**", "reports/**"]
 ```
-
-<Callout type="warn" title="Exclude .gdsuite/">
-
-Today, code health also measures the scripts GDSuite downloaded into
-`.gdsuite/`, and lists them at the top of the report. Add the `exclude` line
-above until this is fixed.
-
-</Callout>
 
 You can also group scripts (`[health.groups]`, such as `gameplay` and `ui`)
 and forbid some groups from using others, so a rule like "UI scripts never

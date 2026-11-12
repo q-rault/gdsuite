@@ -14,8 +14,8 @@ project, and CI, uses the same settings.
 [project]
 root = "."
 
-# Each tool's version comes with gdsuite: after updating gdsuite, run
-# `gdsuite update`. To pin a tool or build it yourself, add a [tools] section:
+# The tools are built into gdsuite: updating gdsuite updates them. To use
+# another build of a tool instead, add a [tools] section:
 # https://q-rault.github.io/gdsuite/reference/gdsuite-toml
 
 [commands]
@@ -36,10 +36,10 @@ The ones you are most likely to change:
   `"test"` to run your tests too.
 - `[commands] default_test_target`: the folder `gdsuite test` runs.
 
-There is no tool version in it: each GDSuite release comes with the versions
-of its tools it was tested with, and [`gdsuite update`](/install#updating-gdsuite)
-installs them. To keep a tool at a version, or build it yourself, give it a
-source in `[tools]` ([tool sources](/reference/gdsuite-toml#tool-sources)).
+There is no tool version in it: the tools are built into GDSuite, so
+[updating GDSuite](/install#updating-gdsuite) updates them. To use another
+build of a tool, such as one you are working on, give it a source in
+`[tools]` ([tool sources](/reference/gdsuite-toml#tool-sources)).
 
 ## A section per feature
 
@@ -67,7 +67,7 @@ timeout = 15000
 cyclomatic_warn = 12
 
 [health.discovery]
-exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
+exclude = ["addons/**", "reports/**"]
 ```
 
 Every key of each section is in the reference: [Format and lint

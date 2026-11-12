@@ -6,8 +6,10 @@ description: Get GDSuite on your computer, then add it to a Godot project.
 Installing GDSuite takes two steps: put the `gdsuite` program on your
 computer once, then add GDSuite to each Godot project you want it to watch.
 
-You only install GDSuite. It downloads everything else it needs by itself
-(see [Under the hood](/under-the-hood) if you are curious).
+You only install GDSuite: the formatter, linter, type checker, test runner
+and code health tool are built into the `gdsuite` program, so there is
+nothing else to download (see [Under the hood](/under-the-hood) if you are
+curious).
 
 <Callout title="Coming soon: the Godot Asset Store">
 
@@ -73,7 +75,7 @@ cd path/to/my-game
 gdsuite init
 ```
 
-It takes a minute the first time, and prints what it does:
+It takes a few seconds, works offline, and prints what it does:
 
 ```text
 [gdsuite:init] step  resolving project setup
@@ -95,7 +97,7 @@ Your project now has:
 | `gdsuite.toml` | GDSuite's settings | Yes |
 | `addons/gdtest/` | Lets your tests run inside Godot | Yes |
 | `addons/gdtest_editor/` | The test panel for the Godot editor | Yes |
-| `.gdsuite/` | The programs GDSuite downloaded | No (added to `.gitignore`) |
+| `.gdsuite/` | What GDSuite keeps for this project on this computer | No (added to `.gitignore`) |
 
 ### If Godot isn't found
 
@@ -116,7 +118,7 @@ written in `gdsuite.toml`, so teammates keep their own). You can also set the
 gdsuite doctor
 ```
 
-It lists Godot and each tool GDSuite installed, with its version, and ends
+It lists Godot and each tool built into GDSuite, with its version, and ends
 with:
 
 ```text
@@ -128,35 +130,21 @@ to fix it. See [Troubleshooting](/troubleshooting).
 
 ## Updating GDSuite
 
-Each GDSuite release comes with the versions of its tools it was tested with,
-so updating GDSuite updates everything:
+The tools are part of the `gdsuite` program, so updating GDSuite updates
+everything. Get the new `gdsuite` the way you got the first one: download it
+again, or run `cargo install gdsuite` again.
 
-1. Get the new `gdsuite` the way you got the first one: download it again, or
-   run `cargo install gdsuite` again.
-2. In each project, run:
+Projects set up by GDSuite 0.4 or earlier downloaded their tools into
+`.gdsuite/`, and may have their versions written in `gdsuite.toml`. Run this
+once in each of them:
 
 ```bash
 gdsuite update
 ```
 
-It installs the tools the new GDSuite was tested with. Projects set up by
-GDSuite 0.4 or earlier have the tool versions written in `gdsuite.toml`;
-`gdsuite update` removes them, so these projects follow GDSuite too from then
-on.
-
-Until you run it, commands warn that the installed tools are older than the
-ones the project uses.
-
-<Callout title="Installed with cargo, but the tools are downloaded?">
-
-`cargo install gdsuite` builds the `gdsuite` program only. GDSuite then
-downloads its tools as ready-made programs from their GitHub releases, checked
-against a known checksum: it is faster and needs no Rust on your teammates'
-computers or in CI. To build a tool from crates.io instead, give it a
-`crate:` source in `[tools]` ([gdsuite.toml](/reference/gdsuite-toml#tool-sources));
-`gdsuite update` moves it to the tested version too.
-
-</Callout>
+It removes the old versions from `gdsuite.toml` and the downloaded tools from
+`.gdsuite/`. Until you run it, commands warn that the project still uses the
+downloaded tools.
 
 ## Next
 

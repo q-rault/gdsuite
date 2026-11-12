@@ -1,23 +1,22 @@
-"""Pin every tool in .gdsuite-release.toml to its latest GitHub release.
+"""Build the latest release of every tool into gdsuite.
 
-    python scripts/pin_tools.py                # pin, checksum and bump gdsuite
+    python scripts/pin_tools.py                # pin and bump gdsuite
     python scripts/pin_tools.py --dry-run      # only say what would change
 
-For each tool whose latest release differs from its pin, this updates the tag
-and the tested version (and gdtest's harness contract), refreshes the
-checksums with release_checksums.py, updates the example in the config docs,
-and bumps gdsuite's version in the same change, so merging it is a release:
-a minor bump when a tool's major or minor version changed, a patch bump
+The tools are built into gdsuite from crates.io, at exact versions. For each
+tool whose latest crates.io release differs from its pin, this updates the
+dependency in Cargo.toml and Cargo.lock (`cargo update --precise`), the
+tested version in .gdsuite-release.toml (and gdtest's harness contract), and
+bumps gdsuite's version in the same change, so merging it is a release: a
+minor bump when a tool's major or minor version changed, a patch bump
 otherwise. The test fixtures read the versions from the manifest.
 
 With --github-output FILE (GitHub Actions), it writes `changed`, `title` and
-`body` for the pin-tools workflow. Set GITHUB_TOKEN to avoid the anonymous
-API rate limit.
+`body` for the pin-tools workflow.
 """
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -28,26 +27,21 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / ".gdsuite-release.toml"
 CARGO_TOML = ROOT / "Cargo.toml"
 CARGO_LOCK = ROOT / "Cargo.lock"
-CONFIG_DOCS = ROOT / "docs" / "content" / "docs" / "configure.mdx"
-ACQUIRE = re.compile(
+TOOL = re.compile(
     r'^\[tools\.(?P<tool>[a-z0-9_-]+)\]\s*\n'
-    r'acquire = \{ kind = "github_release_repo", owner = "(?P<owner>[^"]+)", '
-    r'repo = "(?P<repo>[^"]+)", tag = "(?P<tag>[^"]+)" \}\s*\n'
+    r'acquire = \{ kind = "bundled" \}\s*\n'
     r'tested = "==(?P<tested>[^"]+)"',
     re.MULTILINE,
 )
 
 
-def latest_tag(owner: str, repo: str) -> str:
+def latest_version(crate: str) -> str:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repo}/releases/latest",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "gdsuite-pin-tools"},
+        f"https://crates.io/api/v1/crates/{crate}",
+        headers={"User-Agent": "gdsuite-pin-tools (https://github.com/q-rault/gdsuite)"},
     )
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request) as response:
-        return json.load(response)["tag_name"]
+        return json.load(response)["crate"]["max_stable_version"]
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
@@ -75,11 +69,11 @@ def main() -> int:
 
     manifest = MANIFEST.read_text(encoding="utf-8")
     changes = []
-    for match in ACQUIRE.finditer(manifest):
-        tool, owner, repo, tag = match.group("tool", "owner", "repo", "tag")
-        latest = latest_tag(owner, repo)
-        if latest != tag:
-            changes.append((tool, owner, repo, tag, latest))
+    for match in TOOL.finditer(manifest):
+        tool, tested = match.group("tool", "tested")
+        latest = latest_version(tool)
+        if latest != tested:
+            changes.append((tool, tested, latest))
 
     if not changes:
         print("every tool is pinned to its latest release")
@@ -88,48 +82,46 @@ def main() -> int:
                 out.write("changed=false\n")
         return 0
 
-    suite_version = re.search(r'^version = "([^"]+)"', CARGO_TOML.read_text(encoding="utf-8"), re.MULTILINE).group(1)
-    minor = any(version_tuple(old)[:2] != version_tuple(new)[:2] for _, _, _, old, new in changes)
+    cargo_toml = CARGO_TOML.read_text(encoding="utf-8")
+    suite_version = re.search(r'^version = "([^"]+)"', cargo_toml, re.MULTILINE).group(1)
+    minor = any(version_tuple(old)[:2] != version_tuple(new)[:2] for _, old, new in changes)
     new_version = bump(suite_version, minor)
-    pins = ", ".join(f"{tool} {new.lstrip('v')}" for tool, _, _, _, new in changes)
+    pins = ", ".join(f"{tool} {new}" for tool, _, new in changes)
     title = f"release: v{new_version} (pin {pins})"
-    for tool, _, _, old, new in changes:
+    for tool, old, new in changes:
         print(f"{tool}: {old} -> {new}")
     print(f"gdsuite: {suite_version} -> {new_version}")
     if args.dry_run:
         return 0
 
-    for tool, owner, repo, old, new in changes:
-        old_version, new_version_tool = old.lstrip("v"), new.lstrip("v")
+    for tool, old, new in changes:
         manifest = replace_once(
             manifest,
-            f'repo = "{repo}", tag = "{old}" }}\ntested = "=={old_version}"',
-            f'repo = "{repo}", tag = "{new}" }}\ntested = "=={new_version_tool}"',
+            f'[tools.{tool}]\nacquire = {{ kind = "bundled" }}\ntested = "=={old}"',
+            f'[tools.{tool}]\nacquire = {{ kind = "bundled" }}\ntested = "=={new}"',
             MANIFEST,
         )
         if tool == "gdtest":
             manifest = re.sub(
                 r'^required_harness = "==[^"]+"',
-                f'required_harness = "=={new_version_tool}"',
+                f'required_harness = "=={new}"',
                 manifest,
                 flags=re.MULTILINE,
             )
+        cargo_toml = replace_once(cargo_toml, f'{tool} = "={old}"', f'{tool} = "={new}"', CARGO_TOML)
     manifest = re.sub(
         r'(\[suite\]\nversion = )"[^"]+"', rf'\g<1>"{new_version}"', manifest, count=1
     )
     MANIFEST.write_text(manifest, encoding="utf-8", newline="\n")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "release_checksums.py")], check=True)
 
-    docs = CONFIG_DOCS.read_text(encoding="utf-8")
-    for tool, owner, repo, old, new in changes:
-        docs = docs.replace(f"{owner}/{repo}@{old}", f"{owner}/{repo}@{new}")
-    CONFIG_DOCS.write_text(docs, encoding="utf-8", newline="\n")
-
-    cargo_toml = CARGO_TOML.read_text(encoding="utf-8")
     cargo_toml = replace_once(
         cargo_toml, f'version = "{suite_version}"', f'version = "{new_version}"', CARGO_TOML
     )
     CARGO_TOML.write_text(cargo_toml, encoding="utf-8", newline="\n")
+    # Moves the tools, and what they need, in Cargo.lock; fails when the new
+    # versions can't build together.
+    for tool, _, new in changes:
+        subprocess.run(["cargo", "update", "-p", tool, "--precise", new], cwd=ROOT, check=True)
     cargo_lock = CARGO_LOCK.read_text(encoding="utf-8")
     cargo_lock = replace_once(
         cargo_lock,
@@ -141,20 +133,19 @@ def main() -> int:
 
     if args.github_output:
         lines = [
-            f"Pins the latest tool releases and bumps gdsuite to {new_version}. "
+            f"Builds the latest tool releases into gdsuite and bumps it to {new_version}. "
             "Merging this PR tags `v" + new_version + "`, which publishes the release.",
             "",
-            "| Tool | Pinned | Latest |",
+            "| Tool | Built in | Latest |",
             "|---|---|---|",
         ]
         lines += [
-            f"| {tool} | {old} | [{new}](https://github.com/{owner}/{repo}/releases/tag/{new}) |"
-            for tool, owner, repo, old, new in changes
+            f"| {tool} | {old} | [{new}](https://crates.io/crates/{tool}/{new}) |"
+            for tool, old, new in changes
         ]
         lines += [
             "",
-            "Checksums come from each release's assets. This PR is updated in place when another "
-            "tool is released before it is merged.",
+            "This PR is updated in place when another tool is released before it is merged.",
         ]
         body = "\n".join(lines)
         with args.github_output.open("a", encoding="utf-8") as out:

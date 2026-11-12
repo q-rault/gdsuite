@@ -552,8 +552,8 @@ fn default_config_template(godot_exe: Option<&Path>) -> String {
         r#"[project]
 root = "."
 {godot_exe}
-# Each tool's version comes with gdsuite: after updating gdsuite, run
-# `gdsuite update`. To pin a tool or build it yourself, add a [tools] section:
+# The tools are built into gdsuite: updating gdsuite updates them. To use
+# another build of a tool instead, add a [tools] section:
 # https://q-rault.github.io/gdsuite/reference/gdsuite-toml
 
 [commands]

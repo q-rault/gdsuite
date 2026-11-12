@@ -19,15 +19,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(about = "Bootstrap the local gdsuite toolchain and write suite config")]
+    #[command(about = "Add GDSuite to a project: write gdsuite.toml and install the test addons")]
     Init(OutputArgs),
     #[command(about = "Rewrite gdsuite.toml to the orchestration-only schema")]
     Migrate,
-    #[command(about = "Install or repair the local gdsuite toolchain")]
+    #[command(about = "Install or repair what the project needs, such as after cloning it")]
     Setup(SetupArgs),
     #[command(
-        about = "Move the tools to the versions this gdsuite was tested with, then install them",
-        long_about = "Move the tools to the versions this gdsuite was tested with, then install them.\n\nRelease pins of gdsuite's tools are removed from [tools] in gdsuite.toml, so the tools follow gdsuite from then on. crates.io sources move to the tested version. Other sources (a folder, a Git repository, another release) are kept."
+        about = "Bring a project set up by gdsuite 0.4 or earlier up to date",
+        long_about = "Bring a project set up by gdsuite 0.4 or earlier up to date: use the tools built into this gdsuite.\n\nRelease pins of gdsuite's tools are removed from [tools] in gdsuite.toml, and the tools older versions downloaded are removed from .gdsuite/. crates.io sources move to the built-in version. Other sources (a folder, a Git repository, another release) are kept."
     )]
     Update(OutputArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]

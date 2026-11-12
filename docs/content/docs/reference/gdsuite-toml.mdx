@@ -13,10 +13,10 @@ file is organized.
 | --- | --- | --- |
 | `[project] root` | `"."` | The Godot project folder, relative to this file |
 | `[project] godot_exe` | none | The Godot program, when every computer has it at the same place. Usually left out: see [Where Godot is](/configure#where-godot-is) |
-| `[tools] gdtest_source` | The version GDSuite was tested with | Where `gdsuite setup` gets the test runner |
-| `[tools] gdhealth_source` | Same | Where it gets the code health tool |
-| `[tools] gdtypecheck_source` | Same | Where it gets the type checker |
-| `[tools] gdtidy_source` | Same | Where it gets the formatter and linter |
+| `[tools] gdtest_source` | Built in | Another build of gdtest ([tool sources](#tool-sources)) |
+| `[tools] gdhealth_source` | Built in | Another build of gdhealth ([tool sources](#tool-sources)) |
+| `[tools] gdtypecheck_source` | Built in | Another build of gdtypecheck ([tool sources](#tool-sources)) |
+| `[tools] gdtidy_source` | Built in | Another build of gdtidy ([tool sources](#tool-sources)) |
 | `[commands] default_test_target` | `"test/"` | What `gdsuite test` runs when given no arguments |
 | `[commands] default_health_subcommand` | `"health"` | What `gdsuite health` runs when given no arguments |
 | `[reports] default` | `"text"` | `"json"` makes `--report json` the default |
@@ -25,17 +25,18 @@ file is organized.
 
 ### Tool sources
 
-Without a source, a tool follows GDSuite: each release installs the version
-it was tested with. Give a source only to keep a tool at a version, or to
-build it yourself. [`gdsuite update`](/reference/commands) removes release
-pins of GDSuite's tools and moves `crate:` sources to the tested version; it
-keeps the other forms.
+Without a source, GDSuite runs the tool built into it, at the version it was
+tested with. Give a source only to use another build of a tool, such as one
+you are working on: `gdsuite setup` then installs it in `.gdsuite/`.
+[`gdsuite update`](/reference/commands) removes release pins of GDSuite's
+tools (left by GDSuite 0.4 and earlier) and moves `crate:` sources to the
+built-in version; it keeps the other forms.
 
 A tool source is one of:
 
 | Form | Example | Meaning |
 | --- | --- | --- |
-| `github:<owner>/<repo>@<tag>` | `github:q-rault/gdtest@v0.2.3` | A release archive from GitHub, checked against its known checksum. No Rust needed |
+| `github:<owner>/<repo>@<tag>` | `github:q-rault/gdtest@v0.2.3` | A release archive from GitHub. No Rust needed |
 | `crate:<name>@<version>` | `crate:gdtest@0.2.3` | Built from crates.io (needs Rust) |
 | `path:<folder>` | `path:../gdtest` | Built from a local copy (needs Rust) |
 | `git:<url>?rev=<rev>` | `git:https://github.com/q-rault/gdtest?rev=v0.2.3` | Built from a Git repository at a tag or commit (needs Rust and Git) |

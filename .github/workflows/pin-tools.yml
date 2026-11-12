@@ -1,5 +1,5 @@
-# Keeps one PR open that pins every tool to its latest release and bumps
-# gdsuite's version, on the `auto/pin-tools` branch. When several tools are
+# Keeps one PR open that builds the latest release of every tool into gdsuite
+# and bumps gdsuite's version, on the `auto/pin-tools` branch. When several tools are
 # released one after another, the same PR is updated. Merging it is a
 # release: tag-release.yml then tags the new version.
 #
@@ -33,10 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # pin_tools.py runs `cargo update`.
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Pin the latest tool releases
         id: pin
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/pin_tools.py --github-output "$GITHUB_OUTPUT"
 
       - name: Open or update the pin PR
@@ -55,5 +56,4 @@ jobs:
             .gdsuite-release.toml
             Cargo.toml
             Cargo.lock
-            docs/content/docs/configure.mdx
           delete-branch: true
