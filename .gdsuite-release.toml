@@ -1,49 +1,49 @@
 [suite]
-version = "0.4.1"
+version = "0.4.2"
 manifest_version = 1
 
 [tools.gdtest]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.3" }
-tested = "==0.2.3"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtest", tag = "v0.2.7" }
+tested = "==0.2.7"
 
 [tools.gdtest.sha256]
-"aarch64-apple-darwin" = "0032e9688e3f6fcc106a2c893ada7bd4f9eaab1f1395c43f13c8782250c15884"
-"x86_64-apple-darwin" = "4d88bbe18c6a4a622d251e59d7eec3b9a3cc8e745f3bcc26faeb00e4ed382499"
-"x86_64-pc-windows-msvc" = "546ac3b8f911de46af37aec6532db233f1140bddf29993152f068dd8b4de6c1d"
-"x86_64-unknown-linux-musl" = "e8e39bbb69b03d7a8dd380862a670aced8fad8904790d4baf5a6f3305b2adc45"
+"aarch64-apple-darwin" = "71ab5bcdf131b7c41f49e2bcdc0736f0d2cf9c655363bbb1f4b5c53cc065d392"
+"x86_64-apple-darwin" = "c5659a4272c1aba5f56f94d467b5abee6f0d32f91d1787740c3c354bf5305d53"
+"x86_64-pc-windows-msvc" = "af0a502377a35b995172caaf957db66be28e71be1c9648ae40c7f008422297aa"
+"x86_64-unknown-linux-musl" = "0a01db923c1b31a7aed498abe7f98c831149acd7666a4e0f39fa66e9fdc97241"
 
 [tools.gdhealth]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.3.1" }
-tested = "==0.3.1"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdhealth", tag = "v0.3.6" }
+tested = "==0.3.6"
 
 [tools.gdhealth.sha256]
-"aarch64-apple-darwin" = "395c2132c30d06d2606e7e0598df50254270aaf7084aabf782d693b6bb0042d0"
-"x86_64-apple-darwin" = "ed8774b690f1a5932820a56a9d6339d14ac6b3802496781b441568826c9bdf89"
-"x86_64-pc-windows-msvc" = "aeba71852471a6c4ada1fb90bd39df53af592de244becd639ce9e6dfc9eeaae5"
-"x86_64-unknown-linux-musl" = "95a572fc6f451f908977989721ab6e912af484a8a56663ddd1ec6013b30ad22e"
+"aarch64-apple-darwin" = "b5712b7bcad163cb0e75e3b88b84fa194d4fe7a98d264f537a5935623b22ea64"
+"x86_64-apple-darwin" = "316486fab4bb7860f57f0df7ed189770cdcd3cc8567498d527793d244c7c2091"
+"x86_64-pc-windows-msvc" = "a84861fdfa768a369b41c868498a45684d40ece5a8dcfb8768a54d584f5400fe"
+"x86_64-unknown-linux-musl" = "120cc24efa593c1c1db02b750bfc9684dcd16174030a7d2658ce0d1d91d209a6"
 
 [tools.gdtypecheck]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.2.1" }
-tested = "==0.2.1"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtypecheck", tag = "v0.2.4" }
+tested = "==0.2.4"
 
 [tools.gdtypecheck.sha256]
-"aarch64-apple-darwin" = "f1d9f48a5feb4ead2c9293b1ebaf4e762d86e5cdc74d1a761140b1f5e0c3ede9"
-"x86_64-apple-darwin" = "c77c7198ca026879d4270e35dafaa1f4595580cb8e2c829eae0d544cab134cc0"
-"x86_64-pc-windows-msvc" = "da3a9ca3d8140a32f884dc46938c3786653ff59130529d071dfca6e295377c48"
-"x86_64-unknown-linux-musl" = "0c1c70e09234bd2922a15334e9533b38aa271df5258e456b60f12302a54be5fc"
+"aarch64-apple-darwin" = "19f62ce2eda2cd0d833a69aa115c96c60fd68839bdf02e083bbf0642e00168ee"
+"x86_64-apple-darwin" = "42137c47e404d2963cb52fd02d29ef69e8b5936c634cae70824ac0f25099c96b"
+"x86_64-pc-windows-msvc" = "5519862d686bbe8f4b1ce4dad7b26a7f06e64909f1cd79567585f544d08248e5"
+"x86_64-unknown-linux-musl" = "0a1fcce5254ada701e7da220c5d76054e0186a4bdca94401cc8a64c95139e01e"
 
 [tools.gdtidy]
-acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", tag = "v0.3.0" }
-tested = "==0.3.0"
+acquire = { kind = "github_release_repo", owner = "q-rault", repo = "gdtidy", tag = "v0.3.4" }
+tested = "==0.3.4"
 
 [tools.gdtidy.sha256]
-"aarch64-apple-darwin" = "d93b021d56669231ba9cc8819f1e00c8e5b525e3d001598c7556815f256f9d01"
-"x86_64-apple-darwin" = "8da27d425461f9b1e90bd1ba5b500a9ffc4ed556dbabfd52491e684f82323a41"
-"x86_64-pc-windows-msvc" = "77a46cb5e6d58e69c9049514fa1932ddfbbabeb97ea3f704093e6c21ca8e4469"
-"x86_64-unknown-linux-musl" = "6b712c1f67bc8f5be59a4bdda7494c674c0f786d4e2db77319280dc21d8657de"
+"aarch64-apple-darwin" = "ed661651f27ed04df8e3ca10cff0451bb8db0a4070b2e0577ba3aa6f9db1d8a9"
+"x86_64-apple-darwin" = "c248a292d233431339fc73db85f58559ff0e43400f44b269d2df8508722482ef"
+"x86_64-pc-windows-msvc" = "a52f01e9919e3cf3cd6d9bc3d6e7371dd9467cc24fd9a93a90b336a569a4bc96"
+"x86_64-unknown-linux-musl" = "ee48881f789b7a9c3787ce1e49e8fc4fd8b469fcfdc70e607d5aef8c001ec425"
 
 [contracts.gdtest]
-required_harness = "==0.2.3"
+required_harness = "==0.2.7"
 
 [contracts.gdhealth]
 required_schema_version = 1
