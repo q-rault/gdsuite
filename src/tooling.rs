@@ -482,6 +482,69 @@ pub fn ensure_gdtest_class_cache(
     Ok(())
 }
 
+/// Whether every tool runs built into gdsuite, the default: then a project
+/// needs no `gdsuite setup` before commands run.
+pub fn all_bundled(config: &GdsuiteConfig) -> bool {
+    let plan = install_plan(config);
+    crate::config::TOOL_NAMES
+        .into_iter()
+        .all(|tool| *plan.get(tool) == ToolAcquireSpec::Bundled)
+}
+
+/// The toolchain of a project that was never set up: the tools built into
+/// gdsuite, and Godot wherever it is found. `godot_exe` is empty when Godot
+/// isn't found: formatting, linting and code health don't need it, and the
+/// tools that do say so.
+pub fn bundled_toolchain(
+    context: &ProjectContext,
+    cli_godot: Option<&Path>,
+    config: &GdsuiteConfig,
+) -> Toolchain {
+    Toolchain {
+        godot_exe: resolve_godot(context, cli_godot, Some(config)).unwrap_or_default(),
+        gdtidy: process::bundled_tool_path("gdtidy"),
+        gdtest: process::bundled_tool_path("gdtest"),
+        gdhealth: process::bundled_tool_path("gdhealth"),
+        gdtypecheck: process::bundled_tool_path("gdtypecheck"),
+    }
+}
+
+/// Installs the gdtest addons tests need, when the project has none or has
+/// another harness version, and gdtest is the one built into gdsuite (other
+/// gdtest builds get their addons from `gdsuite setup`). `None` when nothing
+/// had to be done.
+pub fn ensure_test_addons(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    godot_exe: &Path,
+) -> Result<Option<AddonInstallReport>> {
+    if install_plan(config).gdtest != ToolAcquireSpec::Bundled {
+        return Ok(None);
+    }
+    let required = release_manifest()
+        .contracts
+        .gdtest
+        .required_harness
+        .trim_start_matches("==")
+        .to_string();
+    let installed = harness_version_of(&context.root.join(GDTEST_HARNESS_PATH));
+    if installed.as_deref() == Some(required.as_str()) {
+        return Ok(None);
+    }
+    if godot_exe.as_os_str().is_empty() {
+        return Err(anyhow!(
+            "Godot not found, and tests need it; install Godot and add it to PATH, set GODOT_EXE, or pass --godot-exe"
+        ));
+    }
+    context.ensure_dirs()?;
+    ensure_gitignored(context)?;
+    bundled::write_gdtest_addons(&tool_source_cache_dir(context, "gdtest"))?;
+    let report = install_gdtest_addons(context, config)?;
+    bundled::refresh_gdtest_launcher(&gdtest_launcher_path(context))?;
+    ensure_gdtest_class_cache(context, config, godot_exe, &report)?;
+    Ok(Some(report))
+}
+
 pub fn find_binary(context: &ProjectContext, names: &[&str]) -> Option<PathBuf> {
     let roots = [
         context.gdsuite_dir.join("tools").join("gdtidy").join("bin"),

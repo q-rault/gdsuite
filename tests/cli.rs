@@ -1449,3 +1449,49 @@ fn migrate_keeps_a_tool_file_whose_section_gdsuite_toml_already_has() {
         .unwrap();
     assert_eq!(parsed["test"]["timeout"].as_integer(), Some(5));
 }
+
+#[test]
+fn commands_run_in_a_project_that_was_never_set_up() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("player.gd"),
+        "extends Node\n\n\nfunc _ready() -> void:\n\tpass\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["fmt", "--", "--check"])
+        .assert()
+        .success();
+    fixture.cmd().arg("lint").assert().success();
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(pin("gdtidy {gdtidy}")));
+
+    // Nothing was written: no settings file, no .gdsuite/.
+    assert!(!fixture.root.join("gdsuite.toml").exists());
+    assert!(!fixture.root.join(".gdsuite").exists());
+}
+
+#[test]
+fn a_project_that_builds_a_tool_itself_still_needs_setup() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        "[tools]\ngdtidy_source = \"path:../gdtidy\"\n",
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("gdsuite setup"));
+}
