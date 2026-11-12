@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::Instant,
 };
 
@@ -36,8 +37,14 @@ pub struct CommandError {
     pub message: String,
 }
 
+/// `--godot-exe`, for the commands that find Godot themselves.
+static CLI_GODOT: OnceLock<PathBuf> = OnceLock::new();
+
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(godot) = &cli.godot_exe {
+        let _ = CLI_GODOT.set(godot.clone());
+    }
     let root = fs::canonicalize(&cli.project_root)
         .with_context(|| format!("invalid project root {}", cli.project_root.display()))?;
     let context = ProjectContext::new(process::normalize_windows_path(&root));
@@ -99,22 +106,13 @@ fn update_tools(
     for change in &changes {
         match change {
             PinChange::Unpinned { tool, from } => {
-                let tested = release
+                let built_in = release
                     .tool(tool)
-                    .map(|entry| format!("v{}", entry.version()))
+                    .map(|entry| entry.version().to_string())
                     .unwrap_or_default();
-                if *from == tested {
-                    output.step(format!(
-                        "{tool}: removed the pin to {from}, the version gdsuite installs; it now follows gdsuite"
-                    ));
-                } else {
-                    output.step(format!(
-                        "{tool}: removed the pin to {from}, it now follows gdsuite ({from} -> {tested})"
-                    ));
-                }
-            }
-            PinChange::CrateBumped { tool, from, to } => {
-                output.step(format!("{tool}: crates.io version {from} -> {to}"));
+                output.step(format!(
+                    "{tool}: removed {from}; it now runs the {tool} built into gdsuite ({built_in})"
+                ));
             }
             PinChange::Kept { tool, source } => {
                 output.info(format!(
@@ -260,9 +258,19 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         resolve_output_mode(args.output.output),
         CommandScope::Doctor,
     );
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     let manifest = if context.manifest_path.exists() {
         tooling::load_manifest(context).ok()
+    } else if tooling::all_bundled(&config) {
+        // Never set up, and nothing to install: the tools are built in.
+        let toolchain = tooling::bundled_toolchain(context, cli_godot, &config);
+        Some(Manifest {
+            godot_exe: None,
+            gdtidy: Some(toolchain.gdtidy),
+            gdtest: Some(toolchain.gdtest),
+            gdhealth: Some(toolchain.gdhealth),
+            gdtypecheck: Some(toolchain.gdtypecheck),
+        })
     } else {
         None
     };
@@ -463,6 +471,10 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
             EXIT_TOOLCHAIN_ERROR,
             if missing.is_empty() {
                 "toolchain compatibility check failed".to_string()
+            } else if missing == ["godot"] {
+                // setup can't install Godot: say how to point gdsuite at it.
+                "Godot not found; install Godot and add it to PATH, set GODOT_EXE, or pass --godot-exe"
+                    .to_string()
             } else {
                 format!(
                     "missing tools: {}; run `gdsuite setup` to install the local toolchain",
@@ -549,6 +561,7 @@ fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     }
 
     let toolchain = load_toolchain_or_error(context)?;
+    install_test_addons_if_needed(context, &config, &toolchain)?;
     let args = default_test_args(&config, args.args);
     process::run_checked_streaming(&toolchain.gdtest, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
@@ -596,7 +609,7 @@ fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
 }
 
 fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
-    let config = load_config_or_error(context)?;
+    let config = load_runtime_config(context)?;
     if args.name == "ci" {
         let report = aggregate_ci_report(context, &config)?;
         print_and_store_report(context, &config, "ci", &report)?;
@@ -686,6 +699,38 @@ fn load_saved_suite_report(
     })
 }
 
+/// Tests run inside Godot, with gdtest's addons in the project: install them
+/// the first time, or when this gdsuite's gdtest needs another version.
+fn install_test_addons_if_needed(
+    context: &ProjectContext,
+    config: &GdsuiteConfig,
+    toolchain: &tooling::Toolchain,
+) -> Result<()> {
+    let report = tooling::ensure_test_addons(context, config, &toolchain.godot_exe)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
+    let Some(report) = report else {
+        return Ok(());
+    };
+    match &report.upgrade {
+        Some(upgrade) => eprintln!(
+            "gdsuite: upgraded the gdtest addons from {} to {}; the files they replaced are in {}",
+            upgrade.from_version,
+            upgrade.to_version,
+            upgrade.backup_dir.display()
+        ),
+        None => eprintln!(
+            "gdsuite: installed the gdtest addons tests need in addons/gdtest and addons/gdtest_editor; commit them"
+        ),
+    }
+    for skipped in &report.skipped_modified {
+        eprintln!(
+            "warning: kept {}, which you changed; it may not match this gdtest",
+            skipped.display()
+        );
+    }
+    Ok(())
+}
+
 fn load_runtime_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
     if context.config_path.exists() {
         tooling::load_config(context)
@@ -700,7 +745,7 @@ fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
         return Err(command_error(
             EXIT_USAGE_ERROR,
             format!(
-                "missing {}; run `gdsuite init` first to bootstrap this project",
+                "no {} here, so nothing to update: without one, gdsuite uses the tools built into it",
                 context.config_path.display()
             ),
         ));
@@ -711,20 +756,27 @@ fn load_config_or_error(context: &ProjectContext) -> Result<GdsuiteConfig> {
 }
 
 fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchain> {
-    let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
-    let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)?;
-    process::set_godot_exe(&toolchain.godot_exe);
-    if process::bundled_tool_name(&toolchain.gdtest).is_some() {
+    let config = load_runtime_config(context)?;
+    let toolchain = if !context.manifest_path.exists() && tooling::all_bundled(&config) {
+        // Never set up, and nothing to install: the tools are built in.
+        tooling::bundled_toolchain(context, CLI_GODOT.get().map(PathBuf::as_path), &config)
+    } else {
+        let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
+        resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)?
+    };
+    if !toolchain.godot_exe.as_os_str().is_empty() {
+        process::set_godot_exe(&toolchain.godot_exe);
+    }
+    let launcher = tooling::gdtest_launcher_path(context);
+    if process::bundled_tool_name(&toolchain.gdtest).is_some() && launcher.exists() {
         // Keep the gdtest the editor panel runs the one built into this
         // gdsuite. Best effort: a running panel can hold the file.
-        let _ = bundled::refresh_gdtest_launcher(&tooling::gdtest_launcher_path(context));
+        let _ = bundled::refresh_gdtest_launcher(&launcher);
     }
     // After updating gdsuite, or editing [tools], the installed tools lag
     // behind until `gdsuite setup` runs: say so instead of running them silently.
-    if let Ok(config) = load_runtime_config(context) {
-        for drift in tooling::installed_drift(context, &config) {
-            eprintln!("warning: {}", drift.message());
-        }
+    for drift in tooling::installed_drift(context, &config) {
+        eprintln!("warning: {}", drift.message());
     }
     Ok(toolchain)
 }
@@ -734,7 +786,7 @@ fn load_manifest_or_error(context: &ProjectContext, code: u8) -> Result<Manifest
         return Err(command_error(
             code,
             format!(
-                "missing {}; run `gdsuite init` or `gdsuite setup` to install the local toolchain",
+                "missing {}; run `gdsuite setup` to install the tools [tools] in gdsuite.toml asks for",
                 context.manifest_path.display()
             ),
         ));

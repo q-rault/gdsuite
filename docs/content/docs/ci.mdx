@@ -45,7 +45,6 @@ jobs:
           tar -xzf gdsuite.tar.gz -C "$RUNNER_TEMP/bin" gdsuite
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - run: gdsuite setup --output plain
       - run: gdsuite check
       - run: gdsuite test
 ```
@@ -96,5 +95,7 @@ Any Linux, Windows or macOS machine works. The steps are always the same:
 2. put the `gdsuite` program on the `PATH` (a [release
    archive](https://github.com/q-rault/gdsuite/releases), or
    `cargo install gdsuite`),
-3. run `gdsuite setup --output plain`, then `gdsuite check` and
-   `gdsuite test`.
+3. run `gdsuite check` and `gdsuite test`.
+
+If `gdsuite.toml` gives a tool a source in `[tools]`, run
+`gdsuite setup --output plain` first, to install it.

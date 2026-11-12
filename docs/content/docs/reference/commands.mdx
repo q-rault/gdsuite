@@ -7,8 +7,8 @@ description: Every gdsuite command, its options, and how to pass options to the 
 
 | Command | What it does |
 | --- | --- |
-| `gdsuite init` | Add GDSuite to a project: write `gdsuite.toml`, install the test addons |
-| `gdsuite setup` | Install or repair what the project needs, for example after cloning it or deleting `.gdsuite/` |
+| `gdsuite init` | Optional: write a `gdsuite.toml` with every setting at its default, and install the test addons |
+| `gdsuite setup` | Install the tools `[tools]` asks for, and repair the test addons |
 | `gdsuite update` | Bring a project set up by GDSuite 0.4 or earlier up to date: removes old tool versions from `[tools]` and the downloaded tools from `.gdsuite/` |
 | `gdsuite migrate` | Move older settings (`gdtest.toml`, `gdhealth.toml`, `gdtidy.toml`, `gdlintrc`, `gdformatrc`, settings from GDSuite 0.1) into `gdsuite.toml` |
 | `gdsuite doctor` | Show where Godot and each tool are, their versions, and what is missing |

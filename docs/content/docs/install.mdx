@@ -65,44 +65,40 @@ Open a **new** terminal and check it works:
 gdsuite --version
 ```
 
-## 2. Add GDSuite to your project
+## 2. Use it in your project
 
-In a terminal, go to your project's folder (the one with `project.godot`) and
-run `gdsuite init`:
+There is nothing to set up. In a terminal, go to your project's folder (the
+one with `project.godot`) and run a check:
 
 ```bash
 cd path/to/my-game
-gdsuite init
+gdsuite check
 ```
 
-It takes a few seconds, works offline, and prints what it does:
+GDSuite works with its defaults until you change them. The first
+`gdsuite test` adds the files your tests need to run inside Godot, and says
+so.
 
-```text
-[gdsuite:init] step  resolving project setup
-[gdsuite:init] step  resolving Godot executable
-[gdsuite:init] step  writing gdsuite config
-[gdsuite:init] step  installing local toolchain
-[gdsuite:init] step  saving tool manifest
-[gdsuite:init] step  installing gdtest addons
-[gdsuite:init] step  refreshing Godot class cache
-[gdsuite:init] step  verifying installed tools
-[gdsuite:init] step  recording installation state
-[gdsuite:init] ok    initialization complete
-```
+As you go, your project gets:
 
-Your project now has:
-
-| What | Why | Commit it? |
+| What | When | Commit it? |
 | --- | --- | --- |
-| `gdsuite.toml` | GDSuite's settings | Yes |
-| `addons/gdtest/` | Lets your tests run inside Godot | Yes |
-| `addons/gdtest_editor/` | The test panel for the Godot editor | Yes |
-| `.gdsuite/` | What GDSuite keeps for this project on this computer | No (added to `.gitignore`) |
+| `addons/gdtest/` | The first `gdsuite test`: lets your tests run inside Godot | Yes |
+| `addons/gdtest_editor/` | The first `gdsuite test`: the test panel for the Godot editor | Yes |
+| `gdsuite.toml` | When you want to change a setting ([Configure](/configure)) | Yes |
+| `.gdsuite/` | The first `gdsuite test`: what GDSuite keeps for this project on this computer | No (added to `.gitignore`) |
+
+<Callout title="Prefer to set everything up first?">
+
+`gdsuite init` writes a `gdsuite.toml` with every setting at its default and
+installs the test addons, so the whole team sees them in the first commit.
+
+</Callout>
 
 ### If Godot isn't found
 
 GDSuite looks for Godot in the usual places. If yours has another name or
-lives somewhere else, tell `init` where it is:
+lives somewhere else, tell GDSuite once where it is:
 
 ```bash
 gdsuite init --godot-exe "C:/Tools/Godot_v4.7-stable_win64.exe"
@@ -110,16 +106,17 @@ gdsuite init --godot-exe "C:/Tools/Godot_v4.7-stable_win64.exe"
 
 GDSuite remembers it for this project, on this computer (the path is not
 written in `gdsuite.toml`, so teammates keep their own). You can also set the
-`GODOT_EXE` environment variable once for all your projects.
+`GODOT_EXE` environment variable once for all your projects, or pass
+`--godot-exe` to any command.
 
-## 3. Check everything is ready
+## 3. If something doesn't work
 
 ```bash
 gdsuite doctor
 ```
 
-It lists Godot and each tool built into GDSuite, with its version, and ends
-with:
+Run it in your project's folder. It lists Godot and each tool built into
+GDSuite, with its version, and ends with:
 
 ```text
 [gdsuite:doctor] status ok

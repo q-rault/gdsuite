@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -107,11 +106,6 @@ pub struct ReleaseTools {
 pub struct ReleaseTool {
     pub acquire: ToolAcquireSpec,
     pub tested: String,
-    /// SHA-256 of each release archive, keyed by target triple. GitHub release
-    /// assets can be replaced after publishing, so installs of the suite-pinned
-    /// release are checked against these.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub sha256: BTreeMap<String, String>,
 }
 
 impl ReleaseTool {
@@ -643,31 +637,6 @@ fn escape_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bundled_github_releases_have_a_checksum_for_every_target() {
-        let manifest = ReleaseManifest::bundled();
-        for name in ["gdtest", "gdhealth", "gdtypecheck", "gdtidy"] {
-            let tool = manifest.tool(name).unwrap();
-            if !matches!(tool.acquire, ToolAcquireSpec::GithubReleaseRepo { .. }) {
-                continue;
-            }
-            for target in [
-                "x86_64-pc-windows-msvc",
-                "x86_64-apple-darwin",
-                "aarch64-apple-darwin",
-                "x86_64-unknown-linux-musl",
-            ] {
-                let digest = tool.sha256.get(target).unwrap_or_else(|| {
-                    panic!("{name} has no sha256 for {target}; run scripts/release_checksums.py")
-                });
-                assert!(
-                    digest.len() == 64 && digest.chars().all(|c| c.is_ascii_hexdigit()),
-                    "{name} {target}: {digest}"
-                );
-            }
-        }
-    }
 
     #[test]
     fn test_github_release_repo_render_requested() {

@@ -1,11 +1,10 @@
-//! `gdsuite update`: move the tools pinned in `gdsuite.toml` to the versions
-//! this gdsuite was tested with (the versions built into it).
+//! `gdsuite update`: bring the `[tools]` section of a project set up by
+//! gdsuite 0.4 or earlier up to date, so it uses the tools built into gdsuite.
 //!
-//! A release pin of one of gdsuite's own tools (`github:q-rault/gdtest@v0.2.1`)
-//! is removed, so the tool follows gdsuite from then on. A crates.io source
-//! (`crate:gdtest@0.2.1`) keeps building from crates.io, at the tested
-//! version. Any other source (a local folder, a Git repository, another
-//! release) is the project's choice and is left as it is.
+//! A release pin (`github:q-rault/gdtest@v0.2.1`) or crates.io source
+//! (`crate:gdtest@0.2.1`) of one of gdsuite's own tools is removed: both were
+//! ways to get the tool gdsuite now has built in. Any other source (a local
+//! folder, a Git repository) is the project's choice and is left as it is.
 //!
 //! The file is edited line by line, so its comments and layout are kept.
 
@@ -14,14 +13,8 @@ use crate::tooling::own_release_prefix;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinChange {
-    /// The release pin was removed: the tool now follows gdsuite.
+    /// The source was removed: the tool built into gdsuite runs instead.
     Unpinned { tool: String, from: String },
-    /// The crates.io version was moved to the tested one.
-    CrateBumped {
-        tool: String,
-        from: String,
-        to: String,
-    },
     /// A source gdsuite does not manage, kept as it is.
     Kept { tool: String, source: String },
 }
@@ -107,44 +100,13 @@ fn rewrite_source_line(
         return None;
     }
     let source = value.trim().trim_matches('"').to_string();
-    let tested = release.tool(tool)?.version().to_string();
-    let ours = own_release_prefix(tool);
+    release.tool(tool)?;
+    let ours = source.starts_with(&own_release_prefix(tool))
+        || source.starts_with(&format!("crate:{tool}@"));
     let tool = tool.to_string();
-
-    {
-        if let Some(from) = source.strip_prefix(&ours) {
-            return Some((
-                None,
-                PinChange::Unpinned {
-                    tool,
-                    from: from.to_string(),
-                },
-            ));
-        }
-
-        let crate_prefix = format!("crate:{tool}@");
-        if let Some(from) = source.strip_prefix(&crate_prefix) {
-            let to = tested;
-            let indent = &line[..line.len() - line.trim_start().len()];
-            let ending = if line.ends_with("\r\n") {
-                "\r\n"
-            } else if line.ends_with('\n') {
-                "\n"
-            } else {
-                ""
-            };
-            let replacement = format!("{indent}{tool}_source = \"{crate_prefix}{to}\"{ending}");
-            return Some((
-                Some(replacement),
-                PinChange::CrateBumped {
-                    tool,
-                    from: from.to_string(),
-                    to,
-                },
-            ));
-        }
+    if ours {
+        return Some((None, PinChange::Unpinned { tool, from: source }));
     }
-
     Some((Some(line.to_string()), PinChange::Kept { tool, source }))
 }
 
@@ -154,10 +116,6 @@ mod tests {
 
     fn release() -> &'static ReleaseManifest {
         ReleaseManifest::bundled()
-    }
-
-    fn tested_version(tool: &str) -> String {
-        release().tool(tool).unwrap().version().to_string()
     }
 
     #[test]
@@ -173,34 +131,30 @@ mod tests {
             vec![
                 PinChange::Unpinned {
                     tool: "gdtest".into(),
-                    from: "v0.1.1".into()
+                    from: "github:q-rault/gdtest@v0.1.1".into()
                 },
                 PinChange::Unpinned {
                     tool: "gdtidy".into(),
-                    from: "v0.1.0".into()
+                    from: "github:q-rault/gdtidy@v0.1.0".into()
                 },
             ]
         );
     }
 
     #[test]
-    fn crate_sources_move_to_the_tested_version_and_others_are_kept() {
+    fn crate_sources_are_removed_and_others_are_kept() {
         let text = "# comment kept\n[tools]\n# why we build gdtest\ngdtest_source = \"crate:gdtest@0.1.0\"\ngdhealth_source = \"path:../gdhealth\"\n";
         let (updated, changes) = refresh_tool_pins(text, release());
-        let gdtest = tested_version("gdtest");
         assert_eq!(
             updated,
-            format!(
-                "# comment kept\n[tools]\n# why we build gdtest\ngdtest_source = \"crate:gdtest@{gdtest}\"\ngdhealth_source = \"path:../gdhealth\"\n"
-            )
+            "# comment kept\n[tools]\n# why we build gdtest\ngdhealth_source = \"path:../gdhealth\"\n"
         );
         assert_eq!(
             changes,
             vec![
-                PinChange::CrateBumped {
+                PinChange::Unpinned {
                     tool: "gdtest".into(),
-                    from: "0.1.0".into(),
-                    to: gdtest
+                    from: "crate:gdtest@0.1.0".into()
                 },
                 PinChange::Kept {
                     tool: "gdhealth".into(),
