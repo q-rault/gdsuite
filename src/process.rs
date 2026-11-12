@@ -26,7 +26,7 @@ pub fn run(command_path: &Path, args: &[String], cwd: &Path) -> Result<ProcessOu
     command.args(args).current_dir(cwd);
     let output = command
         .output()
-        .with_context(|| format!("failed to execute {}", command_path.display()))?;
+        .with_context(|| format!("failed to execute {}", shown(command_path)))?;
 
     Ok(ProcessOutput {
         status: output.status,
@@ -40,7 +40,7 @@ pub fn run_checked(command_path: &Path, args: &[String], cwd: &Path) -> Result<P
     if !output.status.success() {
         return Err(anyhow!(
             "{} {}\nstdout:\n{}\nstderr:\n{}",
-            command_path.display(),
+            shown(command_path),
             describe_exit(output.status.code()),
             output.stdout,
             output.stderr
@@ -58,17 +58,26 @@ pub fn run_checked_streaming(command_path: &Path, args: &[String], cwd: &Path) -
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .with_context(|| format!("failed to execute {}", command_path.display()))?;
+        .with_context(|| format!("failed to execute {}", shown(command_path)))?;
 
     if !status.success() {
         return Err(anyhow!(
             "{} {}",
-            command_path.display(),
+            shown(command_path),
             describe_exit(status.code())
         ));
     }
 
     Ok(())
+}
+
+/// How messages name a program: a built-in tool by its name (`gdtest`), any
+/// other by its path.
+fn shown(command_path: &Path) -> String {
+    match bundled_tool_name(command_path) {
+        Some(name) => name.to_string(),
+        None => command_path.display().to_string(),
+    }
 }
 
 /// How a failed process ended, as in "failed with exit code 1".
