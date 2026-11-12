@@ -3,19 +3,13 @@
 #![cfg(windows)]
 
 use std::{
-    collections::HashMap,
     fs,
-    io::{Read, Write},
-    net::TcpListener,
     path::{Path, PathBuf},
-    sync::Arc,
-    thread,
 };
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
-use zip::{ZipWriter, write::SimpleFileOptions};
 
 #[test]
 fn fmt_defaults_to_dot() {
@@ -432,7 +426,7 @@ fn update_removes_old_release_pins_and_installs_the_tested_tools() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "gdtest: removed the pin to v0.1.1, it now follows gdsuite",
+            "gdtest: removed github:q-rault/gdtest@v0.1.1; it now runs the gdtest built into gdsuite",
         ))
         .stdout(predicate::str::contains("update complete"));
 
@@ -459,7 +453,7 @@ fn doctor_reports_tools_that_lag_behind_and_old_pins() {
         .arg("doctor")
         .assert()
         .stdout(predicate::str::contains(
-            "this project now uses github:q-rault/gdtest@v0.1.1; run `gdsuite setup`",
+            "this project now uses github:q-rault/gdtest@v0.1.1; run `gdsuite update`",
         ))
         .stdout(predicate::str::contains(
             "gdtest is pinned to v0.1.1 in gdsuite.toml",
@@ -578,7 +572,6 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
 struct Fixture {
     _tempdir: TempDir,
     root: PathBuf,
-    release_server: TestHttpServer,
 }
 
 impl Fixture {
@@ -586,89 +579,16 @@ impl Fixture {
         let tempdir = tempfile::tempdir().unwrap();
         let root = tempdir.path().join("project");
         fs::create_dir_all(&root).unwrap();
-        let release_server = TestHttpServer::new(HashMap::from([
-            (
-                pin(
-                    "/q-rault/gdtest/releases/download/v{gdtest}/gdtest-v{gdtest}-x86_64-pc-windows-msvc.zip",
-                ),
-                build_zip(&[
-                    (
-                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/gdtest.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtest {gdtest}\r\n",
-                    ),
-                    (
-                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdtest_worker.gd",
-                        "const HARNESS_VERSION = \"{gdtest}\"\nload(\"res://addons/gdtest/gdunit4_chain.gd\")\n",
-                    ),
-                    (
-                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdunit4_chain.gd",
-                        "",
-                    ),
-                    (
-                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest/gdt.gd",
-                        "",
-                    ),
-                    (
-                        "gdtest-v{gdtest}-x86_64-pc-windows-msvc/addons/gdtest_editor/plugin.gd",
-                        "_panel = null\n",
-                    ),
-                ]),
-            ),
-            (
-                pin(
-                    "/q-rault/gdhealth/releases/download/v{gdhealth}/gdhealth-v{gdhealth}-x86_64-pc-windows-msvc.zip",
-                ),
-                build_zip(&[(
-                    "gdhealth-v{gdhealth}-x86_64-pc-windows-msvc/gdhealth.cmd",
-                    "@echo off\r\n@if \"%1\"==\"--help\" echo gdhealth help\r\n@if \"%1\"==\"--version\" echo gdhealth {gdhealth}\r\n@if \"%1\"==\"--schema-version\" echo 1\r\n@if \"%1\"==\"schema-version\" echo 1\r\n",
-                )]),
-            ),
-            (
-                pin(
-                    "/q-rault/gdtidy/releases/download/v{gdtidy}/gdtidy-v{gdtidy}-x86_64-pc-windows-msvc.zip",
-                ),
-                build_zip(&[(
-                    "gdtidy-v{gdtidy}-x86_64-pc-windows-msvc/gdtidy.cmd",
-                    &GDTIDY_CMD.replace('\n', "\r\n"),
-                )]),
-            ),
-            (
-                pin(
-                    "/q-rault/gdtypecheck/releases/download/v{gdtypecheck}/gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc.zip",
-                ),
-                build_zip(&[
-                    (
-                        "gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc/gdtypecheck.cmd",
-                        "@echo off\r\n@if \"%1\"==\"--version\" echo gdtypecheck {gdtypecheck}\r\n",
-                    ),
-                    (
-                        "gdtypecheck-v{gdtypecheck}-x86_64-pc-windows-msvc/README.md",
-                        "gdtypecheck\n",
-                    ),
-                ]),
-            ),
-        ]));
 
         Self {
             _tempdir: tempdir,
             root,
-            release_server,
         }
     }
 
     fn cmd(&self) -> Command {
         let mut command = Command::cargo_bin("gdsuite").unwrap();
-        command
-            .current_dir(&self.root)
-            .env("PATH", self.path_env())
-            .env(
-                "GDSUITE_CRATES_DOWNLOAD_BASE_URL",
-                self.release_server.url(),
-            )
-            .env("GDSUITE_GITHUB_RELEASE_BASE_URL", self.release_server.url())
-            // The mock server's archives are not the real releases the bundled
-            // manifest has checksums for.
-            .env("GDSUITE_SKIP_RELEASE_CHECKSUMS", "1");
+        command.current_dir(&self.root).env("PATH", self.path_env());
         command
     }
 
@@ -936,92 +856,6 @@ root = "."
             .trim()
             .to_string()
     }
-}
-
-struct TestHttpServer {
-    url: String,
-    _handle: thread::JoinHandle<()>,
-}
-
-impl TestHttpServer {
-    fn new<T: Into<TestRoute>>(routes: HashMap<String, T>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let base_url = format!("http://{}", address);
-        let routes = Arc::new(
-            routes
-                .into_iter()
-                .map(|(path, route)| (path, route.into()))
-                .collect::<HashMap<_, _>>(),
-        );
-        let handle = thread::spawn(move || {
-            for stream in listener.incoming().take(16) {
-                let mut stream = match stream {
-                    Ok(stream) => stream,
-                    Err(_) => continue,
-                };
-                let mut buffer = [0_u8; 4096];
-                let bytes = match stream.read(&mut buffer) {
-                    Ok(bytes) => bytes,
-                    Err(_) => continue,
-                };
-                let request = String::from_utf8_lossy(&buffer[..bytes]);
-                let path = request
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/");
-                let body = routes
-                    .get(path)
-                    .map(|route| route.body.clone())
-                    .unwrap_or_else(|| b"not found".to_vec());
-                let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                let _ = stream.write_all(header.as_bytes());
-                let response_body = if let Ok(text) = String::from_utf8(body.clone()) {
-                    text.replace("__BASE_URL__", &base_url).into_bytes()
-                } else {
-                    body
-                };
-                let _ = stream.write_all(&response_body);
-            }
-        });
-
-        Self {
-            url: format!("http://{}", address),
-            _handle: handle,
-        }
-    }
-
-    fn url(&self) -> String {
-        self.url.clone()
-    }
-}
-
-struct TestRoute {
-    body: Vec<u8>,
-}
-
-impl From<Vec<u8>> for TestRoute {
-    fn from(body: Vec<u8>) -> Self {
-        Self { body }
-    }
-}
-
-fn build_zip(entries: &[(&str, &str)]) -> Vec<u8> {
-    let mut buffer = std::io::Cursor::new(Vec::new());
-    {
-        let mut archive = ZipWriter::new(&mut buffer);
-        let options = SimpleFileOptions::default();
-        for (path, contents) in entries {
-            archive.start_file(pin(path), options).unwrap();
-            archive.write_all(pin(contents).as_bytes()).unwrap();
-        }
-        archive.finish().unwrap();
-    }
-    buffer.into_inner()
 }
 
 fn write_cmd(path: &Path, body: &str) {

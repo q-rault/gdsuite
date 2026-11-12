@@ -1,15 +1,9 @@
 use std::{
-    env, fs, io,
+    env, fs,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, anyhow};
-use flate2::read::GzDecoder;
-use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
-use serde::Deserialize;
-use tar::Archive;
-use zip::ZipArchive;
 
 use crate::{
     bundled,
@@ -101,17 +95,6 @@ pub struct AddonUpgrade {
     pub to_version: String,
     pub backup_dir: PathBuf,
     pub replaced: Vec<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubReleaseResponse {
-    assets: Vec<GithubReleaseAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubReleaseAsset {
-    name: String,
-    url: String,
 }
 
 impl ProjectContext {
@@ -616,31 +599,10 @@ fn install_tool(
             ];
             process::run_checked(&cargo()?, &args, &context.root)?;
         }
-        ToolAcquireSpec::Crate {
-            crate_name,
-            version,
-        } => {
-            let source_root = tool_source_cache_dir(context, name);
-            reset_dir(&source_root)?;
-            let archive_path = download_file(
-                &crate_download_url(crate_name, version),
-                &tool_download_cache_dir(context, name)
-                    .join(format!("{crate_name}-{version}.crate")),
-            )?;
-            unpack_archive(&archive_path, &source_root)?;
-
-            let args = vec![
-                "install".to_string(),
-                crate_name.clone(),
-                "--version".to_string(),
-                version.clone(),
-                "--root".to_string(),
-                root.display().to_string(),
-                // setup installs or repairs: replace a binary cargo has no
-                // record of, such as one an earlier gdsuite downloaded.
-                "--force".to_string(),
-            ];
-            process::run_checked(&cargo()?, &args, &context.root)?;
+        ToolAcquireSpec::Crate { .. }
+        | ToolAcquireSpec::GithubRelease { .. }
+        | ToolAcquireSpec::GithubReleaseRepo { .. } => {
+            return Err(unsupported_source(name, requested));
         }
         ToolAcquireSpec::Git { url, rev, subdir } => {
             let source_root = tool_source_cache_dir(context, name);
@@ -673,42 +635,6 @@ fn install_tool(
             ];
             process::run_checked(&cargo()?, &args, &context.root)?;
         }
-        ToolAcquireSpec::GithubRelease { url } => {
-            let download_name = file_name_from_url(url).unwrap_or_else(|| name.to_string());
-            let archive_path = download_file(
-                url,
-                &tool_download_cache_dir(context, name).join(download_name),
-            )?;
-            if is_archive_path(&archive_path) {
-                install_binary_archive(&archive_path, &root, name)?;
-            } else {
-                install_downloaded_binary(&archive_path, &root, name)?;
-            }
-        }
-        ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } => {
-            let (target, extension) = current_release_asset_target()?;
-            let asset_name = format!("{name}-{tag}-{target}.{extension}");
-            let archive_path = if github_token().is_some() {
-                download_github_release_asset(
-                    owner,
-                    repo,
-                    tag,
-                    &asset_name,
-                    &tool_download_cache_dir(context, name).join(&asset_name),
-                )?
-            } else {
-                let url = github_release_asset_url(owner, repo, tag, name)?;
-                let download_name = file_name_from_url(&url).unwrap_or_else(|| name.to_string());
-                download_file(
-                    &url,
-                    &tool_download_cache_dir(context, name).join(download_name),
-                )?
-            };
-            if let Some(expected) = expected_release_sha256(name, requested, target)? {
-                verify_sha256(&archive_path, &expected)?;
-            }
-            install_binary_archive(&archive_path, &root, name)?;
-        }
     }
 
     for candidate in process::candidate_paths(root.join("bin").join(name)) {
@@ -718,6 +644,15 @@ fn install_tool(
     }
 
     Err(anyhow!("installing {} did not produce its binary", name))
+}
+
+/// Release archives and crates.io builds of a tool were how gdsuite 0.4 and
+/// earlier got the tools it now has built in.
+fn unsupported_source(name: &str, source: &ToolAcquireSpec) -> anyhow::Error {
+    anyhow!(
+        "{name}: `{}` is no longer supported: the tools are built into gdsuite. Remove {name}_source from [tools] in gdsuite.toml (`gdsuite update` does it for gdsuite's own tools), or build {name} from a folder (path:) or a Git repository (git:)",
+        source.render_requested()
+    )
 }
 
 fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
@@ -866,8 +801,11 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
         }
         ToolAcquireSpec::Crate { .. }
         | ToolAcquireSpec::GithubRelease { .. }
-        | ToolAcquireSpec::GithubReleaseRepo { .. }
-        | ToolAcquireSpec::Git { .. } => {
+        | ToolAcquireSpec::GithubReleaseRepo { .. } => Err(unsupported_source(
+            name,
+            &parse_tool_source_spec(source, name),
+        )),
+        ToolAcquireSpec::Git { .. } => {
             let source_root = tool_source_cache_dir(context, name);
             if !source_root.exists() {
                 return Err(anyhow!(
@@ -892,178 +830,6 @@ pub fn gdtest_launcher_path(context: &ProjectContext) -> PathBuf {
 
 fn tool_source_cache_dir(context: &ProjectContext, name: &str) -> PathBuf {
     context.gdsuite_dir.join("tools").join(name).join("source")
-}
-
-fn tool_download_cache_dir(context: &ProjectContext, name: &str) -> PathBuf {
-    context
-        .gdsuite_dir
-        .join("tools")
-        .join(name)
-        .join("downloads")
-}
-
-fn crate_download_url(name: &str, version: &str) -> String {
-    if let Ok(base) = env::var("GDSUITE_CRATES_DOWNLOAD_BASE_URL") {
-        let base = base.trim_end_matches('/');
-        return format!("{base}/{name}/{version}/download");
-    }
-
-    format!("https://crates.io/api/v1/crates/{name}/{version}/download")
-}
-
-fn download_file(url: &str, destination: &Path) -> Result<PathBuf> {
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create download dir {}", parent.display()))?;
-    }
-
-    let client = http_client()?;
-    let mut response = client
-        .get(url)
-        .send()
-        .with_context(|| format!("failed to download {url}"))?
-        .error_for_status()
-        .with_context(|| format!("failed to download {url}"))?;
-    let mut file = fs::File::create(destination)
-        .with_context(|| format!("failed to create {}", destination.display()))?;
-    io::copy(&mut response, &mut file)
-        .with_context(|| format!("failed to write {}", destination.display()))?;
-    Ok(destination.to_path_buf())
-}
-
-fn download_github_release_asset(
-    owner: &str,
-    repo: &str,
-    tag: &str,
-    asset_name: &str,
-    destination: &Path,
-) -> Result<PathBuf> {
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create download dir {}", parent.display()))?;
-    }
-
-    let client = http_client()?;
-    let release_url = format!(
-        "{}/repos/{owner}/{repo}/releases/tags/{tag}",
-        github_api_base_url()
-    );
-    let release_body = client
-        .get(&release_url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .with_context(|| format!("failed to query GitHub release metadata at {release_url}"))?
-        .error_for_status()
-        .with_context(|| format!("failed to query GitHub release metadata at {release_url}"))?
-        .text()
-        .with_context(|| format!("failed to read GitHub release metadata from {release_url}"))?;
-    let release: GithubReleaseResponse = serde_json::from_str(&release_body)
-        .with_context(|| format!("failed to parse GitHub release metadata from {release_url}"))?;
-
-    let asset = release
-        .assets
-        .into_iter()
-        .find(|asset| asset.name == asset_name)
-        .ok_or_else(|| {
-            anyhow!(
-                "GitHub release {owner}/{repo}@{tag} did not contain expected asset {asset_name}"
-            )
-        })?;
-
-    let mut response = client
-        .get(&asset.url)
-        .header("Accept", "application/octet-stream")
-        .send()
-        .with_context(|| format!("failed to download GitHub release asset {}", asset.name))?
-        .error_for_status()
-        .with_context(|| format!("failed to download GitHub release asset {}", asset.name))?;
-    let mut file = fs::File::create(destination)
-        .with_context(|| format!("failed to create {}", destination.display()))?;
-    io::copy(&mut response, &mut file)
-        .with_context(|| format!("failed to write {}", destination.display()))?;
-    Ok(destination.to_path_buf())
-}
-
-/// The checksum the bundled release manifest records for `name`'s archive on
-/// `target`. Only the suite-pinned release is checked: a source the project
-/// chose itself has no recorded checksum.
-fn expected_release_sha256(
-    name: &str,
-    requested: &ToolAcquireSpec,
-    target: &str,
-) -> Result<Option<String>> {
-    if env::var_os("GDSUITE_SKIP_RELEASE_CHECKSUMS").is_some() {
-        return Ok(None);
-    }
-    let Some(tool) = ReleaseManifest::bundled().tool(name) else {
-        return Ok(None);
-    };
-    if &tool.acquire != requested || tool.sha256.is_empty() {
-        return Ok(None);
-    }
-    tool.sha256
-        .get(target)
-        .map(|digest| Some(digest.to_ascii_lowercase()))
-        .ok_or_else(|| {
-            anyhow!(
-                "the gdsuite release manifest has no checksum for {name} on {target}; \
-                 refusing to install an unverified archive"
-            )
-        })
-}
-
-fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
-    use sha2::{Digest, Sha256};
-
-    let mut file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let actual = format!("{:x}", hasher.finalize());
-    if actual != expected {
-        drop(file);
-        let _ = fs::remove_file(path);
-        return Err(anyhow!(
-            "checksum mismatch for {}: expected sha256 {expected}, got {actual}. \
-             The release archive differs from the one this gdsuite version was tested with.",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-fn http_client() -> Result<Client> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        )),
-    );
-    if let Some(token) = github_token() {
-        let value = HeaderValue::from_str(&format!("Bearer {token}"))
-            .context("GDSUITE_GITHUB_TOKEN contains invalid header characters")?;
-        headers.insert(AUTHORIZATION, value);
-    }
-
-    Client::builder()
-        .default_headers(headers)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .context("failed to initialize HTTP client")
-}
-
-fn github_token() -> Option<String> {
-    let token = env::var("GDSUITE_GITHUB_TOKEN").ok()?;
-    let token = token.trim();
-    if token.is_empty() {
-        None
-    } else {
-        Some(token.to_string())
-    }
 }
 
 fn clone_git_source(url: &str, rev: &str, destination: &Path) -> Result<()> {
@@ -1102,88 +868,6 @@ fn clone_git_source(url: &str, rev: &str, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_binary_archive(archive_path: &Path, root: &Path, name: &str) -> Result<()> {
-    let source_root = root.join("source");
-    reset_dir(&source_root)?;
-    unpack_archive(archive_path, &source_root)?;
-    let extracted_root = normalize_extracted_root(&source_root)?;
-
-    if extracted_root.join("Cargo.toml").exists() {
-        let package_root = resolve_package_root(&extracted_root, name)?;
-        let cargo = which::which("cargo").context("cargo is required for setup")?;
-        let args = vec![
-            "install".to_string(),
-            "--path".to_string(),
-            package_root.display().to_string(),
-            "--root".to_string(),
-            root.display().to_string(),
-        ];
-        process::run_checked(&cargo, &args, root.parent().unwrap_or(root))?;
-        return Ok(());
-    }
-
-    let binary = find_extracted_binary(&extracted_root, name)?;
-    install_binary_at_path(&binary, root, name)
-}
-
-fn install_downloaded_binary(path: &Path, root: &Path, name: &str) -> Result<()> {
-    install_binary_at_path(path, root, name)
-}
-
-fn install_binary_at_path(path: &Path, root: &Path, name: &str) -> Result<()> {
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| format!(".{value}"))
-        .unwrap_or_default();
-    let target = root.join("bin").join(format!("{name}{extension}"));
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::copy(path, &target)
-        .with_context(|| format!("failed to copy {} to {}", path.display(), target.display()))?;
-    make_executable(&target)?;
-    Ok(())
-}
-
-fn unpack_archive(archive_path: &Path, destination: &Path) -> Result<()> {
-    fs::create_dir_all(destination)
-        .with_context(|| format!("failed to create {}", destination.display()))?;
-    let file = fs::File::open(archive_path)
-        .with_context(|| format!("failed to open {}", archive_path.display()))?;
-    let file_name = archive_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default();
-
-    if file_name.ends_with(".zip") {
-        let mut archive = ZipArchive::new(file)
-            .with_context(|| format!("failed to read zip archive {}", archive_path.display()))?;
-        archive
-            .extract(destination)
-            .with_context(|| format!("failed to extract {}", archive_path.display()))?;
-        return Ok(());
-    }
-
-    if file_name.ends_with(".tar.gz")
-        || file_name.ends_with(".tgz")
-        || file_name.ends_with(".crate")
-    {
-        let reader = GzDecoder::new(file);
-        let mut archive = Archive::new(reader);
-        archive
-            .unpack(destination)
-            .with_context(|| format!("failed to extract {}", archive_path.display()))?;
-        return Ok(());
-    }
-
-    Err(anyhow!(
-        "unsupported archive format for {}",
-        archive_path.display()
-    ))
-}
-
 fn normalize_extracted_root(source_root: &Path) -> Result<PathBuf> {
     let children = fs::read_dir(source_root)
         .with_context(|| format!("failed to read {}", source_root.display()))?
@@ -1198,90 +882,6 @@ fn normalize_extracted_root(source_root: &Path) -> Result<PathBuf> {
     Ok(source_root.to_path_buf())
 }
 
-fn find_extracted_binary(root: &Path, name: &str) -> Result<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in
-            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
-        {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-
-            let stem = path.file_stem().and_then(|value| value.to_str());
-            let extension = path.extension().and_then(|value| value.to_str());
-            let is_binary_name =
-                matches!(extension, Some("exe" | "cmd" | "bat")) || extension.is_none();
-            if stem == Some(name) && is_binary_name {
-                return Ok(path);
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "archive did not contain an executable or cargo package for {}",
-        name
-    ))
-}
-
-fn is_archive_path(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default();
-    name.ends_with(".zip")
-        || name.ends_with(".tar.gz")
-        || name.ends_with(".tgz")
-        || name.ends_with(".crate")
-}
-
-fn file_name_from_url(url: &str) -> Option<String> {
-    let clean = url.split('?').next().unwrap_or(url).trim_end_matches('/');
-    clean.rsplit('/').next().map(ToString::to_string)
-}
-
-fn github_release_asset_url(
-    owner: &str,
-    repo: &str,
-    tag: &str,
-    binary_name: &str,
-) -> Result<String> {
-    let (target, extension) = current_release_asset_target()?;
-    let base = github_release_base_url();
-    Ok(format!(
-        "{base}/{owner}/{repo}/releases/download/{tag}/{binary_name}-{tag}-{target}.{extension}"
-    ))
-}
-
-fn github_release_base_url() -> String {
-    env::var("GDSUITE_GITHUB_RELEASE_BASE_URL")
-        .unwrap_or_else(|_| "https://github.com".to_string())
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn github_api_base_url() -> String {
-    env::var("GDSUITE_GITHUB_API_BASE_URL")
-        .unwrap_or_else(|_| "https://api.github.com".to_string())
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn current_release_asset_target() -> Result<(&'static str, &'static str)> {
-    match (env::consts::OS, env::consts::ARCH) {
-        ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zip")),
-        ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "tar.gz")),
-        ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "tar.gz")),
-        ("linux", "x86_64") => Ok(("x86_64-unknown-linux-musl", "tar.gz")),
-        (os, arch) => Err(anyhow!(
-            "unsupported platform for GitHub release installs: {arch}-{os}"
-        )),
-    }
-}
-
 fn command_path(path: &Path) -> String {
     #[cfg(windows)]
     {
@@ -1293,30 +893,6 @@ fn command_path(path: &Path) -> String {
     {
         path.display().to_string()
     }
-}
-
-fn reset_dir(path: &Path) -> Result<()> {
-    if path.exists() {
-        fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
-    }
-    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
-    Ok(())
-}
-
-fn make_executable(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut permissions = fs::metadata(path)?.permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)?;
-    }
-
-    #[cfg(not(unix))]
-    let _ = path;
-
-    Ok(())
 }
 
 pub fn probe_installation_state(
@@ -1974,8 +1550,14 @@ pub struct ToolDrift {
 
 impl ToolDrift {
     pub fn message(&self) -> String {
+        // Release and crates.io sources are gone: update removes them.
+        let fix = if self.wanted.starts_with("github:") || self.wanted.starts_with("crate:") {
+            "gdsuite update"
+        } else {
+            "gdsuite setup"
+        };
         format!(
-            "{}: {} is installed, but this project now uses {}; run `gdsuite setup`",
+            "{}: {} is installed, but this project now uses {}; run `{fix}`",
             self.tool, self.installed, self.wanted
         )
     }
@@ -2078,42 +1660,14 @@ mod tests {
     }
 
     #[test]
-    fn test_current_target_is_known_platform() {
-        let known = [
-            ("x86_64-pc-windows-msvc", "zip"),
-            ("x86_64-apple-darwin", "tar.gz"),
-            ("aarch64-apple-darwin", "tar.gz"),
-            ("x86_64-unknown-linux-musl", "tar.gz"),
-        ];
-        let result = current_release_asset_target();
-        assert!(
-            result.is_ok(),
-            "current platform is not supported: {}-{}",
-            std::env::consts::ARCH,
-            std::env::consts::OS
-        );
-        let (target, ext) = result.unwrap();
-        assert!(
-            known.contains(&(target, ext)),
-            "unexpected target/ext pair: {target}/{ext}"
-        );
-    }
-
-    #[test]
-    fn test_github_release_asset_url_format() {
-        // Use a known base to avoid flakiness from GDSUITE_GITHUB_RELEASE_BASE_URL env var
-        // SAFETY: test-only, single-threaded context
-        unsafe { std::env::remove_var("GDSUITE_GITHUB_RELEASE_BASE_URL") };
-        let url = github_release_asset_url("q-rault", "gdtest", "v0.1.0", "gdtest").unwrap();
-        assert!(
-            url.starts_with(
-                "https://github.com/q-rault/gdtest/releases/download/v0.1.0/gdtest-v0.1.0-"
-            ),
-            "unexpected URL prefix: {url}"
-        );
-        assert!(
-            url.ends_with(".zip") || url.ends_with(".tar.gz"),
-            "unexpected URL suffix: {url}"
-        );
+    fn release_and_crate_sources_say_what_to_do_instead() {
+        for source in ["github:q-rault/gdtest@v0.1.0", "crate:gdtest@0.2.0"] {
+            let message =
+                unsupported_source("gdtest", &parse_tool_source_spec(source, "gdtest")).to_string();
+            assert!(
+                message.contains(source) && message.contains("gdsuite update"),
+                "{message}"
+            );
+        }
     }
 }

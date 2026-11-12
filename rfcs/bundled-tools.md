@@ -198,21 +198,21 @@ replaces it once the panel knows gdsuite.
 ## Order of work
 
 1. **Tools** (done): each tool's library entry point, released.
-2. **gdsuite**: depend on the released crates, make `bundled` the default
-   source, keep the other sources. Release.
-3. **Docs**: Install, Under the hood, Configure (`[tools]`), CI and
-   Troubleshooting no longer talk about downloading tools.
-4. **No setup needed**: commands work without `gdsuite.toml`, `test` installs
-   the addons, `init` becomes optional.
-5. **Remove downloads**: drop release downloads, checksums, the compatibility
-   report and `update` once a release with built-in tools has been out for a
-   while.
+2. **gdsuite** (done, 0.5.0): depend on the released crates, make `bundled`
+   the default source.
+3. **Docs** (done, 0.5.0): Install, Under the hood, Configure (`[tools]`), CI
+   and Troubleshooting no longer talk about downloading tools.
+4. **No setup needed** (0.6.0): commands work without `gdsuite.toml` or
+   `setup`, the first `test` installs the addons, `init` is optional.
+5. **Remove downloads** (0.6.0): release downloads, archives and checksums
+   are gone, and with them `github:` and `crate:` sources (`update` removes
+   them). `path:` and `git:` stay, for tool developers. The compatibility
+   report stays: it still checks `path:` and `git:` builds.
 6. **Editor**: the panel calls `gdsuite tool gdtest`; then the GDExtension
    (Asset Store plan B).
 
 ## Open questions
 
-- Keep `crate:` and `github:` sources, or only `path:` and `git:`?
 - `gdsuite tool <name>`: keep it hidden, or document it as a way to run a
   tool's commands that gdsuite has no shortcut for?
 - What is the Asset Store's size limit for an addon?

@@ -1,7 +1,7 @@
 name: e2e
 
-# Runs gdsuite against the published tool releases and a real Godot, so it needs
-# those releases to exist and be public. Run it manually before a gdsuite release.
+# Runs gdsuite, with the tools built in, against a real Godot. Run it manually
+# before a gdsuite release.
 on:
   workflow_dispatch:
 
@@ -62,3 +62,22 @@ jobs:
             exit 1
           fi
           grep -qx '.gdsuite/' .gitignore
+      - name: Run in a project that was never set up
+        shell: bash
+        run: |
+          gdsuite="$PWD/target/debug/gdsuite"
+          project="$RUNNER_TEMP/plain"
+          mkdir -p "$project/test"
+          cd "$project"
+          printf 'config_version=5\n\n[application]\nconfig/name="plain"\n' > project.godot
+          printf 'class_name Player\nextends RefCounted\n\nvar health := 10\n\n\nfunc hit(amount: int) -> void:\n\thealth -= amount\n' > player.gd
+          printf 'extends GdTest\n\n\nfunc test_hit() -> void:\n\tvar p := Player.new()\n\tp.hit(3)\n\tassert_eq(p.health, 7)\n' > test/test_player.gd
+          # The tools are built in: lint and doctor need nothing set up, and
+          # the first test installs the addons tests need.
+          "$gdsuite" lint
+          "$gdsuite" doctor
+          test ! -e .gdsuite
+          "$gdsuite" test
+          test -f addons/gdtest/gdtest_worker.gd
+          "$gdsuite" check
+          test ! -e gdsuite.toml

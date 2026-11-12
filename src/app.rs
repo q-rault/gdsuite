@@ -106,22 +106,13 @@ fn update_tools(
     for change in &changes {
         match change {
             PinChange::Unpinned { tool, from } => {
-                let tested = release
+                let built_in = release
                     .tool(tool)
-                    .map(|entry| format!("v{}", entry.version()))
+                    .map(|entry| entry.version().to_string())
                     .unwrap_or_default();
-                if *from == tested {
-                    output.step(format!(
-                        "{tool}: removed the pin to {from}, the version gdsuite installs; it now follows gdsuite"
-                    ));
-                } else {
-                    output.step(format!(
-                        "{tool}: removed the pin to {from}, it now follows gdsuite ({from} -> {tested})"
-                    ));
-                }
-            }
-            PinChange::CrateBumped { tool, from, to } => {
-                output.step(format!("{tool}: crates.io version {from} -> {to}"));
+                output.step(format!(
+                    "{tool}: removed {from}; it now runs the {tool} built into gdsuite ({built_in})"
+                ));
             }
             PinChange::Kept { tool, source } => {
                 output.info(format!(
