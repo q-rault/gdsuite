@@ -128,11 +128,35 @@ to fix it. See [Troubleshooting](/troubleshooting).
 
 ## Updating GDSuite
 
-1. Get the new `gdsuite` the way you got the first one (download it again, or
-   `cargo install gdsuite` again).
-2. In `gdsuite.toml`, delete the `[tools]` section, so the project uses the
-   tool versions the new GDSuite was tested with.
-3. Run `gdsuite setup` in the project.
+Each GDSuite release comes with the versions of its tools it was tested with,
+so updating GDSuite updates everything:
+
+1. Get the new `gdsuite` the way you got the first one: download it again, or
+   run `cargo install gdsuite` again.
+2. In each project, run:
+
+```bash
+gdsuite update
+```
+
+It installs the tools the new GDSuite was tested with. Projects set up by
+GDSuite 0.4 or earlier have the tool versions written in `gdsuite.toml`;
+`gdsuite update` removes them, so these projects follow GDSuite too from then
+on.
+
+Until you run it, commands warn that the installed tools are older than the
+ones the project uses.
+
+<Callout title="Installed with cargo, but the tools are downloaded?">
+
+`cargo install gdsuite` builds the `gdsuite` program only. GDSuite then
+downloads its tools as ready-made programs from their GitHub releases, checked
+against a known checksum: it is faster and needs no Rust on your teammates'
+computers or in CI. To build a tool from crates.io instead, give it a
+`crate:` source in `[tools]` ([gdsuite.toml](/reference/gdsuite-toml#tool-sources));
+`gdsuite update` moves it to the tested version too.
+
+</Callout>
 
 ## Next
 

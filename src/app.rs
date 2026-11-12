@@ -14,11 +14,12 @@ use crate::{
         Cli, Commands, DoctorArgs, ForwardArgs, ForwardReportArgs, LintArgs, OutputArgs,
         OutputModeArg, ReportArgs, RunArgs, SetupArgs,
     },
-    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
+    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest, ToolAcquireSpec},
     migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
     tooling::{self, ProjectContext},
+    update::{self, PinChange},
 };
 
 pub const EXIT_USAGE_ERROR: u8 = 2;
@@ -45,6 +46,7 @@ pub fn run() -> Result<()> {
         Commands::Init(args) => init(&context, cli.godot_exe.as_deref(), args),
         Commands::Migrate => migrate_project(&context, cli.godot_exe.as_deref()),
         Commands::Setup(args) => setup(&context, cli.godot_exe.as_deref(), args),
+        Commands::Update(args) => update_tools(&context, cli.godot_exe.as_deref(), args),
         Commands::Doctor(args) => doctor(&context, cli.godot_exe.as_deref(), args),
         Commands::Fmt(args) => fmt(&context, args),
         Commands::Lint(args) => lint(&context, args),
@@ -79,6 +81,64 @@ fn setup(context: &ProjectContext, cli_godot: Option<&Path>, args: SetupArgs) ->
     let output = OutputContext::new(resolve_output_mode(args.output.output), CommandScope::Setup);
     setup_impl(context, cli_godot, args, &output)?;
     finish_mutating_command(&output, "setup complete");
+    Ok(())
+}
+
+fn update_tools(
+    context: &ProjectContext,
+    cli_godot: Option<&Path>,
+    args: OutputArgs,
+) -> Result<()> {
+    load_config_or_error(context)?;
+    let output = OutputContext::new(resolve_output_mode(args.output), CommandScope::Update);
+    let text = fs::read_to_string(&context.config_path)
+        .with_context(|| format!("failed to read {}", context.config_path.display()))?;
+    let release = tooling::release_manifest();
+    let (updated, changes) = update::refresh_tool_pins(&text, release);
+    for change in &changes {
+        match change {
+            PinChange::Unpinned { tool, from } => {
+                let tested = match release.tool(tool).map(|entry| &entry.acquire) {
+                    Some(ToolAcquireSpec::GithubReleaseRepo { tag, .. }) => tag.clone(),
+                    _ => String::new(),
+                };
+                if *from == tested {
+                    output.step(format!(
+                        "{tool}: removed the pin to {from}, the version gdsuite installs; it now follows gdsuite"
+                    ));
+                } else {
+                    output.step(format!(
+                        "{tool}: removed the pin to {from}, it now follows gdsuite ({from} -> {tested})"
+                    ));
+                }
+            }
+            PinChange::CrateBumped { tool, from, to } => {
+                output.step(format!("{tool}: crates.io version {from} -> {to}"));
+            }
+            PinChange::Kept { tool, source } => {
+                output.info(format!(
+                    "{tool}: kept {source}, which gdsuite does not manage"
+                ));
+            }
+        }
+    }
+    if changes.is_empty() {
+        output.info("every tool follows gdsuite already");
+    }
+    if updated != text {
+        fs::write(&context.config_path, updated)
+            .with_context(|| format!("failed to write {}", context.config_path.display()))?;
+    }
+    setup_impl(
+        context,
+        cli_godot,
+        SetupArgs {
+            output: args,
+            sync_product_configs: false,
+        },
+        &output,
+    )?;
+    finish_mutating_command(&output, "update complete");
     Ok(())
 }
 
@@ -363,10 +423,27 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         }
     }
 
+    for drift in tooling::installed_drift(context, &config) {
+        warnings.push(drift.message());
+        if status == CompatibilityVerdict::Ok {
+            status = CompatibilityVerdict::Warning;
+        }
+    }
+    // A pin is the project's choice, so it is mentioned without changing the status.
+    for (tool, pinned, tested) in tooling::outdated_pins(&config) {
+        warnings.push(format!(
+            "{tool} is pinned to {pinned} in gdsuite.toml, and this gdsuite was tested with {tested}; run `gdsuite update` to follow gdsuite"
+        ));
+    }
+
     let report = DoctorReport {
         command: "doctor".to_string(),
         status: verdict_label(&status).to_string(),
         paths: DoctorPaths::from_context(context),
+        settings: tooling::settings_sources(context)
+            .into_iter()
+            .map(|(name, source)| (name.to_string(), source))
+            .collect(),
         tools: tool_reports,
         compatibility: compatibility_reports,
         warnings,
@@ -542,9 +619,18 @@ fn report(context: &ProjectContext, args: ReportArgs) -> Result<()> {
     Ok(())
 }
 
+/// Combines the saved check, test and health reports into one, with one entry
+/// per step. `check.json` is required; `test.json` and `health.json` are
+/// required unless the check already ran that step. A step that ran in both
+/// keeps the result of its own command, which ran with that command's options.
 fn aggregate_ci_report(context: &ProjectContext, config: &GdsuiteConfig) -> Result<SuiteReport> {
-    let mut reports = Vec::new();
-    for name in ["check", "test", "health"] {
+    let check = load_saved_suite_report(context, config, "check")?;
+    let mut reports = vec![check];
+    for name in ["test", "health"] {
+        let in_check = reports[0].steps.iter().any(|step| step.name == name);
+        if in_check && !report_path(context, config, name).exists() {
+            continue;
+        }
         reports.push(load_saved_suite_report(context, config, name)?);
     }
 
@@ -561,10 +647,13 @@ fn aggregate_ci_report(context: &ProjectContext, config: &GdsuiteConfig) -> Resu
         }
     }
 
-    let steps = reports
-        .into_iter()
-        .flat_map(|report| report.steps)
-        .collect::<Vec<_>>();
+    let mut steps: Vec<StepReport> = Vec::new();
+    for step in reports.into_iter().flat_map(|report| report.steps) {
+        match steps.iter_mut().find(|existing| existing.name == step.name) {
+            Some(existing) => *existing = step,
+            None => steps.push(step),
+        }
+    }
     Ok(SuiteReport::from_steps("ci", context, steps))
 }
 
@@ -624,6 +713,13 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
     let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
     let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)?;
     process::set_godot_exe(&toolchain.godot_exe);
+    // After updating gdsuite, or editing [tools], the installed tools lag
+    // behind until `gdsuite setup` runs: say so instead of running them silently.
+    if let Ok(config) = load_runtime_config(context) {
+        for drift in tooling::installed_drift(context, &config) {
+            eprintln!("warning: {}", drift.message());
+        }
+    }
     Ok(toolchain)
 }
 
@@ -913,10 +1009,19 @@ fn probe_version(path: &Path, args: &[&str]) -> Option<String> {
 fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
     output.kv("project root", &report.paths.project_root);
     output.kv("config", &report.paths.config);
-    output.kv("gdtest config", &report.paths.gdtest_config);
-    output.kv("gdhealth config", &report.paths.gdhealth_config);
     output.kv("manifest", &report.paths.manifest);
     output.kv("installation", &report.paths.installation);
+    output.blank();
+
+    for (name, label) in [
+        ("test", "[test]"),
+        ("health", "[health]"),
+        ("fmt_lint", "[fmt]/[lint]"),
+    ] {
+        if let Some(source) = report.settings.get(name) {
+            output.kv(label, source);
+        }
+    }
     output.blank();
 
     for name in ["godot", "gdtidy", "gdtest", "gdhealth", "gdtypecheck"] {
@@ -969,10 +1074,11 @@ fn render_doctor_pretty(output: &OutputContext, report: &DoctorReport) {
 fn render_doctor_plain(output: &OutputContext, report: &DoctorReport) {
     output.kv("project_root", &report.paths.project_root);
     output.kv("config", &report.paths.config);
-    output.kv("gdtest_config", &report.paths.gdtest_config);
-    output.kv("gdhealth_config", &report.paths.gdhealth_config);
     output.kv("manifest", &report.paths.manifest);
     output.kv("installation", &report.paths.installation);
+    for (name, source) in &report.settings {
+        output.kv(&format!("{name}_settings"), source);
+    }
 
     for (name, tool) in &report.tools {
         if let Some(path) = tool.path.as_deref() {
@@ -1032,6 +1138,9 @@ struct DoctorReport {
     command: String,
     status: String,
     paths: DoctorPaths,
+    /// Where each tool reads its settings: a gdsuite.toml section, its own
+    /// file, or "defaults".
+    settings: BTreeMap<String, String>,
     tools: BTreeMap<String, DoctorToolReport>,
     compatibility: BTreeMap<String, DoctorCompatibilityReport>,
     warnings: Vec<String>,
@@ -1042,8 +1151,6 @@ struct DoctorReport {
 struct DoctorPaths {
     project_root: String,
     config: String,
-    gdtest_config: String,
-    gdhealth_config: String,
     manifest: String,
     installation: String,
 }
@@ -1053,8 +1160,6 @@ impl DoctorPaths {
         Self {
             project_root: context.root.display().to_string(),
             config: context.config_path.display().to_string(),
-            gdtest_config: context.gdtest_config_path.display().to_string(),
-            gdhealth_config: context.gdhealth_config_path.display().to_string(),
             manifest: context.manifest_path.display().to_string(),
             installation: context.installation_path.display().to_string(),
         }

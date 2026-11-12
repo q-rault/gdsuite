@@ -17,6 +17,7 @@ pub enum OutputMode {
 pub enum CommandScope {
     Init,
     Setup,
+    Update,
     Doctor,
 }
 
@@ -155,6 +156,7 @@ impl CommandScope {
         match self {
             CommandScope::Init => "init",
             CommandScope::Setup => "setup",
+            CommandScope::Update => "update",
             CommandScope::Doctor => "doctor",
         }
     }

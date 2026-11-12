@@ -25,6 +25,12 @@ file is organized.
 
 ### Tool sources
 
+Without a source, a tool follows GDSuite: each release installs the version
+it was tested with. Give a source only to keep a tool at a version, or to
+build it yourself. [`gdsuite update`](/reference/commands) removes release
+pins of GDSuite's tools and moves `crate:` sources to the tested version; it
+keeps the other forms.
+
 A tool source is one of:
 
 | Form | Example | Meaning |

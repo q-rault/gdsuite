@@ -25,6 +25,11 @@ pub enum Commands {
     Migrate,
     #[command(about = "Install or repair the local gdsuite toolchain")]
     Setup(SetupArgs),
+    #[command(
+        about = "Move the tools to the versions this gdsuite was tested with, then install them",
+        long_about = "Move the tools to the versions this gdsuite was tested with, then install them.\n\nRelease pins of gdsuite's tools are removed from [tools] in gdsuite.toml, so the tools follow gdsuite from then on. crates.io sources move to the tested version. Other sources (a folder, a Git repository, another release) are kept."
+    )]
+    Update(OutputArgs),
     #[command(about = "Print resolved tool paths, versions, and setup status")]
     Doctor(DoctorArgs),
     #[command(about = "Format GDScript with `gdtidy fmt` (arguments are forwarded)")]

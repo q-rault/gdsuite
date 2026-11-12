@@ -395,13 +395,141 @@ fn migrate_rewrites_legacy_config_to_orchestration_only_schema() {
         .stdout(predicate::str::contains("migrate complete"));
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    // The old release pins are kept (`gdsuite update` moves them); tools the
+    // file did not pin follow gdsuite and are not written.
     assert!(config.contains("[tools]"));
-    assert!(config.contains("gdtypecheck_source"));
+    assert!(config.contains("gdtest_source = \"github:q-rault/gdtest@v0.1.1\""));
+    assert!(!config.contains("gdtypecheck_source"));
     assert!(config.contains("[check]"));
     assert!(!config.contains("[lint]"));
     assert!(!config.contains("[health]"));
     assert!(!config.contains("[gdtest]"));
     assert!(!config.contains("[gdhealth]"));
+}
+
+/// Pins gdtest to an older release in `[tools]`, as gdsuite 0.4 and earlier
+/// wrote on init.
+fn pin_old_gdtest(fixture: &Fixture) {
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    let config = format!(
+        "{config}\n[tools]\n# kept: a comment in the section\ngdtest_source = \"github:q-rault/gdtest@v0.1.1\"\n"
+    );
+    fs::write(fixture.root.join("gdsuite.toml"), config).unwrap();
+}
+
+#[test]
+fn update_removes_old_release_pins_and_installs_the_tested_tools() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fixture.cmd().arg("init").assert().success();
+    pin_old_gdtest(&fixture);
+
+    fixture
+        .cmd()
+        .arg("update")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "gdtest: removed the pin to v0.1.1, it now follows gdsuite",
+        ))
+        .stdout(predicate::str::contains("update complete"));
+
+    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
+    assert!(!config.contains("gdtest_source"), "{config}");
+    assert!(
+        !config.lines().any(|line| line.trim() == "[tools]"),
+        "{config}"
+    );
+    assert!(config.contains("[check]"), "{config}");
+}
+
+#[test]
+fn doctor_reports_tools_that_lag_behind_and_old_pins() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fixture.cmd().arg("init").assert().success();
+    pin_old_gdtest(&fixture);
+
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .stdout(predicate::str::contains(
+            "this project now uses github:q-rault/gdtest@v0.1.1; run `gdsuite setup`",
+        ))
+        .stdout(predicate::str::contains(
+            "gdtest is pinned to v0.1.1 in gdsuite.toml",
+        ))
+        .stdout(predicate::str::contains("[test]        defaults"))
+        .stdout(predicate::str::contains("gdtest config").not());
+}
+
+#[test]
+fn doctor_shows_where_each_tool_reads_its_settings() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    let config = format!(
+        "{}\n[lint]\ndisable = [\"max-returns\"]\n",
+        fixture.default_gdsuite_config()
+    );
+    fs::write(fixture.root.join("gdsuite.toml"), config).unwrap();
+    fs::write(fixture.root.join("gdhealth.toml"), "").unwrap();
+
+    fixture
+        .cmd()
+        .args(["doctor", "--output", "json"])
+        .assert()
+        .stdout(predicate::str::contains(
+            "\"fmt_lint\": \"gdsuite.toml [lint]\"",
+        ))
+        .stdout(predicate::str::contains("\"health\": \"gdhealth.toml\""))
+        .stdout(predicate::str::contains("\"test\": \"defaults\""));
+}
+
+#[test]
+fn report_ci_lists_each_step_once() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fs::write(
+        fixture.root.join("gdsuite.toml"),
+        fixture.default_gdsuite_config(),
+    )
+    .unwrap();
+
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success();
+    fixture
+        .cmd()
+        .args(["test", "--report", "json"])
+        .assert()
+        .success();
+    // No health.json: the check already ran the health step.
+    let output = fixture
+        .cmd()
+        .args(["report", "ci"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let names: Vec<&str> = report["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|step| step["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["fmt", "lint", "typecheck", "health", "test"]);
 }
 
 #[test]
@@ -421,7 +549,10 @@ fn init_writes_orchestration_only_config_and_installs_toolchain() {
         ));
 
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    assert!(config.contains("gdtypecheck_source"));
+    assert!(
+        !config.lines().any(|line| line.trim() == "[tools]"),
+        "tool versions come with gdsuite, so init pins none:\n{config}"
+    );
     assert!(
         !config.contains("godot_exe"),
         "a machine's Godot path must stay out of the committed config:\n{config}"
@@ -1208,17 +1339,7 @@ fn setup_replaces_a_tool_binary_cargo_has_no_record_of() {
     // downloaded is already in place, and cargo has no record of it.
     fs::create_dir_all(fixture.root.join("../gdtypecheck")).unwrap();
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    let config = config
-        .lines()
-        .map(|line| {
-            if line.starts_with("gdtypecheck_source") {
-                "gdtypecheck_source = \"../gdtypecheck\"".to_string()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let config = format!("{config}\n[tools]\ngdtypecheck_source = \"../gdtypecheck\"\n");
     fs::write(fixture.root.join("gdsuite.toml"), config).unwrap();
 
     fixture.cmd().arg("setup").assert().success();

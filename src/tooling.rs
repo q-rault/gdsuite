@@ -30,8 +30,6 @@ pub struct ProjectContext {
     pub gdsuite_dir: PathBuf,
     pub state_dir: PathBuf,
     pub config_path: PathBuf,
-    pub gdtest_config_path: PathBuf,
-    pub gdhealth_config_path: PathBuf,
     pub manifest_path: PathBuf,
     pub installation_path: PathBuf,
     pub versions_path: PathBuf,
@@ -122,8 +120,6 @@ impl ProjectContext {
 
         Self {
             config_path: root.join("gdsuite.toml"),
-            gdtest_config_path: root.join("gdtest.toml"),
-            gdhealth_config_path: root.join("gdhealth.toml"),
             manifest_path: state_dir.join("manifest.json"),
             installation_path: state_dir.join("installation.json"),
             versions_path: state_dir.join("versions.json"),
@@ -1854,6 +1850,109 @@ fn join_res_path(base: &str, file: &str) -> String {
     } else {
         format!("{base}/{file}")
     }
+}
+
+impl InstallPlan {
+    pub fn get(&self, tool: &str) -> &ToolAcquireSpec {
+        match tool {
+            "gdtest" => &self.gdtest,
+            "gdhealth" => &self.gdhealth,
+            "gdtypecheck" => &self.gdtypecheck,
+            "gdtidy" => &self.gdtidy,
+            _ => panic!("unknown tool {tool}"),
+        }
+    }
+}
+
+/// A tool whose installed source is not the one gdsuite.toml (or, for a tool
+/// it doesn't pin, this gdsuite) asks for, such as after updating gdsuite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDrift {
+    pub tool: &'static str,
+    pub wanted: String,
+    pub installed: String,
+}
+
+impl ToolDrift {
+    pub fn message(&self) -> String {
+        format!(
+            "{}: {} is installed, but this project now uses {}; run `gdsuite setup`",
+            self.tool, self.installed, self.wanted
+        )
+    }
+}
+
+pub fn installed_drift(context: &ProjectContext, config: &GdsuiteConfig) -> Vec<ToolDrift> {
+    let Ok(state) = InstalledState::load(&context.installation_path) else {
+        return Vec::new();
+    };
+    let plan = install_plan(config);
+    crate::config::TOOL_NAMES
+        .into_iter()
+        .filter_map(|tool| {
+            let installed = match tool {
+                "gdtest" => &state.tools.gdtest,
+                "gdhealth" => &state.tools.gdhealth,
+                "gdtypecheck" => &state.tools.gdtypecheck,
+                _ => &state.tools.gdtidy,
+            };
+            let wanted = plan.get(tool);
+            (installed.requested != *wanted).then(|| ToolDrift {
+                tool,
+                wanted: wanted.render_requested(),
+                installed: installed.requested.render_requested(),
+            })
+        })
+        .collect()
+}
+
+/// gdsuite's own tools pinned in `[tools]` to a release other than the one
+/// this gdsuite was tested with: `(tool, pinned tag, tested tag)`.
+pub fn outdated_pins(config: &GdsuiteConfig) -> Vec<(&'static str, String, String)> {
+    let release = release_manifest();
+    config
+        .tools
+        .pinned()
+        .into_iter()
+        .filter_map(|(tool, source)| {
+            let ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } =
+                &release.tool(tool)?.acquire
+            else {
+                return None;
+            };
+            let pinned = source.strip_prefix(&format!("github:{owner}/{repo}@"))?;
+            (pinned != tag).then(|| (tool, pinned.to_string(), tag.clone()))
+        })
+        .collect()
+}
+
+/// Where each tool reads its settings: `(label, source)`, the source being
+/// a `gdsuite.toml` section, the tool's own file, or its defaults.
+pub fn settings_sources(context: &ProjectContext) -> Vec<(&'static str, String)> {
+    let sections: Vec<String> = fs::read_to_string(&context.config_path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .map(|table| table.keys().cloned().collect())
+        .unwrap_or_default();
+    let source = |keys: &[&str], file: &str| {
+        let found: Vec<String> = keys
+            .iter()
+            .filter(|key| sections.iter().any(|section| section == *key))
+            .map(|key| format!("[{key}]"))
+            .collect();
+        if !found.is_empty() {
+            format!("gdsuite.toml {}", found.join(" "))
+        } else if context.root.join(file).exists() {
+            file.to_string()
+        } else {
+            "defaults".to_string()
+        }
+    };
+    vec![
+        ("test", source(&["test"], "gdtest.toml")),
+        ("health", source(&["health"], "gdhealth.toml")),
+        ("fmt_lint", source(&["fmt", "lint"], "gdtidy.toml")),
+    ]
 }
 
 #[cfg(test)]
