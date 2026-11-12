@@ -1,9 +1,18 @@
 {
   "title": "Reference",
   "pages": [
-    "cli",
-    "report-json-format",
-    "config-schema-reference",
-    "glossary"
+    "commands",
+    "gdsuite-toml",
+    "reports",
+    "lint-rules",
+    "formatting-style",
+    "type-check-findings",
+    "assertions",
+    "mock-api",
+    "scene-runner-api",
+    "health-metrics",
+    "test-settings",
+    "format-lint-settings",
+    "health-settings"
   ]
 }

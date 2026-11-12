@@ -1,0 +1,110 @@
+---
+title: Linting
+description: Spot code that works but is probably a mistake, or hard to read.
+---
+
+**A linter reads your scripts and points at code that is probably not what
+you meant**, or will be hard to work with later. The code may run fine today:
+the linter catches what a careful reviewer would mention.
+
+<BeforeAfter before="The linter warns" after="After the fix">
+
+```gdscript
+func heal(amount: int) -> void:
+	health = health
+
+
+func is_dead() -> bool:
+	if health <= 0:
+		return true
+	else:
+		return false
+```
+
+```gdscript
+func heal(amount: int) -> void:
+	health = health + amount
+
+
+func is_dead() -> bool:
+	return health <= 0
+```
+
+</BeforeAfter>
+
+```text
+player.gd:2:2: warning[self-assignment]: `health` is assigned to itself.
+player.gd:8:2: warning[no-else-return]: Unnecessary "else" after "return"
+```
+
+## What it looks for
+
+35 rules, in a few families. Most come from gdlint, the linter of
+[gdtoolkit](https://github.com/Scony/godot-gdscript-toolkit), and follow
+Godot's style guide:
+
+| Family | Example of what it catches |
+| --- | --- |
+| **Names** | A function called `TakeDamage` instead of `take_damage`, a constant called `maxHealth` |
+| **Order** | Signals declared below functions, `class_name` after `extends` |
+| **Likely mistakes** | `x = x`, `x == x`, the same scene loaded twice in one script |
+| **Simpler code** | An `else` after a `return`, a `pass` that isn't needed |
+| **Size** | A line over 100 characters, a script over 1000 lines, a function with more than 10 parameters |
+
+The [Lint rules](/reference/lint-rules) page lists every rule, whether it is
+on by default, and its options.
+
+Errors that stop a script from running are not the linter's job: they are
+what [type checking](/type-checking) finds.
+
+## Lint your project
+
+```bash
+gdsuite lint                    # the whole project
+gdsuite lint -- player/         # only this folder
+gdsuite lint -- --fix           # repair what is safe to repair, list the rest
+```
+
+Each problem is one line: file, line, column, the rule's name in brackets,
+and what is wrong:
+
+```text
+player/player.gd:11:1: warning[class-definitions-order]: Definition out of order in global scope: `signals` must come before `others`
+test/test_player.gd:12:24: warning[duplicated-load]: duplicated loading of "res://player/player.gd"
+2 lint problems in 3 files
+```
+
+## When you disagree with a rule
+
+Rules are advice. Turn one off for the whole project in `gdsuite.toml`:
+
+```toml
+[lint]
+disable = ["max-public-methods"]
+
+[lint.rules.max-line-length]
+max = 130
+```
+
+Or silence it on one line, when the code is right as it is:
+
+```gdscript
+var Scene = preload("res://enemy.tscn")  # gdtidy: ignore=class-load-variable-name
+```
+
+Comments written for gdlint (`# gdlint: ignore=...`) work too.
+
+## In a check
+
+Lint is the second step of [`gdsuite check`](/check), after formatting.
+
+## In the Godot editor
+
+Not yet: a Problems list in the editor, where a click opens the script at the
+line, is planned for the GDSuite editor addon.
+
+## Go further
+
+- [Lint rules](/reference/lint-rules): every rule and its options.
+- [Format and lint settings](/reference/format-lint-settings).
+- Coming from gdlint? [Coming from gdtoolkit](/existing-project/from-gdtoolkit).

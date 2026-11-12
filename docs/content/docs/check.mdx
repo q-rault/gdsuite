@@ -1,0 +1,69 @@
+---
+title: Check everything at once
+description: One command runs formatting, lint, type checking and code health, the same way everywhere.
+---
+
+`gdsuite check` runs the checks one after the other, and stops at the first
+that finds a problem:
+
+```bash
+gdsuite check
+```
+
+```text
+pass: Formatting check passed (fmt, 10ms)
+pass: Lint check passed (lint, 9ms)
+pass: GDScript type check passed (typecheck, 289ms)
+pass: Health checks passed (health, 78ms)
+```
+
+Run it whenever you finish a change, before you commit. Run it in [CI](/ci)
+too: when it passes on your machine, it passes there.
+
+## The steps
+
+| Step | What it does | It fails when | Fix it with |
+| --- | --- | --- | --- |
+| `fmt` | Checks [formatting](/formatting), changes nothing | A script isn't formatted | `gdsuite fmt` |
+| `lint` | Runs the [linter](/linting) | A rule reports a problem | `gdsuite lint -- --fix`, then by hand |
+| `typecheck` | Runs the [type check](/type-checking) | Godot reports an error | By hand |
+| `test` | Runs your [tests](/testing) (not by default) | A test fails | By hand |
+| `health` | Measures [code health](/code-health) | Code health could not run | |
+
+Tests are left out by default because they take longer than the rest. Run
+`gdsuite test` separately, or add them:
+
+```toml
+# gdsuite.toml
+[check]
+steps = ["fmt", "lint", "typecheck", "test", "health"]
+```
+
+Remove a step from the list to skip it, for example `health` while you set it
+up.
+
+## When it fails
+
+The failing step says what it found and how to fix it:
+
+```text
+pass: Formatting check passed (fmt, 10ms)
+error: Lint check failed (lint, 9ms)
+test/test_player.gd:12:24 [duplicated-load] duplicated loading of "res://player/player.gd"
+
+Found 1 lint problem. Fix them and rerun `gdsuite check`.
+error: check failed
+```
+
+Fix, run `gdsuite check` again, and the next step runs.
+
+## In the Godot editor
+
+Not yet: a **Check** button that runs the same steps and shows each result is
+planned for the GDSuite editor addon.
+
+## For scripts and CI
+
+`gdsuite check --report json` prints the result of every step as JSON and
+saves it in `reports/gdsuite/check.json`. See [Run it in CI](/ci) and
+[Reports](/reference/reports).

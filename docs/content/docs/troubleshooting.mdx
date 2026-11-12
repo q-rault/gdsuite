@@ -1,75 +1,154 @@
 ---
-title: Troubleshooting
-description: Common setup and workflow failures, with the quickest path to the right diagnostic command.
+title: Troubleshooting & FAQ
+description: What to do when something doesn't work, and answers to common questions.
 ---
 
-## Run `doctor` first
+## Start with `doctor`
 
-If the suite feels broken, start with:
+When something seems wrong, run this in your project's folder:
 
 ```bash
 gdsuite doctor
 ```
 
-That prints resolved paths, config locations, and setup state.
+It shows where Godot and each tool are, and their versions. When everything
+is in place, it ends with `[gdsuite:doctor] status ok`. When something is
+missing, each line says what to run:
 
-When all tools are installed, pretty output ends with `[gdsuite:doctor] status ok`:
-
-```
-[gdsuite:doctor] info  project root  /your/project
-[gdsuite:doctor] info  config        /your/project/gdsuite.toml
-[gdsuite:doctor] info  godot         /usr/local/bin/godot
-[gdsuite:doctor] info  version       4.7.stable.official
-[gdsuite:doctor] info  gdtidy        /your/project/.gdsuite/tools/gdtidy/bin/gdtidy
-[gdsuite:doctor] info  version       gdtidy 0.2.0
-[gdsuite:doctor] status ok
-```
-
-When tools are missing, each missing entry says exactly what to run to fix it, and `[gdsuite:doctor] status error` appears at the end:
-
-```
+```text
 [gdsuite:doctor] warn  godot not found; install Godot and add to PATH, or set GODOT_EXE, or set project.godot_exe in gdsuite.toml
 [gdsuite:doctor] warn  gdtidy not found; run `gdsuite setup` to install the toolchain
-[gdsuite:doctor] warn  gdtest not found; run `gdsuite setup` to install the toolchain
-[gdsuite:doctor] warn  gdhealth not found; run `gdsuite setup` to install the toolchain
 [gdsuite:doctor] status error
-error: missing tools: godot, gdtidy, gdtest, gdhealth; run `gdsuite setup` to install the local toolchain
 ```
 
-Use `gdsuite doctor --output plain` when you want stable `key=value` lines for shell scripts, or `gdsuite doctor --output json` for a structured report.
+## Common problems
 
-## Common failure modes
+<Accordions>
 
-### `run gdsuite init first`
+<Accordion title="&quot;run gdsuite init first&quot;">
 
-The project was never bootstrapped. Run:
+The project has no `gdsuite.toml` yet. Run `gdsuite init` in the folder that
+holds `project.godot`.
+
+</Accordion>
+
+<Accordion title="&quot;gdtidy not found&quot; (or another tool) after cloning a project">
+
+The tools live in `.gdsuite/`, which is not committed. Run `gdsuite setup`
+once after cloning.
+
+</Accordion>
+
+<Accordion title="Godot is not found">
+
+Run `gdsuite init --godot-exe <path to Godot>` once: GDSuite remembers the path
+for this project on this computer. Or set the `GODOT_EXE` environment variable
+for all projects. See [Install](/install#if-godot-isnt-found).
+
+</Accordion>
+
+<Accordion title="The test panel in Godot says gdtest is not available">
+
+The panel doesn't look in `.gdsuite/` yet. Set the `GDTEST_BIN` environment
+variable to the gdtest path that `gdsuite doctor` prints, then restart Godot.
+
+</Accordion>
+
+<Accordion title="Code health lists files from .gdsuite/">
+
+Code health currently measures the scripts GDSuite downloaded. Exclude them:
+
+```toml
+[health.discovery]
+exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
+```
+
+</Accordion>
+
+<Accordion title="A tool warns that its settings file is ignored">
+
+A `gdtest.toml`, `gdhealth.toml` or `gdtidy.toml` sits next to a
+`gdsuite.toml` that has a section for the same tool. The section wins and the
+file is ignored; nothing is merged. Keep one: `gdsuite migrate` moves the file
+into `gdsuite.toml` when the section doesn't exist yet. See [Older settings
+files](/configure#older-settings-files).
+
+</Accordion>
+
+<Accordion title="macOS says gdsuite can't be opened">
+
+macOS blocks programs downloaded from the internet that aren't from the App
+Store. Allow it once in a terminal, in the folder where you put it:
 
 ```bash
-gdsuite init
+xattr -d com.apple.quarantine gdsuite
 ```
 
-### A tool warns that its config file is ignored
+</Accordion>
 
-`gdtest.toml`, `gdhealth.toml` or `gdtidy.toml` sits next to a `gdsuite.toml`
-that has a section for the same tool (`[test]`, `[health]`, `[lint]` or
-`[fmt]`). The section wins and the file is ignored: the two are not merged.
-Keep the settings in one place; `gdsuite migrate` moves a tool file into
-`gdsuite.toml` when `gdsuite.toml` has no section for it yet.
+<Accordion title="&quot;gdsuite report ci&quot; fails">
 
-### CI aggregation fails
+It combines three saved reports, so run these first:
+`gdsuite check --report json`, `gdsuite test --report json` and
+`gdsuite health --report json`.
 
-`gdsuite report ci` needs existing JSON artifacts from:
+</Accordion>
 
-- `gdsuite check --report json`
-- `gdsuite test --report json`
-- `gdsuite health --report json`
+</Accordions>
 
-### Health seems to ignore config exclusions
+## Questions
 
-gdhealth reads the `[health]` section of `gdsuite.toml` if there is one, and
-`gdhealth.toml` otherwise, never both. Check that the exclusions are in the
-file gdhealth actually reads.
+<Accordions>
 
-## Next step
+<Accordion title="Do I need to install gdtidy, gdtest, gdhealth or gdtypecheck?">
 
-Next step: go to [Install](/install), [Migrate an Existing Project](/migrate), or [CI](/ci) depending on where the failure happened.
+No. GDSuite downloads them into your project's `.gdsuite/` folder, at
+versions tested together, and runs them for you. See [Under the
+hood](/under-the-hood).
+
+</Accordion>
+
+<Accordion title="Do I need Rust?">
+
+No. The `gdsuite` program and the tools come as ready-made programs from
+GitHub. Rust is only needed to install with `cargo`, or to build a tool from
+its source.
+
+</Accordion>
+
+<Accordion title="Can it break my code?">
+
+Only `gdsuite fmt`, `gdsuite lint -- --fix` and `gdsuite migrate` change files.
+Formatting and fixes check every file they rewrite and leave it alone if its
+meaning would change. Commit before you run them, so you can review the
+change.
+
+</Accordion>
+
+<Accordion title="Does it work with C#?">
+
+No. GDSuite reads GDScript (`.gd`), shaders and scenes. Type checking also
+reports errors in shaders and missing files in scenes, whatever language your
+scripts use.
+
+</Accordion>
+
+<Accordion title="Which Godot versions?">
+
+Godot 4.5 and newer.
+
+</Accordion>
+
+<Accordion title="Does it send anything over the internet?">
+
+Only downloads: `gdsuite init` and `gdsuite setup` fetch the tools from
+GitHub. Nothing about your project is sent anywhere.
+
+</Accordion>
+
+</Accordions>
+
+## Still stuck?
+
+[Open an issue](https://github.com/q-rault/gdsuite/issues) with the output of
+`gdsuite doctor` and of the command that failed.

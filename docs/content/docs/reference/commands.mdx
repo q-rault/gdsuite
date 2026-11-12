@@ -1,0 +1,66 @@
+---
+title: Commands
+description: Every gdsuite command, its options, and how to pass options to the tool behind it.
+---
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `gdsuite init` | Add GDSuite to a project: write `gdsuite.toml`, download the tools, install the test addons |
+| `gdsuite setup` | Download or repair the tools, for example after cloning a project or deleting `.gdsuite/` |
+| `gdsuite migrate` | Move older settings (`gdtest.toml`, `gdhealth.toml`, `gdtidy.toml`, `gdlintrc`, `gdformatrc`, settings from GDSuite 0.1) into `gdsuite.toml` |
+| `gdsuite doctor` | Show where Godot and each tool are, their versions, and what is missing |
+| `gdsuite fmt` | [Format](/formatting) the project's scripts |
+| `gdsuite lint` | [Lint](/linting) the project's scripts |
+| `gdsuite typecheck` | [Type check](/type-checking) the project |
+| `gdsuite test` | Run the [tests](/testing) in `default_test_target` (`test/`) |
+| `gdsuite health` | Measure [code health](/code-health) |
+| `gdsuite check` | Run the [check](/check) steps in order, stopping at the first that fails |
+| `gdsuite report [NAME]` | Print a saved [report](/reference/reports): `latest` (the default), `check`, `test`, `health`, or `ci` to combine them |
+
+## Options
+
+Every command takes:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--project-root <DIR>` | `.` | The Godot project |
+| `--godot-exe <PATH>` | Remembered by `init`, then `GODOT_EXE`, then found automatically | The Godot 4 program |
+
+Some also take:
+
+| Option | Commands | Description |
+| --- | --- | --- |
+| `--output pretty\|plain\|json` | `init`, `setup`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
+| `--report text\|json` | `lint`, `test`, `health`, `check` | Print the result as text or JSON, and save it in `reports/gdsuite/` |
+
+## Passing options to a tool
+
+Each feature is run by a tool that GDSuite installs (see [Under the
+hood](/under-the-hood)). Everything after `--` goes to that tool unchanged:
+
+```bash
+gdsuite fmt -- --check                    # change nothing, list what would change
+gdsuite lint -- --fix player/             # fix what can be fixed, in player/
+gdsuite typecheck -- --strict             # also check calls on your own classes
+gdsuite test -- --filter combat           # only tests whose name matches
+gdsuite health -- health --fail-on critical
+```
+
+For `gdsuite health`, what follows `--` replaces the default `health`
+subcommand, so start with it.
+
+The options of each tool:
+
+- formatting and linting: [Formatting style](/reference/formatting-style) and
+  [gdtidy's command reference](https://q-rault.github.io/gdtidy/docs/cli-reference)
+- type checking: [gdtypecheck's command reference](https://q-rault.github.io/gdtypecheck/docs/cli-reference)
+- tests: [Filters, tags and coverage](/writing-tests/running) and
+  [gdtest's command reference](https://q-rault.github.io/gdtest/docs/cli-reference)
+- code health: [gdhealth's command reference](https://q-rault.github.io/gdhealth/docs/cli-reference)
+
+## Exit codes
+
+`0` means everything passed. Anything else means a check found a problem or
+could not run; the last lines of the output say which.

@@ -1,0 +1,89 @@
+---
+title: Reports
+description: The JSON that --report json prints and saves, for CI and scripts.
+---
+
+With `--report json` (or `[reports] default = "json"`), `check`, `test`,
+`health` and `lint` print their result as JSON and save it in
+`reports/gdsuite/`:
+
+| File | Written by |
+| --- | --- |
+| `check.json` | `gdsuite check --report json` |
+| `test.json` | `gdsuite test --report json` |
+| `health.json` | `gdsuite health --report json` |
+| `ci.json` | `gdsuite report ci`, which combines the three above (all three must exist) |
+| `latest.json` | A copy of the last report written |
+
+`gdsuite report <name>` prints one of them again.
+
+## Shape
+
+`check`, `test`, `health` and `ci` reports share one shape:
+
+```json
+{
+  "status": "ok",
+  "command": "check",
+  "project_root": "/home/me/my-game",
+  "duration_ms": 382,
+  "steps": [
+    {
+      "name": "lint",
+      "status": "ok",
+      "duration_ms": 9,
+      "summary": "0 lint problems in 3 files",
+      "findings": [],
+      "artifacts": []
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `"ok"`, or `"failed"` if any step failed |
+| `command` | `check`, `test`, `health` or `ci` |
+| `steps[].name` | `fmt`, `lint`, `typecheck`, `test` or `health` |
+| `steps[].status` | `"ok"` or `"failed"`. `check` stops at the first failed step, so the steps after it are not listed |
+| `steps[].summary` | One line, as printed in text mode |
+| `steps[].findings` | The step's problems, when it reports them one by one |
+| `steps[].artifacts` | Files the step wrote, as `{ "name", "path" }`, such as code health's `summary.txt` and `health.json` |
+
+## Lint report
+
+`gdsuite lint --report json` prints the linter's own shape, where each
+problem is a finding:
+
+```json
+{
+  "status": "failed",
+  "success": false,
+  "exit_code": 1,
+  "summary": "1 lint problem in 3 files",
+  "findings": [
+    {
+      "file": "test/test_player.gd",
+      "line": 12,
+      "column": 24,
+      "severity": "warning",
+      "message": "duplicated loading of \"res://player/player.gd\"",
+      "rule": "duplicated-load",
+      "fixable": false
+    }
+  ],
+  "skipped": [],
+  "stderr": []
+}
+```
+
+`skipped` lists the scripts that could not be linted, such as scripts with a
+syntax error (type checking reports those).
+
+## The tools' own reports
+
+Code health writes its full report in `reports/code-health/` (`summary.txt`,
+`health.json`, the dependency graph, the interactive map); its fields are in
+[Health metrics](/reference/health-metrics). For the other tools' JSON
+output, pass their own options after `--`, such as
+`gdsuite typecheck -- --format json`.

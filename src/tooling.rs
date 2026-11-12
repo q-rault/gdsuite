@@ -520,7 +520,12 @@ fn install_tool(
     requested: &ToolAcquireSpec,
     name: &str,
 ) -> Result<PathBuf> {
-    let cargo = which::which("cargo").context("cargo is required for setup")?;
+    // Only sources that are built need cargo: a release archive installs
+    // without Rust.
+    let cargo = || {
+        which::which("cargo")
+            .with_context(|| format!("cargo is required to build {name} from this source"))
+    };
     let root = context.gdsuite_dir.join("tools").join(name);
     fs::create_dir_all(&root)
         .with_context(|| format!("failed to create tool root {}", root.display()))?;
@@ -537,7 +542,7 @@ fn install_tool(
                 // record of, such as one an earlier gdsuite downloaded.
                 "--force".to_string(),
             ];
-            process::run_checked(&cargo, &args, &context.root)?;
+            process::run_checked(&cargo()?, &args, &context.root)?;
         }
         ToolAcquireSpec::Crate {
             crate_name,
@@ -563,7 +568,7 @@ fn install_tool(
                 // record of, such as one an earlier gdsuite downloaded.
                 "--force".to_string(),
             ];
-            process::run_checked(&cargo, &args, &context.root)?;
+            process::run_checked(&cargo()?, &args, &context.root)?;
         }
         ToolAcquireSpec::Git { url, rev, subdir } => {
             let source_root = tool_source_cache_dir(context, name);
@@ -594,7 +599,7 @@ fn install_tool(
                 // record of, such as one an earlier gdsuite downloaded.
                 "--force".to_string(),
             ];
-            process::run_checked(&cargo, &args, &context.root)?;
+            process::run_checked(&cargo()?, &args, &context.root)?;
         }
         ToolAcquireSpec::GithubRelease { url } => {
             let download_name = file_name_from_url(url).unwrap_or_else(|| name.to_string());
@@ -640,7 +645,7 @@ fn install_tool(
         }
     }
 
-    Err(anyhow!("cargo install did not produce {}", name))
+    Err(anyhow!("installing {} did not produce its binary", name))
 }
 
 fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {

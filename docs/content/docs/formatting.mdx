@@ -1,0 +1,119 @@
+---
+title: Formatting
+description: Every script laid out the same way, following Godot's style guide, without changing what it does.
+---
+
+**Formatting tidies the layout of your scripts**: spaces around operators,
+indentation, blank lines between functions. It makes every script look like
+it was written by the same careful person, so you read the code instead of
+its layout, and changes stay small and easy to review.
+
+<BeforeAfter>
+
+```gdscript
+extends Node
+signal died
+const MAX_HEALTH=100
+var health:int=MAX_HEALTH
+func take_damage(amount:int)->void:
+    health=max(health-amount,0)
+    if (health==0 && !is_queued_for_deletion()) :
+        died.emit()
+```
+
+```gdscript
+extends Node
+signal died
+const MAX_HEALTH = 100
+var health: int = MAX_HEALTH
+
+
+func take_damage(amount: int) -> void:
+	health = max(health - amount, 0)
+	if health == 0 and not is_queued_for_deletion():
+		died.emit()
+```
+
+</BeforeAfter>
+
+## What it never does
+
+- **It never changes what your code does.** After formatting a script,
+  GDSuite reads it again and compares it with the original: if anything other
+  than layout changed, the script is left as it was.
+- **It never moves your line breaks.** A long line stays long; a call you
+  split over several lines stays split. (The [linter](/linting) can warn
+  about long lines.)
+- **It never renames or reorders anything.** The style guide's order of
+  declarations is a lint rule, not something formatting forces on you.
+- **It never touches node paths** such as `$Body/Sprite` or `%Health`.
+
+## Format your project
+
+```bash
+gdsuite fmt                 # format every script in the project
+gdsuite fmt -- player/      # only this folder
+gdsuite fmt -- --check      # change nothing, list the scripts that would change
+gdsuite fmt -- --diff       # change nothing, show the changes
+```
+
+`addons/`, hidden folders and folders with a `.gdignore` file are skipped, as
+in the Godot editor.
+
+<Callout title="First time on an existing project?">
+
+The first `gdsuite fmt` can touch most of your scripts. Commit your work
+before, run it, check the game still runs, and commit the formatting on its
+own, so it doesn't hide other changes in your history.
+
+</Callout>
+
+## In a check
+
+[`gdsuite check`](/check) verifies formatting first, without changing
+anything, and fails if a script isn't formatted:
+
+```text
+error: Formatting issues found (fmt, 10ms)
+hud.gd: would be reformatted
+player/player.gd: would be reformatted
+
+Found formatting issues in 2 files. Run `gdsuite fmt` to format the target.
+```
+
+## In the Godot editor
+
+Not yet: formatting from the editor, and formatting on save, are planned for
+the GDSuite editor addon. Today, run `gdsuite fmt` in a terminal; the editor
+reloads the scripts it changed.
+
+## Settings
+
+Two choices where the style guide and common practice disagree are yours, in
+`gdsuite.toml`:
+
+```toml
+[fmt]
+continuation-indent = 1     # a continued line gets 1 extra level (the guide says 2)
+dict-brace-spaces = false   # {"a": 1} instead of { "a": 1 }
+exclude = ["generated"]     # folders to leave alone
+```
+
+To keep a part of a script exactly as written, such as a table you aligned
+by hand:
+
+```gdscript
+# gdtidy: fmt-off
+const DAMAGE_TABLE = [
+	[1,   0],
+	[0,  10],
+]
+# gdtidy: fmt-on
+```
+
+## Go further
+
+- [Formatting style](/reference/formatting-style): every change formatting
+  makes, rule by rule.
+- [Format and lint settings](/reference/format-lint-settings): every setting.
+- Coming from gdformat? [Coming from gdtoolkit](/existing-project/from-gdtoolkit).

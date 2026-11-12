@@ -1,56 +1,100 @@
 ---
-title: What is GDSuite?
-description: Start here if you want one workflow surface for formatting, linting, tests, and architecture health in Godot.
+title: Welcome to GDSuite
+description: Keep a Godot project tidy, correct and easy to change, with one tool.
 ---
 
-GDSuite is the suite-owned entrypoint for a Godot project. It gives you one place to bootstrap local tooling, run the fast local gate, delegate into `gdtest` and `gdhealth` when needed, and collect reports in a consistent way.
+GDSuite watches over your GDScript while you build your game. It tidies the
+layout of your scripts, points at likely mistakes, finds errors in scripts you
+haven't opened, runs your tests, and tells you which scripts are getting too
+big to change safely.
 
-## Why this portal exists
-
-The suite now owns the main documentation home for three products:
-
-- `gdsuite` for workflow orchestration and config ownership
-- `gdtest` for test execution
-- `gdhealth` for architecture health checks
-
-That means you can start with the suite narrative, then go deeper into product-specific docs without leaving the same portal shell.
-
-## The normal path
-
-If you are new to the stack, the shortest useful path is:
+You install one thing, GDSuite, and run one command to check everything:
 
 ```bash
-gdsuite init
 gdsuite check
-gdsuite test
-gdsuite health
 ```
 
-`gdsuite check` is the default local validation command. `gdsuite test` and `gdsuite health` are the delegated depth commands you add when the change justifies them.
+## What it does for you
 
-## What each product does
+<Cards>
+  <Card title="Formatting" href="/formatting">
+    Spaces, indentation and blank lines laid out the same way in every script,
+    following Godot's style guide. It never changes what your code does.
+  </Card>
+  <Card title="Linting" href="/linting">
+    Points at code that works but is probably a mistake, or hard to read: a
+    variable you never use, a function that is far too long.
+  </Card>
+  <Card title="Type checking" href="/type-checking">
+    Finds the errors Godot would show you, in every script and scene of the
+    project, including the ones you haven't opened today.
+  </Card>
+  <Card title="Testing" href="/testing">
+    Small scripts that play a piece of your game and check the result, so you
+    know a change didn't break something that used to work.
+  </Card>
+  <Card title="Code health" href="/code-health">
+    Shows which scripts have grown too big or too tangled, before they become
+    painful to change.
+  </Card>
+  <Card title="Check everything" href="/check">
+    One command runs them all, the same way on your machine and on a server.
+  </Card>
+</Cards>
 
-### `gdsuite`
+## A taste
 
-Owns the project-local toolchain, the top-level `gdsuite.toml` contract, suite reports, and the main workflow framing.
+Here is what formatting does to a script written in a hurry:
 
-### `gdtest`
+<BeforeAfter>
 
-Owns direct test execution. Use it through `gdsuite test` for normal suite workflows, then drop to deeper `gdtest` docs when you need harness, filtering, mocking, or scene-runner details.
+```gdscript
+extends Node
 
-### `gdhealth`
+const MAX_HEALTH=100
+var health:int=MAX_HEALTH
 
-Owns codebase architecture health. Use it through `gdsuite health` for suite workflows, then go deeper when you need policy, reports, or architecture review recipes.
+func take_damage(amount:int)->void:
+    health=max(health-amount,0)
+    if health==0 :
+        died.emit()
+```
 
-## Read by outcome
+```gdscript
+extends Node
 
-- Want the first successful run: [Quickstart](/quickstart)
-- Adopting an existing project: [Migrate an Existing Project](/migrate)
-- Understanding the local gate: [`gdsuite check`](/workflow-check)
-- Wiring CI correctly: [CI](/ci)
-- Understanding ownership split: [Config Overview](/config)
-- Going product-specific: [gdtest](/gdtest) and [gdhealth](/gdhealth)
+const MAX_HEALTH = 100
+var health: int = MAX_HEALTH
 
-## Next step
 
-Next step: go to [Install](/install) if this is a new machine, or [Quickstart](/quickstart) if the toolchain is already available.
+func take_damage(amount: int) -> void:
+	health = max(health - amount, 0)
+	if health == 0:
+		died.emit()
+```
+
+</BeforeAfter>
+
+And here is what a check finds in a small project:
+
+```text
+player/player.gd:11:1: warning[class-definitions-order]: Definition out of order in global scope: `signals` must come before `others`
+hud.gd:10: error[missing-resource]: "res://levels/level_2.tscn" does not exist
+```
+
+The second line is a scene that was renamed or deleted: the game would only
+fail when the player reaches the exit.
+
+## Do I need to be a programmer?
+
+No. If you write GDScript in the Godot editor, GDSuite is for you. Every page
+here starts with what a feature does and why it helps, before any command.
+GDSuite runs from a terminal today, and its tests already have a panel in the
+Godot editor; the rest of its features are coming to the editor too.
+
+## Start here
+
+<Cards>
+  <Card title="Install GDSuite" href="/install" />
+  <Card title="Your first 10 minutes" href="/first-steps" />
+</Cards>

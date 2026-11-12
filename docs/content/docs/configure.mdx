@@ -1,0 +1,121 @@
+---
+title: Configure GDSuite
+description: All your settings in one file, gdsuite.toml, next to project.godot.
+---
+
+GDSuite works without any settings. When you want to change something (a
+lint rule, a code health limit, the steps of the check), it goes in one file:
+`gdsuite.toml`, next to `project.godot`. Commit it, so everyone on the
+project, and CI, uses the same settings.
+
+## What `init` writes
+
+```toml
+[project]
+root = "."
+
+[tools]
+# The version of each tool GDSuite installs. Delete this section to use the
+# versions your GDSuite was tested with.
+gdtest_source = "github:q-rault/gdtest@v0.2.3"
+gdhealth_source = "github:q-rault/gdhealth@v0.3.1"
+gdtypecheck_source = "github:q-rault/gdtypecheck@v0.2.1"
+gdtidy_source = "github:q-rault/gdtidy@v0.3.0"
+
+[commands]
+default_test_target = "test/"
+default_health_subcommand = "health"
+
+[reports]
+default = "text"
+artifacts_dir = "reports/gdsuite"
+
+[check]
+steps = ["fmt", "lint", "typecheck", "health"]
+```
+
+The ones you are most likely to change:
+
+- `[check] steps`: the steps of [`gdsuite check`](/check), in order. Add
+  `"test"` to run your tests too.
+- `[commands] default_test_target`: the folder `gdsuite test` runs.
+
+## A section per feature
+
+Each feature reads its own section, which you add when you need it:
+
+```toml
+# Formatting
+[fmt]
+dict-brace-spaces = false
+
+# Linting
+[lint]
+disable = ["max-public-methods"]
+
+[lint.rules.max-line-length]
+max = 130
+
+# Testing
+[test]
+exclude = ["test/helpers/**"]
+timeout = 15000
+
+# Code health
+[health.thresholds]
+cyclomatic_warn = 12
+
+[health.discovery]
+exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
+```
+
+Every key of each section is in the reference: [Format and lint
+settings](/reference/format-lint-settings), [Test
+settings](/reference/test-settings), [Health
+settings](/reference/health-settings). Type checking has no settings.
+
+These sections apply however a feature runs: through `gdsuite`, from the
+gdtest panel in the Godot editor, or when one of the tools is started on its
+own.
+
+## Settings that differ between your computer and CI
+
+The test runner has *profiles*: a set of settings you switch on by name.
+
+```toml
+[test.profile.ci]
+fail_fast = true
+reporter = "junit"
+```
+
+```bash
+gdsuite test -- --profile ci
+```
+
+## Where Godot is
+
+Godot's path is not in `gdsuite.toml`, since it differs from one computer to
+the next. `gdsuite init --godot-exe <path>` remembers it for the project on
+your computer, and the `GODOT_EXE` environment variable sets it everywhere.
+`[project] godot_exe` works too, if every computer has Godot at the same
+place.
+
+## Older settings files
+
+GDSuite's tools also accept their own settings files: `gdtest.toml`,
+`gdhealth.toml` and `gdtidy.toml`. They are meant for people who use one of
+the tools without GDSuite. In a GDSuite project, keep everything in
+`gdsuite.toml`:
+
+- when `gdsuite.toml` has a tool's section, that tool ignores its own file and
+  prints a warning; the two are never merged;
+- `gdsuite migrate` moves those files into `gdsuite.toml` for you, comments
+  included.
+
+gdtoolkit's `gdlintrc` and `gdformatrc` are converted by `gdsuite init`; see
+[Coming from gdtoolkit](/existing-project/from-gdtoolkit).
+
+## Go further
+
+[gdsuite.toml reference](/reference/gdsuite-toml) lists every key of
+GDSuite's own sections.

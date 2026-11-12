@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / ".gdsuite-release.toml"
 CARGO_TOML = ROOT / "Cargo.toml"
 CARGO_LOCK = ROOT / "Cargo.lock"
-CONFIG_DOCS = ROOT / "docs" / "content" / "docs" / "config" / "gdsuite-toml.mdx"
+CONFIG_DOCS = ROOT / "docs" / "content" / "docs" / "configure.mdx"
 ACQUIRE = re.compile(
     r'^\[tools\.(?P<tool>[a-z0-9_-]+)\]\s*\n'
     r'acquire = \{ kind = "github_release_repo", owner = "(?P<owner>[^"]+)", '

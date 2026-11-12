@@ -55,5 +55,5 @@ jobs:
             .gdsuite-release.toml
             Cargo.toml
             Cargo.lock
-            docs/content/docs/config/gdsuite-toml.mdx
+            docs/content/docs/configure.mdx
           delete-branch: true

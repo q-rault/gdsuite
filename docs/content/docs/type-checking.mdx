@@ -1,0 +1,80 @@
+---
+title: Type checking
+description: Find the errors Godot would show you, in every script and scene, without opening them.
+---
+
+**Type checking asks Godot itself to read every script, shader and scene of
+your project and report what is broken.** The Godot editor shows you errors in
+the script you have open; type checking finds them everywhere, including in
+the scripts you haven't touched today but that your change broke.
+
+```gdscript
+# hud.gd: nobody opened it since level_2.tscn was renamed
+func _on_exit_reached() -> void:
+	get_tree().change_scene_to_file("res://levels/level_2.tscn")
+```
+
+```text
+hud.gd:10: error[missing-resource]: "res://levels/level_2.tscn" does not exist
+gdtypecheck: 1 error(s), 0 warning(s) (3 scripts)
+```
+
+Without it, you would find this when a player reaches the exit.
+
+## What it finds
+
+| Kind | Example |
+| --- | --- |
+| **Script errors** | A typo in a function name, a wrong number of arguments, an unknown type, a missing `preload` |
+| **Shader errors** | A `.gdshader` file that doesn't compile |
+| **Missing files** | A scene that points at a deleted texture, a `load("res://...")` of a file that was moved, a broken autoload or main scene |
+| **Godot's warnings** | The warnings your project settings set to "warn", such as an unused variable |
+
+Warnings are listed but don't fail the check. Errors do.
+
+## Typed code gets more out of it
+
+Godot only knows what a variable holds when you tell it. In
+`var player = $Player`, `player` could be anything, so Godot can't check
+`player.take_damge(10)`. In `var player: Player = $Player` it can.
+
+For a stricter check, which also reports methods and properties that don't
+exist on your own classes:
+
+```bash
+gdsuite typecheck -- --strict
+```
+
+```text
+hud.gd:6: error[unsafe-access]: The method "take_damge()" is not present on the inferred type "Player" (but may be present on a subtype).
+```
+
+## What it can't see
+
+It reports errors, not bugs: whether your code does the right thing is what
+[tests](/testing) are for. It also doesn't check node paths (`$Missing`),
+paths built while the game runs, or shader code inside a scene.
+
+## Run it
+
+```bash
+gdsuite typecheck                     # the whole project
+gdsuite typecheck -- player/ ui/      # only these folders
+```
+
+It starts Godot without a window, so it takes a few seconds rather than a few
+milliseconds. Your game doesn't run: the check ends before any scene starts.
+
+Type checking is the third step of [`gdsuite check`](/check).
+
+## In the Godot editor
+
+The editor already shows errors in the scripts you open. A project-wide list
+in the editor, where a click opens the script at the line, is planned for the
+GDSuite editor addon.
+
+## Go further
+
+[Type check findings](/reference/type-check-findings) lists every rule, its
+limits, and what the check does to your project (such as creating `.uid`
+files for new scripts, as the editor does).

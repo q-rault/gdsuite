@@ -1,0 +1,107 @@
+---
+title: Testing
+description: Small scripts that play a piece of your game and check the result, so a change never quietly breaks it.
+---
+
+**A test is a small script that uses a piece of your game and checks the
+result.** You write it once; GDSuite runs it as often as you like, in a
+fraction of a second. When a change breaks something that used to work, a
+test turns red and tells you what and where, before a player finds it.
+
+```gdscript
+# test/test_player.gd
+extends GdTest
+
+
+func test_health_never_goes_below_zero() -> void:
+	var player := Player.new()
+	player.take_damage(500)
+	assert_eq(player.health, 0)
+	player.free()
+```
+
+Months later, someone simplifies `take_damage` to `health -= amount`. The game
+still runs, but health can now drop below zero. The test catches it:
+
+```text
+✓ res://test/test_player.gd :: test_damage_lowers_health (11 µs)
+✗ res://test/test_player.gd :: test_health_never_goes_below_zero (19 µs)
+    → expected 0 == -400
+
+2 tests  1 passed 1 failed
+```
+
+## What is worth testing in a game
+
+You don't need to test everything. Start where a bug would hurt and is easy to
+miss:
+
+- **Rules and numbers**: damage, scores, prices, cooldowns, level-up curves.
+- **State that must stay consistent**: an inventory, a save file, a quest log.
+- **Things that broke before**: when you fix a bug, add a test that would have
+  caught it, so it never comes back.
+- **Scenes and input**: press "jump" in a test, wait a few frames, check the
+  character left the ground ([Testing scenes and input](/writing-tests/scenes)).
+
+## Write tests
+
+A test file:
+
+- lives in the `test/` folder (any folder works; `test/` is the default),
+- has a name starting with `test_`, such as `test_player.gd`,
+- starts with `extends GdTest`,
+- has one function per test, each named `test_something`.
+
+Inside a test, `assert_eq(actual, expected)` and its friends check results. A
+failed check is reported and the other tests keep running.
+
+[Your first test](/writing-tests/first-test) shows the shape of a test file,
+with setup shared between tests. The [Writing tests](/writing-tests/first-test)
+section goes on with scenes, replacing dependencies, and snapshots.
+
+## Run tests
+
+```bash
+gdsuite test                                  # every test in test/
+gdsuite test -- test/test_player.gd           # one file
+gdsuite test -- --filter inventory            # tests whose name matches
+gdsuite test -- --changed-only                # only tests your changes can affect
+gdsuite test -- test/ --watch                 # run again on every save
+```
+
+Everything after `--` goes to the test runner as is: [Filters, tags and
+coverage](/writing-tests/running) lists all the options.
+
+Each test file runs in its own Godot process, without a window, several at
+once: a crash in one test file doesn't stop the others.
+
+## In the Godot editor
+
+`gdsuite init` installs a test panel for the editor. Enable **gdtest Editor**
+in **Project → Project Settings → Plugins**, and a **gdtest** tab appears in
+the bottom panel:
+
+- the tree lists every test file and test;
+- run everything, one file, or one test, and rerun only the failures;
+- a failed test shows its message; double-click it to open the script at the
+  line.
+
+<Callout type="warn" title="If the panel says gdtest is not available">
+
+The panel doesn't look in `.gdsuite/` yet, where GDSuite installs it. Until
+it does, set the `GDTEST_BIN` environment variable to the gdtest path that
+`gdsuite doctor` prints, and restart Godot.
+
+</Callout>
+
+## In a check
+
+Tests are not part of [`gdsuite check`](/check) by default, because they take
+longer than the other steps. Run `gdsuite test` before you commit, or add
+`"test"` to the check's steps. In [CI](/ci), run both.
+
+## Coming from GUT or gdUnit4?
+
+[Coming from GUT](/existing-project/from-gut) and [Coming from
+gdUnit4](/existing-project/from-gdunit4) map each of their functions to
+GDSuite's, and gdUnit4 tests can keep running while you move them.

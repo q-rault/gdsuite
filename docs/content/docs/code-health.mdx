@@ -1,0 +1,111 @@
+---
+title: Code health
+description: See which scripts are growing too big or too tangled, before they become painful to change.
+---
+
+**Code health shows you where your project is getting hard to work with.**
+Every game has a few scripts that grow and grow: the player controller that
+does everything, the manager every other script talks to. Changing them gets
+slower and riskier over time. Code health finds them early and tells you why
+they stand out, so you can decide what to clean up first.
+
+It doesn't run your game and doesn't say your code is wrong. It measures, and
+ranks.
+
+## What it measures, in plain words
+
+| It asks | It measures | A warning sign |
+| --- | --- | --- |
+| **How big?** | Lines per script and per function | A 1,500-line `player.gd` |
+| **How tangled?** | Branches and nesting inside functions | A function with 20 `if`s, four levels deep |
+| **How connected?** | Which scripts use which | `game_manager.gd` used by 30 scripts, or using 30 of them |
+| **Going in circles?** | Scripts that depend on each other in a loop | `player.gd` needs `hud.gd`, which needs `player.gd` |
+| **Where first?** | A *hotspot* score combining all the above, and how often Git says a script changes | A big, tangled script you edit every week |
+
+## Run it
+
+```bash
+gdsuite health
+```
+
+It prints where the full report went (`reports/code-health/`). Start with
+`summary.txt`. On a real game it looks like this:
+
+```text
+files: 126
+edges: 142
+cycles: 1
+policy findings: 91
+top files:
+- player.gd (hotspot: 204, lines: 717, funcs: 36, incoming: 0, outgoing: 1, cycles: 0)
+- ai/mob_ai_controller.gd (hotspot: 169, lines: 568, funcs: 33, incoming: 8, outgoing: 0, cycles: 0)
+top functions:
+- terrain_grid.gd::_cast_light (hotspot: 72, lines: 90, cyclomatic: 19, nesting: 4, params: 0)
+policy findings:
+- [critical] function_lines_threshold: terrain_grid.gd::_cast_light spans 90 lines (warn 40, critical 80)
+```
+
+Read it as a to-do list, from the top:
+
+- **top files** and **top functions** are where cleaning up pays most.
+  `incoming` is how many scripts use this one (change it carefully),
+  `outgoing` how many it uses (it may do too much).
+- **cycles** are scripts that depend on each other in a loop; they are hard to
+  change or test one at a time.
+- **policy findings** are measures over a limit: `warning` is worth a look,
+  `critical` is worth planning work for.
+
+To see how your scripts connect, open the interactive map the same run wrote,
+`reports/code-health/browser/emerge.html`, in your browser.
+
+## What to do with it
+
+- **Act now** on dependency loops you didn't intend, and critical findings in
+  code you're about to change anyway.
+- **Plan** to split the top hotspots, especially the ones that change often.
+- **Watch** the rest: run it now and then, and see whether things get better.
+- **Ignore** generated code and what you know is fine, after writing down why.
+
+Don't chase a perfect score: the numbers compare your scripts with each
+other, not with an ideal.
+
+## Your settings
+
+Limits and folders live in `gdsuite.toml`:
+
+```toml
+[health.thresholds]
+cyclomatic_warn = 12
+
+[health.discovery]
+exclude = ["addons/**", ".godot/**", ".gdsuite/**", "reports/**"]
+```
+
+<Callout type="warn" title="Exclude .gdsuite/">
+
+Today, code health also measures the scripts GDSuite downloaded into
+`.gdsuite/`, and lists them at the top of the report. Add the `exclude` line
+above until this is fixed.
+
+</Callout>
+
+You can also group scripts (`[health.groups]`, such as `gameplay` and `ui`)
+and forbid some groups from using others, so a rule like "UI scripts never
+touch the network code" is checked for you. See [Health
+settings](/reference/health-settings).
+
+## In a check
+
+Code health is the last step of [`gdsuite check`](/check). It reports, but
+doesn't fail the check because of findings. To make critical findings fail a
+CI build, see [Run it in CI](/ci).
+
+## In the Godot editor
+
+Not yet: a Health tab, with the top hotspots and a click to open each script,
+is planned for the GDSuite editor addon.
+
+## Go further
+
+[Health metrics](/reference/health-metrics) explains every number in the
+report.

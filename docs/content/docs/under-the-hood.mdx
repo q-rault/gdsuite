@@ -1,0 +1,53 @@
+---
+title: Under the hood
+description: The four tools GDSuite runs for you. You don't need to install them separately.
+---
+
+GDSuite is one program you install and one command you learn. Behind it, four
+specialized tools do the work. **GDSuite downloads them, keeps their versions
+in step, and runs them for you: you never need to install them yourself.**
+
+| Feature | Tool | Its own site |
+| --- | --- | --- |
+| [Formatting](/formatting) and [linting](/linting) | gdtidy | [q-rault.github.io/gdtidy](https://q-rault.github.io/gdtidy/) |
+| [Type checking](/type-checking) | gdtypecheck | [q-rault.github.io/gdtypecheck](https://q-rault.github.io/gdtypecheck/) |
+| [Testing](/testing) | gdtest | [q-rault.github.io/gdtest](https://q-rault.github.io/gdtest/) |
+| [Code health](/code-health) | gdhealth | [q-rault.github.io/gdhealth](https://q-rault.github.io/gdhealth/) |
+
+gdtidy, gdtest and gdhealth read GDScript with
+[gdsyntax](https://crates.io/crates/gdsyntax), a port of Godot's own parser,
+so they understand your code the way Godot does. gdtypecheck and gdtest run
+Godot itself, without a window.
+
+## Why separate tools?
+
+Each tool can be used on its own, and released on its own, by people who only
+want one of them. GDSuite picks a version of each that was tested with the
+others, installs it in your project's `.gdsuite/` folder (so two projects can
+use different versions), and gives them one command, one settings file and
+one place to read about them: this site.
+
+## When to read a tool's own site
+
+Rarely. The pages you need, such as the lint rules or how to write tests, are
+on this site. A tool's site covers what only matters when you use it without
+GDSuite (installing it, its own settings file), and every option of its
+command line, which you reach through GDSuite with `--`:
+
+```bash
+gdsuite test -- --help
+```
+
+## Where things are
+
+```text
+my-game/
+├── gdsuite.toml          settings for GDSuite and every tool
+├── addons/
+│   ├── gdtest/           lets your tests run inside Godot
+│   └── gdtest_editor/    the test panel for the Godot editor
+├── .gdsuite/             not committed
+│   ├── tools/            the four tools, one folder each
+│   └── state/            what was installed, and where Godot is
+└── reports/              not committed: JSON reports and code health's report
+```
