@@ -1384,3 +1384,32 @@ fn config_changes_gdsuite_toml_and_reads_it_back() {
         config
     );
 }
+
+#[test]
+fn init_installs_the_editor_addon_and_says_how_to_turn_it_on() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+
+    fixture
+        .cmd()
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "installed the GDSuite editor addon in addons/gdsuite",
+        ))
+        .stdout(predicate::str::contains("Project Settings > Plugins"));
+    let plugin = fs::read_to_string(fixture.root.join("addons/gdsuite/plugin.cfg")).unwrap();
+    assert!(plugin.contains("script=\"plugin.gd\""), "{plugin}");
+    assert!(fixture.root.join(".gdsuite/bin").exists());
+
+    // Once installed, setup leaves it alone and says nothing about it.
+    fixture
+        .cmd()
+        .arg("setup")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("editor addon").not());
+}

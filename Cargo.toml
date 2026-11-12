@@ -11,7 +11,7 @@ homepage = "https://github.com/q-rault/gdsuite"
 readme = "README.md"
 keywords = ["godot", "gamedev", "cli", "tooling"]
 categories = ["development-tools", "command-line-utilities"]
-include = ["/src/**", "/.gdsuite-release.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE", "/LICENSE.md"]
+include = ["/src/**", "/editor/addons/**", "/.gdsuite-release.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE", "/LICENSE.md"]
 
 [dependencies]
 # The tools built into gdsuite, at exact versions: .gdsuite-release.toml

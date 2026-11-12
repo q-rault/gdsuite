@@ -3,6 +3,7 @@ mod bundled;
 mod cli;
 mod config;
 mod config_command;
+mod editor_addon;
 mod migrate;
 mod output;
 mod process;

@@ -16,7 +16,7 @@ use crate::{
         ReportArgs, RunArgs, SetupArgs,
     },
     config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
-    config_command, migrate,
+    config_command, editor_addon, migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
     tooling::{self, ProjectContext},
@@ -35,6 +35,8 @@ pub struct CommandError {
     pub code: u8,
     pub message: String,
 }
+
+const EDITOR_ADDON_INSTALLED: &str = "installed the GDSuite editor addon in addons/gdsuite; turn it on in Project > Project Settings > Plugins";
 
 /// `--godot-exe`, for the commands that find Godot themselves.
 static CLI_GODOT: OnceLock<PathBuf> = OnceLock::new();
@@ -196,6 +198,14 @@ fn setup_impl(
             "gdtest addon install skipped modified file {}",
             skipped.display()
         ));
+    }
+    let had_editor_addon = editor_addon::is_installed(&context.root);
+    let written = editor_addon::install(&context.root)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
+    if !had_editor_addon {
+        output.step(EDITOR_ADDON_INSTALLED);
+    } else if written > 0 {
+        output.step("updated the GDSuite editor addon in addons/gdsuite");
     }
     output.step("refreshing Godot class cache");
     tooling::ensure_gdtest_class_cache(context, &config, &godot_path, &addon_report)
@@ -769,6 +779,11 @@ fn install_test_addons_if_needed(
             "gdsuite: installed the gdtest addons tests need in addons/gdtest and addons/gdtest_editor; commit them"
         ),
     }
+    if !editor_addon::is_installed(&context.root) {
+        editor_addon::install(&context.root)
+            .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
+        eprintln!("gdsuite: {EDITOR_ADDON_INSTALLED}");
+    }
     for skipped in &report.skipped_modified {
         eprintln!(
             "warning: kept {}, which you changed; it may not match this gdtest",
@@ -820,6 +835,11 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
         // Keep the programs the editor addons run this gdsuite. Best effort:
         // a running editor can hold the files.
         let _ = tooling::refresh_editor_links(context);
+    }
+    if editor_addon::is_installed(&context.root)
+        && editor_addon::install(&context.root).is_ok_and(|written| written > 0)
+    {
+        eprintln!("gdsuite: updated the GDSuite editor addon in addons/gdsuite");
     }
     // After updating gdsuite, or editing [tools], the installed tools lag
     // behind until `gdsuite setup` runs: say so instead of running them silently.
