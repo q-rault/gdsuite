@@ -535,6 +535,7 @@ fn install_tool(
                 .with_context(|| format!("failed to clear {}", root.display()))?;
             if name == "gdtest" {
                 bundled::write_gdtest_addons(&tool_source_cache_dir(context, name))?;
+                bundled::refresh_gdtest_launcher(&gdtest_launcher_path(context))?;
             }
             return Ok(process::bundled_tool_path(name));
         }
@@ -814,6 +815,16 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
             normalize_extracted_root(&source_root)
         }
     }
+}
+
+/// Where the gdtest panel in Godot looks for gdtest in a GDSuite project.
+pub fn gdtest_launcher_path(context: &ProjectContext) -> PathBuf {
+    context
+        .gdsuite_dir
+        .join("tools")
+        .join("gdtest")
+        .join("bin")
+        .join(format!("gdtest{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn tool_source_cache_dir(context: &ProjectContext, name: &str) -> PathBuf {
