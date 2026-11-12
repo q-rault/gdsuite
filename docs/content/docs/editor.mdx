@@ -1,0 +1,101 @@
+---
+title: In the Godot editor
+description: Check the project, see its problems on the right lines, and format scripts without leaving Godot.
+---
+
+GDSuite comes with an addon for the Godot editor. It runs the same checks as
+`gdsuite check`, with the same `gdsuite.toml`, so what is green in the editor
+is green in the terminal and in CI.
+
+## Turn it on
+
+The first `gdsuite test` (or `gdsuite init`) puts the addon in
+`addons/gdsuite/`. Commit it with the rest of the project. Then, once:
+
+1. Open the project in Godot.
+2. Go to **Project → Project Settings → Plugins** and turn on **GDSuite**.
+
+The addon runs the `gdsuite` program you installed: it finds the one in your
+project's `.gdsuite/` folder, or on your `PATH`. If it says gdsuite is not
+found, see [Install](/install), or set its path in **Editor Settings →
+GDSuite → Program**.
+
+It works best with Godot 4.7 and newer; Godot 4.5 is supported.
+
+## Check the project
+
+The **Check** button in the editor's top bar runs the project's check: the
+steps of `[check]` in `gdsuite.toml`, as [`gdsuite check`](/check) does. When
+it ends, the button shows whether everything passed, and its tooltip lists
+each step:
+
+```text
+✔ fmt: format check passed
+✖ lint: 1 lint problem in 4 files
+```
+
+## The Problems dock
+
+The **Problems** dock lists what [linting](/linting) and the [type
+check](/type-checking) found, grouped by script:
+
+- **Double-click** a problem to open the script at its line.
+- **Errors**, **Warnings**, **Lint** and **Types** filter the list; **Whole
+  project** or **Current script** chooses which scripts it shows.
+- **Right-click** a lint problem to fix it (when it can be fixed), ignore it on
+  this line, turn its rule off for the whole project (written in
+  `gdsuite.toml`), or read what the rule means.
+
+The list shows the whole project, including problems in scripts you haven't
+opened: a broken reference in a scene, a script loading a file that was
+renamed. Godot's own warnings and errors are in it too, so a problem doesn't
+disappear from the list when you open its script.
+
+Like any dock, you can move it to a side, or make it a window of its own.
+
+## Problems in the script editor
+
+In the script you're editing, a line with a problem gets an icon in the
+margin and a light red or yellow tint. Click the icon to read the problem.
+
+## Format a script
+
+**Format script** formats the script you're editing, with the project's
+[formatting settings](/reference/formatting-style), even before you save it.
+It's one step to undo with **Ctrl+Z**.
+
+Run it from:
+
+- **Project → Tools → GDSuite → Format script**,
+- the command palette (**Ctrl+Shift+P**, then "Format Script"),
+- **Shift+Alt+F**, which you can change in **Editor Settings → Shortcuts**.
+
+A script with a syntax error is left as it is.
+
+## When you save
+
+What runs when you save a script is your choice. Turn each one on or off
+from the **⚙** button of the Problems dock, or in **Editor Settings →
+GDSuite**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Format on save | Off | Formats the script when you save it |
+| Lint on save | On | Lints the script you saved, and updates its problems |
+| Type check after saving | On | Type checks the project a moment after you save, in the background |
+| Show problems in the script editor | On | The icons and tints in the script editor |
+
+These are yours: they apply to every project on your computer.
+
+### The same choice for the whole team
+
+To make everyone format on save, say so in the project's `gdsuite.toml`:
+
+```toml
+[editor]
+format_on_save = true
+```
+
+A setting in `[editor]` wins over each person's own; the ⚙ menu shows it as
+"set by this project". The keys are `format_on_save`, `lint_on_save` and
+`type_check_on_save`.
