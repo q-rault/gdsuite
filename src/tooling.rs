@@ -523,7 +523,7 @@ pub fn ensure_test_addons(
     ensure_gitignored(context)?;
     bundled::write_gdtest_addons(&tool_source_cache_dir(context, "gdtest"))?;
     let report = install_gdtest_addons(context, config)?;
-    bundled::refresh_gdtest_launcher(&gdtest_launcher_path(context))?;
+    refresh_editor_links(context)?;
     ensure_gdtest_class_cache(context, config, godot_exe, &report)?;
     Ok(Some(report))
 }
@@ -581,7 +581,7 @@ fn install_tool(
                 .with_context(|| format!("failed to clear {}", root.display()))?;
             if name == "gdtest" {
                 bundled::write_gdtest_addons(&tool_source_cache_dir(context, name))?;
-                bundled::refresh_gdtest_launcher(&gdtest_launcher_path(context))?;
+                refresh_editor_links(context)?;
             }
             return Ok(process::bundled_tool_path(name));
         }
@@ -816,6 +816,21 @@ fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> R
             normalize_extracted_root(&source_root)
         }
     }
+}
+
+/// Where the GDSuite addon in Godot looks for gdsuite in a project.
+pub fn gdsuite_link_path(context: &ProjectContext) -> PathBuf {
+    context
+        .gdsuite_dir
+        .join("bin")
+        .join(format!("gdsuite{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Points the programs the editor addons run, `.gdsuite/bin/gdsuite` and the
+/// test panel's gdtest, at this gdsuite.
+pub fn refresh_editor_links(context: &ProjectContext) -> Result<()> {
+    bundled::refresh_link(&gdtest_launcher_path(context))?;
+    bundled::refresh_link(&gdsuite_link_path(context))
 }
 
 /// Where the gdtest panel in Godot looks for gdtest in a GDSuite project.
