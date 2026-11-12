@@ -1,7 +1,7 @@
-# Keeps one PR open that builds the latest release of every tool into gdsuite
-# and bumps gdsuite's version, on the `auto/pin-tools` branch. When several tools are
-# released one after another, the same PR is updated. Merging it is a
-# release: tag-release.yml then tags the new version.
+# Keeps one PR open that builds the latest release of every tool into gdsuite,
+# on the `auto/pin-tools` branch. When several tools are released one after
+# another, the same PR is updated. Merging it releases nothing: run Cut release
+# (cut-release.yml) when you want to release.
 #
 # Each tool's release.yml starts this workflow once its GitHub release exists
 # (with that repository's GDSUITE_TRIGGER_TOKEN secret). It can also be run

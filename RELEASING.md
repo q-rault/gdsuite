@@ -1,14 +1,64 @@
 # Releasing gdsuite
 
-A release is a version bump merged into `main`:
+A release is one run of **Cut release**, from the Actions tab, as in the tools.
+There is no local release command, and nothing releases on its own: merging to
+`main`, the pin PR included, releases nothing.
 
-1. `tag-release.yml` sees that `Cargo.toml`'s version has no tag yet and
-   pushes `v<version>`.
-2. `release.yml` runs on that tag: it checks the tag matches `Cargo.toml`,
-   builds the four archives, publishes the crate to crates.io (trusted
-   publishing), then creates the GitHub release.
+Cut release commits the new version and pushes a `v<version>` tag, then starts
+**Publish release** (`.github/workflows/release.yml`) on it. Publish release
+checks that the tag matches the version in `Cargo.toml`, builds the four
+archives, publishes gdsuite to crates.io (trusted publishing, no token), then
+creates the GitHub release with the archives. Tags with a prerelease suffix
+(`v0.6.0-rc.1`) become GitHub prereleases, never marked "Latest".
 
-Do not push the tag yourself: `tag-release.yml` does it.
+## Releasing
+
+**Actions → Cut release → Run workflow**, on `main`:
+
+| Input | Values |
+| --- | --- |
+| bump | `patch`, `minor` or `major` |
+| pre | `none` for a stable release, or `alpha`, `beta`, `rc` |
+| version | an exact version instead, such as `0.6.0-rc.1` (overrides the two above) |
+| dry run | pick the version and run the tests, push nothing |
+
+It updates the version in `Cargo.toml`, `.gdsuite-release.toml` (`[suite]`,
+which `doctor` shows) and `Cargo.lock`, runs `cargo test --locked`, commits
+`release: v<version>` to `main`, pushes the tag and starts Publish release and
+the docs deploy (`docs.yml`). The run summary shows the version it picked.
+
+Which bump: below 1.0, a change that breaks something (a removed option, a
+setting read differently) is `minor`; anything else is `patch`. Going to 1.0
+is `major`, on purpose.
+
+How the version is picked, from the current one:
+
+| Current | bump | pre | Next |
+| --- | --- | --- | --- |
+| 0.5.0 | patch | none | 0.5.1 |
+| 0.5.0 | minor | none | 0.6.0 |
+| 0.5.0 | minor | rc | 0.6.0-rc.1 |
+| 0.6.0-rc.1 | minor | rc | 0.6.0-rc.2 |
+| 0.6.0-rc.2 | minor | none | 0.6.0 |
+| 0.6.0 | major | none | 1.0.0 |
+
+From a prerelease, a bump that already leads to its version stays on it, so
+keep the same `bump` through the betas, the release candidates and the
+release. Going back (from `rc` to `beta`) is refused. To see a pick without
+releasing, run Cut release with **dry run**, or
+`python scripts/release.py next-version minor rc`.
+
+## When a release fails
+
+- **Publish release failed on a transient error** (runner or network): open
+  the run and use **Re-run failed jobs**.
+- **It needs a fix, and crates.io does not have the version yet**: delete the
+  tag (Code → Tags, or `git push origin --delete v<version>`) and the GitHub
+  release if one was created, merge the fix to `main`, then run Cut release
+  with **version** set to the same version. It tags `main` as it is, since the
+  version is already there.
+- **crates.io already has the version**: it cannot be published again. Release
+  the fix as the next patch.
 
 ## Pinning the tools
 
@@ -21,31 +71,29 @@ The tools are built into gdsuite from crates.io, at exact versions:
 also be run by hand from the Actions tab. It runs `scripts/pin_tools.py`,
 which:
 
-- moves each tool to its latest crates.io release, in `Cargo.toml`,
-  `Cargo.lock` (`cargo update --precise`, which fails when the new versions
-  can't build together) and `.gdsuite-release.toml`, with gdtest's harness
-  contract;
-- bumps gdsuite's version: minor when a tool's major or minor version
-  changed, patch otherwise.
+moves each tool to its latest crates.io release, in `Cargo.toml`,
+`Cargo.lock` (`cargo update --precise`, which fails when the new versions
+can't build together) and `.gdsuite-release.toml`, with gdtest's harness
+contract.
 
 It opens a PR from the `auto/pin-tools` branch, or updates the one already
 open, so tools released one after another end up in the same PR. Review it,
-wait for CI, merge: that is the release.
+wait for CI, merge, then run Cut release: the PR says which bump it suggests
+(minor when a tool's major or minor version changed, patch otherwise).
 
 To pin by hand: `python scripts/pin_tools.py`, or `--dry-run` to see what it
 would change.
 
 ## One-time setup: the `PIN_TOOLS_TOKEN` secret
 
-Pushes and tags made with a workflow's default token start no other
-workflow, so the pin PR would get no CI and the tag would not start the
-release. Both workflows use a token of yours instead:
+A PR pushed with a workflow's default token gets no CI, so pin-tools pushes
+the pin PR with a token of yours instead:
 
 1. On GitHub, open your **account** settings (not the repository's):
    Settings → Developer settings → Personal access tokens →
    **Fine-grained tokens** → Generate new token.
 2. Name it `gdsuite pin-tools`, owner `q-rault`, and an expiration (note the
-   date: the workflows fail once it expires).
+   date: pin-tools fails once it expires).
 3. Repository access: **Only select repositories** → `q-rault/gdsuite`.
    The tools' releases are public, so no access to their repositories is
    needed.
