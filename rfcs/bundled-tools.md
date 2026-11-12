@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed, with a working trial on the `bundled-tools` branch (gdsuite) and
-the `lib-entry` branches (gdtest, gdtidy, gdhealth, gdtypecheck). Changes
-part of [docs-and-editor-overhaul](docs-and-editor-overhaul.md), section 1.
+In progress. The tools have their library entry points (gdtest 0.2.7,
+gdtidy 0.3.4, gdhealth 0.3.6, gdtypecheck 0.2.4), and gdsuite builds them
+in. Changes part of [docs-and-editor-overhaul](docs-and-editor-overhaul.md), section 1.
 
 ## The problem
 
@@ -189,12 +189,15 @@ no `gdtest` file in `.gdsuite/`. Two options:
    works). A hard link goes stale when gdsuite is replaced, so it must be
    refreshed on each run, or be a copy.
 
-Option 1 is preferred.
+Option 2 is in place, so the panel keeps working without a gdtest
+release: `setup` hard-links gdsuite to `.gdsuite/tools/gdtest/bin/gdtest`
+(or copies it, 14 MB, where links don't work, such as across drives), and
+every gdsuite command replaces the link when gdsuite changed since. Option 1
+replaces it once the panel knows gdsuite.
 
 ## Order of work
 
-1. **Tools**: merge the `lib-entry` branches and release each tool, so
-   gdsuite can depend on crates.io versions instead of local paths.
+1. **Tools** (done): each tool's library entry point, released.
 2. **gdsuite**: depend on the released crates, make `bundled` the default
    source, keep the other sources. Release.
 3. **Docs**: Install, Under the hood, Configure (`[tools]`), CI and

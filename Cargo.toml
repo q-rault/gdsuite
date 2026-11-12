@@ -14,12 +14,13 @@ categories = ["development-tools", "command-line-utilities"]
 include = ["/src/**", "/.gdsuite-release.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE", "/LICENSE.md"]
 
 [dependencies]
-# The tools built into gdsuite. Path dependencies while this is tried out; a
-# release would depend on their crates.io versions.
-gdhealth = { path = "../gdhealth" }
-gdtest = { path = "../gdtest/crates/gdtest" }
-gdtidy = { path = "../gdtidy/crates/gdtidy" }
-gdtypecheck = { path = "../gdtypecheck" }
+# The tools built into gdsuite, at exact versions: .gdsuite-release.toml
+# records the same versions. To try a tool's unreleased changes, add to
+# .cargo/config.toml: [patch.crates-io] gdtest = { path = "../gdtest/crates/gdtest" }
+gdhealth = "=0.3.6"
+gdtest = "=0.2.7"
+gdtidy = "=0.3.4"
+gdtypecheck = "=0.2.4"
 anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"

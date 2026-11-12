@@ -95,3 +95,39 @@ pub fn write_gdtest_addons(dir: &Path) -> Result<PathBuf> {
     }
     Ok(dir.to_path_buf())
 }
+
+/// Makes `launcher` a gdsuite that runs as gdtest, for the gdtest panel in
+/// Godot, which runs a `gdtest` program: a hard link to this gdsuite, or a
+/// copy where links don't work. gdsuite started under the name `gdtest`
+/// runs gdtest (see `dispatch`). Replaced when gdsuite changed since.
+pub fn refresh_gdtest_launcher(launcher: &Path) -> Result<()> {
+    let gdsuite = std::env::current_exe().context("failed to find the gdsuite program")?;
+    if is_current(launcher, &gdsuite) {
+        return Ok(());
+    }
+    if let Some(parent) = launcher.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    if launcher.exists() {
+        fs::remove_file(launcher)
+            .with_context(|| format!("failed to replace {}", launcher.display()))?;
+    }
+    if fs::hard_link(&gdsuite, launcher).is_err() {
+        fs::copy(&gdsuite, launcher)
+            .with_context(|| format!("failed to write {}", launcher.display()))?;
+    }
+    Ok(())
+}
+
+/// Whether `launcher` is this gdsuite: same size, and not older.
+fn is_current(launcher: &Path, gdsuite: &Path) -> bool {
+    let (Ok(launcher), Ok(gdsuite)) = (fs::metadata(launcher), fs::metadata(gdsuite)) else {
+        return false;
+    };
+    let not_older = match (launcher.modified(), gdsuite.modified()) {
+        (Ok(launcher), Ok(gdsuite)) => launcher >= gdsuite,
+        _ => false,
+    };
+    launcher.len() == gdsuite.len() && not_older
+}

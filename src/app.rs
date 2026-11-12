@@ -10,6 +10,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    bundled,
     cli::{
         Cli, Commands, DoctorArgs, ForwardArgs, ForwardReportArgs, LintArgs, OutputArgs,
         OutputModeArg, ReportArgs, RunArgs, SetupArgs,
@@ -713,6 +714,11 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
     let manifest = load_manifest_or_error(context, EXIT_USAGE_ERROR)?;
     let toolchain = resolve_toolchain_or_error(context, Some(&manifest), EXIT_TOOLCHAIN_ERROR)?;
     process::set_godot_exe(&toolchain.godot_exe);
+    if process::bundled_tool_name(&toolchain.gdtest).is_some() {
+        // Keep the gdtest the editor panel runs the one built into this
+        // gdsuite. Best effort: a running panel can hold the file.
+        let _ = bundled::refresh_gdtest_launcher(&tooling::gdtest_launcher_path(context));
+    }
     // After updating gdsuite, or editing [tools], the installed tools lag
     // behind until `gdsuite setup` runs: say so instead of running them silently.
     if let Ok(config) = load_runtime_config(context) {
