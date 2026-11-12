@@ -38,6 +38,10 @@ way.
 
 ## 1. Installing
 
+> Building the tools into gdsuite ([bundled-tools](bundled-tools.md)) removes
+> the per-project downloads below and makes plan B (GDExtension) the way to
+> ship a complete Asset Store addon.
+
 ### The three channels, in this order
 
 | Channel | For whom | What they get |

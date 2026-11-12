@@ -1,5 +1,5 @@
 //! `gdsuite update`: move the tools pinned in `gdsuite.toml` to the versions
-//! this gdsuite was tested with.
+//! this gdsuite was tested with (the versions built into it).
 //!
 //! A release pin of one of gdsuite's own tools (`github:q-rault/gdtest@v0.2.1`)
 //! is removed, so the tool follows gdsuite from then on. A crates.io source
@@ -9,7 +9,8 @@
 //!
 //! The file is edited line by line, so its comments and layout are kept.
 
-use crate::config::{ReleaseManifest, TOOL_NAMES, ToolAcquireSpec};
+use crate::config::{ReleaseManifest, TOOL_NAMES};
+use crate::tooling::own_release_prefix;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinChange {
@@ -106,11 +107,11 @@ fn rewrite_source_line(
         return None;
     }
     let source = value.trim().trim_matches('"').to_string();
-    let tested = &release.tool(tool)?.acquire;
+    let tested = release.tool(tool)?.version().to_string();
+    let ours = own_release_prefix(tool);
     let tool = tool.to_string();
 
-    if let ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } = tested {
-        let ours = format!("github:{owner}/{repo}@");
+    {
         if let Some(from) = source.strip_prefix(&ours) {
             return Some((
                 None,
@@ -123,7 +124,7 @@ fn rewrite_source_line(
 
         let crate_prefix = format!("crate:{tool}@");
         if let Some(from) = source.strip_prefix(&crate_prefix) {
-            let to = tag.trim_start_matches('v').to_string();
+            let to = tested;
             let indent = &line[..line.len() - line.trim_start().len()];
             let ending = if line.ends_with("\r\n") {
                 "\r\n"
@@ -156,10 +157,7 @@ mod tests {
     }
 
     fn tested_version(tool: &str) -> String {
-        match &release().tool(tool).unwrap().acquire {
-            ToolAcquireSpec::GithubReleaseRepo { tag, .. } => tag.trim_start_matches('v').into(),
-            other => panic!("{tool} is not pinned to a release: {other:?}"),
-        }
+        release().tool(tool).unwrap().version().to_string()
     }
 
     #[test]

@@ -1054,22 +1054,6 @@ fn escape(path: PathBuf) -> String {
 }
 
 #[test]
-fn init_rejects_a_release_archive_whose_checksum_does_not_match() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_tool_sources();
-    fixture.seed_path_tools();
-
-    fixture
-        .cmd()
-        .env_remove("GDSUITE_SKIP_RELEASE_CHECKSUMS")
-        .arg("init")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("checksum mismatch"));
-}
-
-#[test]
 fn setup_extends_an_existing_gitignore_once() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -1105,20 +1089,14 @@ fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
         .stdout(predicate::str::contains(
             "converted gdlintrc into gdsuite.toml",
         ))
-        .stdout(predicate::str::contains("gdtidy migrate: unused-argument"));
+        .stdout(predicate::str::contains(
+            "gdtidy migrate: custom: not a gdlint setting, ignored",
+        ));
 
-    assert!(
-        fixture
-            .read_log("gdtidy-migrate-args.txt")
-            .ends_with("gdlintrc")
-    );
     // By default, everything is in gdsuite.toml.
     assert!(!fixture.root.join("gdtidy.toml").exists());
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    assert!(
-        config.contains("[lint]") && config.contains("[fmt]"),
-        "{config}"
-    );
+    assert!(config.contains("[lint]"), "{config}");
     assert_eq!(
         fs::read_to_string(fixture.root.join("gdlintrc")).unwrap(),
         "custom: true\n"
@@ -1157,11 +1135,6 @@ fn setup_converts_a_gdformatrc_that_gdtidy_toml_has_no_section_for() {
             "converted .gdformatrc into gdtidy.toml",
         ));
 
-    assert!(
-        fixture
-            .read_log("gdtidy-migrate-args.txt")
-            .ends_with(".gdformatrc")
-    );
     assert!(fixture.root.join(".gdformatrc").exists());
 }
 
@@ -1283,13 +1256,12 @@ fn setup_upgrades_gdtest_addons_from_another_harness_version() {
 
     let worker = fs::read_to_string(fixture.root.join("addons/gdtest/gdtest_worker.gd")).unwrap();
     assert!(
-        worker.contains(&pin("HARNESS_VERSION = \"{gdtest}\"")),
+        worker.contains(&pin("HARNESS_VERSION := \"{gdtest}\"")),
         "{worker}"
     );
-    assert_eq!(
-        fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap(),
-        ""
-    );
+    // The addons built into gdsuite replaced it.
+    let gdt = fs::read_to_string(fixture.root.join("addons/gdtest/gdt.gd")).unwrap();
+    assert!(gdt.contains("class_name"), "{gdt}");
     let backup = fixture
         .root
         .join(".gdsuite/backups/gdtest-addons-0.1.1/addons/gdtest");

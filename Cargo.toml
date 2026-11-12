@@ -14,6 +14,12 @@ categories = ["development-tools", "command-line-utilities"]
 include = ["/src/**", "/.gdsuite-release.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE", "/LICENSE.md"]
 
 [dependencies]
+# The tools built into gdsuite. Path dependencies while this is tried out; a
+# release would depend on their crates.io versions.
+gdhealth = { path = "../gdhealth" }
+gdtest = { path = "../gdtest/crates/gdtest" }
+gdtidy = { path = "../gdtidy/crates/gdtidy" }
+gdtypecheck = { path = "../gdtypecheck" }
 anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"

@@ -12,6 +12,7 @@ use tar::Archive;
 use zip::ZipArchive;
 
 use crate::{
+    bundled,
     config::{
         CompatibilityVerdict, GdsuiteConfig, InstalledContractsState, InstalledState,
         InstalledToolState, Manifest, ReleaseManifest, ToolAcquireSpec,
@@ -526,6 +527,17 @@ fn install_tool(
     fs::create_dir_all(&root)
         .with_context(|| format!("failed to create tool root {}", root.display()))?;
     match requested {
+        ToolAcquireSpec::Bundled => {
+            // Nothing to download: gdsuite runs the tool built into it. Only
+            // gdtest has files to copy into projects, its addons. What an
+            // earlier gdsuite downloaded or built for this tool goes.
+            fs::remove_dir_all(&root)
+                .with_context(|| format!("failed to clear {}", root.display()))?;
+            if name == "gdtest" {
+                bundled::write_gdtest_addons(&tool_source_cache_dir(context, name))?;
+            }
+            return Ok(process::bundled_tool_path(name));
+        }
         ToolAcquireSpec::Path { path } => {
             let package_root = resolve_package_root(&context.root.join(path), name)?;
             let args = vec![
@@ -693,6 +705,10 @@ fn resolve_package_root(source_root: &Path, name: &str) -> Result<PathBuf> {
 }
 
 fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
+    if source == "bundled" {
+        return ToolAcquireSpec::Bundled;
+    }
+
     if let Some(rest) = source.strip_prefix("crate:")
         && let Some((name, version)) = rest.split_once('@')
         && !name.is_empty()
@@ -775,6 +791,15 @@ fn parse_tool_source_spec(source: &str, default_name: &str) -> ToolAcquireSpec {
 fn resolved_source_root(context: &ProjectContext, source: &str, name: &str) -> Result<PathBuf> {
     match parse_tool_source_spec(source, name) {
         ToolAcquireSpec::Path { path } => Ok(context.root.join(path)),
+        ToolAcquireSpec::Bundled => {
+            let source_root = tool_source_cache_dir(context, name);
+            if !source_root.exists() {
+                return Err(anyhow!(
+                    "{name}'s files are missing from .gdsuite; run `gdsuite setup`"
+                ));
+            }
+            Ok(source_root)
+        }
         ToolAcquireSpec::Crate { .. }
         | ToolAcquireSpec::GithubRelease { .. }
         | ToolAcquireSpec::GithubReleaseRepo { .. }
@@ -1915,13 +1940,9 @@ pub fn outdated_pins(config: &GdsuiteConfig) -> Vec<(&'static str, String, Strin
         .pinned()
         .into_iter()
         .filter_map(|(tool, source)| {
-            let ToolAcquireSpec::GithubReleaseRepo { owner, repo, tag } =
-                &release.tool(tool)?.acquire
-            else {
-                return None;
-            };
-            let pinned = source.strip_prefix(&format!("github:{owner}/{repo}@"))?;
-            (pinned != tag).then(|| (tool, pinned.to_string(), tag.clone()))
+            let tag = format!("v{}", release.tool(tool)?.version());
+            let pinned = source.strip_prefix(&own_release_prefix(tool))?;
+            (pinned != tag).then(|| (tool, pinned.to_string(), tag))
         })
         .collect()
 }
@@ -1953,6 +1974,12 @@ pub fn settings_sources(context: &ProjectContext) -> Vec<(&'static str, String)>
         ("health", source(&["health"], "gdhealth.toml")),
         ("fmt_lint", source(&["fmt", "lint"], "gdtidy.toml")),
     ]
+}
+
+/// The start of a `[tools]` source that pins one of gdsuite's own tools to
+/// a GitHub release: `github:q-rault/gdtest@`.
+pub fn own_release_prefix(tool: &str) -> String {
+    format!("github:q-rault/{tool}@")
 }
 
 #[cfg(test)]
