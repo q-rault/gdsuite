@@ -200,12 +200,23 @@ fn setup_impl(
         ));
     }
     let had_editor_addon = editor_addon::is_installed(&context.root);
-    let written = editor_addon::install(&context.root)
+    let installed = editor_addon::install(&context.root)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     if !had_editor_addon {
         output.step(EDITOR_ADDON_INSTALLED);
-    } else if written > 0 {
+    } else if installed.written > 0 {
         output.step("updated the GDSuite editor addon in addons/gdsuite");
+    }
+    for kept in &installed.kept {
+        output.warn(format!(
+            "kept {}, which differs from this gdsuite's addon; delete it to get this version",
+            kept.display()
+        ));
+    }
+    match old_editor_addon_note(context)? {
+        Some((note, true)) => output.warn(note),
+        Some((note, false)) => output.step(note),
+        None => {}
     }
     output.step("refreshing Godot class cache");
     tooling::ensure_gdtest_class_cache(context, &config, &godot_path, &addon_report)
@@ -765,6 +776,10 @@ fn install_test_addons_if_needed(
 ) -> Result<()> {
     let report = tooling::ensure_test_addons(context, config, &toolchain.godot_exe)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
+    if let Some((note, warning)) = old_editor_addon_note(context)? {
+        let prefix = if warning { "warning" } else { "gdsuite" };
+        eprintln!("{prefix}: {note}");
+    }
     let Some(report) = report else {
         return Ok(());
     };
@@ -775,9 +790,9 @@ fn install_test_addons_if_needed(
             upgrade.to_version,
             upgrade.backup_dir.display()
         ),
-        None => eprintln!(
-            "gdsuite: installed the gdtest addons tests need in addons/gdtest and addons/gdtest_editor; commit them"
-        ),
+        None => {
+            eprintln!("gdsuite: installed the gdtest addon tests need in addons/gdtest; commit it")
+        }
     }
     if !editor_addon::is_installed(&context.root) {
         editor_addon::install(&context.root)
@@ -791,6 +806,27 @@ fn install_test_addons_if_needed(
         );
     }
     Ok(())
+}
+
+/// Removes the gdtest Editor addon the Tests dock of the GDSuite addon
+/// replaces, and says so: `(note, is_warning)`, or None when there was none.
+fn old_editor_addon_note(context: &ProjectContext) -> Result<Option<(String, bool)>> {
+    let outcome = tooling::retire_gdtest_editor_addon(context)
+        .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
+    Ok(match outcome {
+        tooling::OldEditorAddon::Absent => None,
+        tooling::OldEditorAddon::Removed { backup } => Some((
+            format!(
+                "removed addons/gdtest_editor: the Tests dock of the GDSuite addon replaces it (a copy is in {})",
+                backup.display()
+            ),
+            false,
+        )),
+        tooling::OldEditorAddon::KeptModified => Some((
+            "kept addons/gdtest_editor, which you changed: the Tests dock of the GDSuite addon replaces it, so you can delete it".to_string(),
+            true,
+        )),
+    })
 }
 
 fn load_runtime_config(context: &ProjectContext) -> Result<GdsuiteConfig> {
@@ -837,7 +873,7 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
         let _ = tooling::refresh_editor_links(context);
     }
     if editor_addon::is_installed(&context.root)
-        && editor_addon::install(&context.root).is_ok_and(|written| written > 0)
+        && editor_addon::install(&context.root).is_ok_and(|installed| installed.written > 0)
     {
         eprintln!("gdsuite: updated the GDSuite editor addon in addons/gdsuite");
     }

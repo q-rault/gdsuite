@@ -1395,26 +1395,128 @@ pub fn install_gdtest_addons(
         |relative, contents| rewrite_runtime_asset(relative, contents, &runtime_res_dir),
     )?;
 
-    let editor_source = source_root.join("addons").join("gdtest_editor");
-    if !editor_source.exists() {
-        return Err(anyhow!(
-            "gdtest editor addon source missing at {}",
-            editor_source.display()
-        ));
-    }
-    let editor_res_dir = res_dir_from_rel_path(Path::new(GDTEST_EDITOR_PLUGIN_DIR));
-    install_addon_dir(
-        &editor_source,
-        &context.root.join(GDTEST_EDITOR_PLUGIN_DIR),
-        AddonTarget {
-            project_root: &context.root,
-            backup_dir: backup_dir.as_deref(),
-        },
-        &mut report,
-        |relative, contents| rewrite_editor_asset(relative, contents, &editor_res_dir),
-    )?;
-
     Ok(report)
+}
+
+/// What became of the gdtest Editor addon (`addons/gdtest_editor/`), whose
+/// test panel the GDSuite addon's Tests dock replaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OldEditorAddon {
+    /// The project doesn't have it.
+    Absent,
+    /// It was as gdsuite installed it: removed, after a copy in `backup`.
+    Removed { backup: PathBuf },
+    /// Someone changed it, so it stays.
+    KeptModified,
+}
+
+/// Removes the gdtest Editor addon gdsuite used to install, when nobody
+/// changed it, and turns it off in project.godot. A changed one is kept.
+pub fn retire_gdtest_editor_addon(context: &ProjectContext) -> Result<OldEditorAddon> {
+    let dir = context.root.join(GDTEST_EDITOR_PLUGIN_DIR);
+    if !dir.is_dir() {
+        return Ok(OldEditorAddon::Absent);
+    }
+    let shipped: Vec<(String, &str)> = gdtest::addon_files()
+        .filter_map(|(path, contents)| {
+            path.strip_prefix(GDTEST_EDITOR_PLUGIN_DIR)
+                .map(|relative| (relative.trim_start_matches('/').to_string(), contents))
+        })
+        .collect();
+    if !is_unchanged_copy(&dir, &dir, &shipped)? {
+        return Ok(OldEditorAddon::KeptModified);
+    }
+    let backup = context.gdsuite_dir.join("backups").join("gdtest_editor");
+    if backup.exists() {
+        fs::remove_dir_all(&backup)
+            .with_context(|| format!("failed to clear {}", backup.display()))?;
+    }
+    copy_dir(&dir, &backup)?;
+    fs::remove_dir_all(&dir).with_context(|| format!("failed to remove {}", dir.display()))?;
+    disable_editor_plugin(
+        &context.root.join("project.godot"),
+        &format!("res://{GDTEST_EDITOR_PLUGIN_DIR}/plugin.cfg"),
+    )?;
+    Ok(OldEditorAddon::Removed { backup })
+}
+
+/// Whether every file under `dir` is one of `shipped` (paths relative to
+/// `root`) with the same text. The `.uid` files Godot writes don't count.
+fn is_unchanged_copy(root: &Path, dir: &Path, shipped: &[(String, &str)]) -> Result<bool> {
+    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+        let path = entry?.path();
+        if path.is_dir() {
+            if !is_unchanged_copy(root, &path, shipped)? {
+                return Ok(false);
+            }
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Some((_, contents)) = shipped.iter().find(|(name, _)| *name == relative) else {
+            if relative.ends_with(".uid") {
+                continue;
+            }
+            return Ok(false);
+        };
+        let current = fs::read_to_string(&path).unwrap_or_default();
+        if current.replace("\r\n", "\n") != contents.replace("\r\n", "\n") {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+    fs::create_dir_all(to).with_context(|| format!("failed to create {}", to.display()))?;
+    for entry in fs::read_dir(from).with_context(|| format!("failed to read {}", from.display()))? {
+        let path = entry?.path();
+        let target = to.join(path.file_name().unwrap());
+        if path.is_dir() {
+            copy_dir(&path, &target)?;
+        } else {
+            fs::copy(&path, &target)
+                .with_context(|| format!("failed to copy {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Takes `plugin` out of the editor plugins project.godot turns on.
+fn disable_editor_plugin(project_file: &Path, plugin: &str) -> Result<()> {
+    let Ok(text) = fs::read_to_string(project_file) else {
+        return Ok(());
+    };
+    let quoted = format!("\"{plugin}\"");
+    let edited: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if !line.starts_with("enabled=PackedStringArray(") || !line.contains(&quoted) {
+                return line.to_string();
+            }
+            let inside = line
+                .trim_start_matches("enabled=PackedStringArray(")
+                .trim_end_matches(')');
+            let kept: Vec<&str> = inside
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty() && *item != quoted)
+                .collect();
+            format!("enabled=PackedStringArray({})", kept.join(", "))
+        })
+        .collect();
+    let mut result = edited.join("\n");
+    if text.ends_with('\n') {
+        result.push('\n');
+    }
+    if result != text {
+        fs::write(project_file, result)
+            .with_context(|| format!("failed to write {}", project_file.display()))?;
+    }
+    Ok(())
 }
 
 fn harness_version_of(harness: &Path) -> Option<String> {
@@ -1503,16 +1605,6 @@ fn rewrite_runtime_asset(relative: &Path, contents: &str, runtime_res_dir: &str)
         "gdunit4_compat.gd" => {
             contents.replace("res://addons/gdtest/gdunit4_chain.gd", &runtime_prefix)
         }
-        _ => contents.to_string(),
-    }
-}
-
-fn rewrite_editor_asset(relative: &Path, contents: &str, editor_res_dir: &str) -> String {
-    match relative.to_string_lossy().replace('\\', "/").as_str() {
-        "plugin.gd" => contents.replace(
-            "res://addons/gdtest_editor/test_panel.gd",
-            &join_res_path(editor_res_dir, "test_panel.gd"),
-        ),
         _ => contents.to_string(),
     }
 }
@@ -1657,6 +1749,70 @@ pub fn own_release_prefix(tool: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::ToolAcquireSpec;
+
+    fn write_shipped_editor_addon(root: &Path) {
+        for (path, contents) in gdtest::addon_files() {
+            if path.starts_with(GDTEST_EDITOR_PLUGIN_DIR) {
+                let target = root.join(path);
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::write(target, contents).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_retire_removes_unchanged_gdtest_editor_addon() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ProjectContext::new(dir.path().to_path_buf());
+        write_shipped_editor_addon(dir.path());
+        fs::write(
+            dir.path().join("addons/gdtest_editor/extra.gd.uid"),
+            "uid://x",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("project.godot"),
+            "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/gdtest_editor/plugin.cfg\", \"res://addons/gdsuite/plugin.cfg\")\n",
+        )
+        .unwrap();
+
+        let outcome = retire_gdtest_editor_addon(&context).unwrap();
+
+        let backup = context.gdsuite_dir.join("backups/gdtest_editor");
+        assert_eq!(
+            outcome,
+            OldEditorAddon::Removed {
+                backup: backup.clone()
+            }
+        );
+        assert!(!dir.path().join("addons/gdtest_editor").exists());
+        assert!(backup.join("plugin.cfg").exists());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("project.godot")).unwrap(),
+            "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/gdsuite/plugin.cfg\")\n"
+        );
+    }
+
+    #[test]
+    fn test_retire_keeps_changed_gdtest_editor_addon() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ProjectContext::new(dir.path().to_path_buf());
+        write_shipped_editor_addon(dir.path());
+        fs::write(
+            dir.path().join("addons/gdtest_editor/plugin.gd"),
+            "# mine\n",
+        )
+        .unwrap();
+
+        let outcome = retire_gdtest_editor_addon(&context).unwrap();
+
+        assert_eq!(outcome, OldEditorAddon::KeptModified);
+        assert!(dir.path().join("addons/gdtest_editor/plugin.gd").exists());
+        assert_eq!(
+            retire_gdtest_editor_addon(&ProjectContext::new(dir.path().join("none"))).unwrap(),
+            OldEditorAddon::Absent
+        );
+    }
 
     #[test]
     fn test_parse_github_release_repo_spec() {

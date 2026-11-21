@@ -1404,6 +1404,8 @@ fn init_installs_the_editor_addon_and_says_how_to_turn_it_on() {
     let plugin = fs::read_to_string(fixture.root.join("addons/gdsuite/plugin.cfg")).unwrap();
     assert!(plugin.contains("script=\"plugin.gd\""), "{plugin}");
     assert!(fixture.root.join(".gdsuite/bin").exists());
+    // Its Tests dock replaces gdtest's own editor panel.
+    assert!(!fixture.root.join("addons/gdtest_editor").exists());
 
     // Once installed, setup leaves it alone and says nothing about it.
     fixture

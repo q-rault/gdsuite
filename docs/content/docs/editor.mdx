@@ -1,6 +1,6 @@
 ---
 title: In the Godot editor
-description: Check the project, see its problems on the right lines, and format scripts without leaving Godot.
+description: Check the project, see its problems on the right lines, format scripts, and run tests without leaving Godot.
 ---
 
 GDSuite comes with an addon for the Godot editor. It runs the same checks as
@@ -72,6 +72,34 @@ Run it from:
 
 A script with a syntax error is left as it is.
 
+## Run tests
+
+The **Tests** dock lists the project's tests: the ones `gdsuite test` runs,
+from the folder in `[commands] default_test_target`.
+
+- The buttons at the top run every test, the tests you selected, or again
+  only the tests that failed.
+- **Right-click** a test, a file or a folder in the list to run it, and
+  **double-click** a test to open it.
+- Select a test that failed to read why.
+- **Rerun on save** keeps the tests running: when you save a script, the tests
+  run again, only those of the test script when you saved a test.
+
+In the script editor, a test script gets a ▶ next to each test. Click it to
+run that test; after a run, it shows whether the test passed. Folders and
+scripts in the **FileSystem** dock have **Run Tests** in their right-click
+menu.
+
+The command palette has **Run All Tests**, **Rerun Failed Tests** and **Run
+Tests in Script**.
+
+Tests run in the background with the Godot of your editor, as `gdsuite test`
+runs them, so they don't stop you from working.
+
+If you used the gdtest panel before (`addons/gdtest_editor/`), `gdsuite test`
+removes it: the Tests dock replaces it. If you changed its files, they are kept
+and you can delete the folder.
+
 ## When you save
 
 What runs when you save a script is your choice. Turn each one on or off
@@ -83,6 +111,7 @@ GDSuite**:
 | Format on save | Off | Formats the script when you save it |
 | Lint on save | On | Lints the script you saved, and updates its problems |
 | Type check after saving | On | Type checks the project a moment after you save, in the background |
+| Rerun tests on save | Off | Runs the tests again when you save a script; also the switch in the Tests dock |
 | Show problems in the script editor | On | The icons and tints in the script editor |
 
 These are yours: they apply to every project on your computer.
@@ -97,5 +126,10 @@ format_on_save = true
 ```
 
 A setting in `[editor]` wins over each person's own; the ⚙ menu shows it as
-"set by this project". The keys are `format_on_save`, `lint_on_save` and
-`type_check_on_save`.
+"set by this project". The keys are `format_on_save`, `lint_on_save`,
+`type_check_on_save` and `run_tests_on_save`.
+
+## Your changes to the addon
+
+`gdsuite` updates `addons/gdsuite/` when you update gdsuite. A file of the
+addon you changed is kept as it is: delete it to get the new version.

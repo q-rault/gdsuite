@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 ## GDSuite in the Godot editor: a Check button, a Problems dock, problems
-## marked in the script editor, and formatting. Everything runs the gdsuite
+## marked in the script editor, formatting, and a Tests dock. Everything runs the gdsuite
 ## program, with the project's gdsuite.toml, so the editor agrees with the
 ## terminal and CI.
 
@@ -9,6 +9,9 @@ const Runner = preload("runner.gd")
 const Settings = preload("settings.gd")
 const Markers = preload("markers.gd")
 const ProblemsDock = preload("problems_dock.gd")
+const TestsDock = preload("tests_dock.gd")
+const TestsGutter = preload("tests_gutter.gd")
+const TestsMenu = preload("tests_menu.gd")
 
 const DOCS := "https://q-rault.github.io/gdsuite"
 const NOT_FOUND := "gdsuite not found: install it, or set its path in Editor Settings > GDSuite"
@@ -22,12 +25,28 @@ const COMMAND_FORMAT := "gdsuite/format_script"
 const COMMAND_CHECK := "gdsuite/check"
 const COMMAND_PROBLEMS := "gdsuite/show_problems"
 const COMMAND_REFRESH := "gdsuite/refresh_problems"
+const COMMAND_RUN_TESTS := "gdsuite/run_all_tests"
+const COMMAND_RERUN_FAILED := "gdsuite/rerun_failed_tests"
+const COMMAND_RUN_SCRIPT_TESTS := "gdsuite/run_script_tests"
+const COMMAND_SHOW_TESTS := "gdsuite/show_tests"
+const COMMANDS := [
+	COMMAND_FORMAT,
+	COMMAND_CHECK,
+	COMMAND_PROBLEMS,
+	COMMAND_REFRESH,
+	COMMAND_RUN_TESTS,
+	COMMAND_RERUN_FAILED,
+	COMMAND_RUN_SCRIPT_TESTS,
+	COMMAND_SHOW_TESTS,
+]
 
 const MENU_FORMAT := 0
 const MENU_CHECK := 1
 const MENU_PROBLEMS := 2
 const MENU_REFRESH := 3
 const MENU_CONFIG := 4
+const MENU_RUN_TESTS := 5
+const MENU_TESTS := 6
 
 ## EditorDock.DockSlot.SLOT_BOTTOM and DockLayout flags, written as
 ## numbers so the addon also loads on Godot 4.5, which has no EditorDock.
@@ -40,6 +59,12 @@ var _markers := Markers.new()
 var _dock: ProblemsDock
 ## The EditorDock holding `_dock` on Godot 4.6 and newer; null on 4.5.
 var _dock_host: Control
+var _tests: TestsDock
+var _tests_host: Control
+var _tests_gutter := TestsGutter.new()
+var _tests_menu: TestsMenu
+## Waits for the file system to settle before finding the tests again.
+var _discover_timer: Timer
 var _check_button: Button
 var _menu: PopupMenu
 var _format_shortcut: Shortcut
@@ -64,16 +89,17 @@ func _enter_tree() -> void:
 	_dock.problems_changed.connect(_show_markers)
 	_dock.setting_toggled.connect(_on_setting_toggled)
 	_dock.open_config_requested.connect(_open_config)
-	if ClassDB.class_exists("EditorDock"):
-		_dock_host = ClassDB.instantiate("EditorDock")
-		_dock_host.set("title", "Problems")
-		_dock_host.set("layout_key", "gdsuite_problems")
-		_dock_host.set("default_slot", SLOT_BOTTOM)
-		_dock_host.set("available_layouts", LAYOUT_HORIZONTAL | LAYOUT_FLOATING)
-		_dock_host.add_child(_dock)
-		call("add_dock", _dock_host)
-	else:
-		add_control_to_bottom_panel(_dock, "Problems")
+	_dock_host = _add_dock(_dock, "Problems", "gdsuite_problems")
+
+	_tests = TestsDock.new()
+	_tests.runner = _runner
+	_tests.results_changed.connect(_show_test_marks)
+	_tests.open_requested.connect(_open_test)
+	_tests.watch_toggled.connect(_on_watch_toggled)
+	_tests_host = _add_dock(_tests, "Tests", "gdsuite_tests")
+	_tests_menu = TestsMenu.new()
+	_tests_menu.run_paths = _run_tests_and_show
+	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _tests_menu)
 
 	_check_button = Button.new()
 	_check_button.text = "Check"
@@ -88,6 +114,9 @@ func _enter_tree() -> void:
 	_menu.add_item("Show problems", MENU_PROBLEMS)
 	_menu.add_item("Lint and type check the project", MENU_REFRESH)
 	_menu.add_separator()
+	_menu.add_item("Run all tests", MENU_RUN_TESTS)
+	_menu.add_item("Show tests", MENU_TESTS)
+	_menu.add_separator()
 	_menu.add_item("Open gdsuite.toml", MENU_CONFIG)
 	_menu.id_pressed.connect(_on_menu)
 	add_tool_submenu_item("GDSuite", _menu)
@@ -99,6 +128,11 @@ func _enter_tree() -> void:
 	palette.add_command("Check the Project", COMMAND_CHECK, _run_check)
 	palette.add_command("Show Problems", COMMAND_PROBLEMS, _show_dock)
 	palette.add_command("Lint and Type Check the Project", COMMAND_REFRESH, _refresh_project)
+	var run_all := _run_tests_and_show.bind(PackedStringArray())
+	palette.add_command("Run All Tests", COMMAND_RUN_TESTS, run_all)
+	palette.add_command("Rerun Failed Tests", COMMAND_RERUN_FAILED, _tests.rerun_failed)
+	palette.add_command("Run Tests in Script", COMMAND_RUN_SCRIPT_TESTS, _run_script_tests)
+	palette.add_command("Show Tests", COMMAND_SHOW_TESTS, _show_tests)
 
 	_type_check_timer = Timer.new()
 	_type_check_timer.one_shot = true
@@ -106,10 +140,16 @@ func _enter_tree() -> void:
 	_type_check_timer.timeout.connect(_type_check)
 	add_child(_type_check_timer)
 
+	_discover_timer = Timer.new()
+	_discover_timer.one_shot = true
+	_discover_timer.wait_time = 1.0
+	_discover_timer.timeout.connect(_tests.discover)
+	add_child(_discover_timer)
+
 	resource_saved.connect(_on_resource_saved)
 	var script_editor := EditorInterface.get_script_editor()
 	script_editor.editor_script_changed.connect(_on_script_changed)
-	EditorInterface.get_resource_filesystem().filesystem_changed.connect(_read_project_settings)
+	EditorInterface.get_resource_filesystem().filesystem_changed.connect(_on_filesystem_changed)
 
 	if _runner.find_program() == "":
 		_dock.set_status(NOT_FOUND)
@@ -126,27 +166,25 @@ func _exit_tree() -> void:
 	if script_editor.editor_script_changed.is_connected(_on_script_changed):
 		script_editor.editor_script_changed.disconnect(_on_script_changed)
 	var filesystem := EditorInterface.get_resource_filesystem()
-	if filesystem.filesystem_changed.is_connected(_read_project_settings):
-		filesystem.filesystem_changed.disconnect(_read_project_settings)
+	if filesystem.filesystem_changed.is_connected(_on_filesystem_changed):
+		filesystem.filesystem_changed.disconnect(_on_filesystem_changed)
 	for id: int in _connected_code_edits:
 		var code_edit := instance_from_id(id) as CodeEdit
 		if is_instance_valid(code_edit):
 			_markers.clear(code_edit)
+			_tests_gutter.clear(code_edit)
 			code_edit.gutter_clicked.disconnect(_connected_code_edits[id])
 	_connected_code_edits.clear()
 
 	var palette := EditorInterface.get_command_palette()
-	for command in [COMMAND_FORMAT, COMMAND_CHECK, COMMAND_PROBLEMS, COMMAND_REFRESH]:
+	for command: String in COMMANDS:
 		palette.remove_command(command)
 	remove_tool_menu_item("GDSuite")
+	remove_context_menu_plugin(_tests_menu)
 	remove_control_from_container(CONTAINER_TOOLBAR, _check_button)
 	_check_button.queue_free()
-	if _dock_host != null:
-		call("remove_dock", _dock_host)
-		_dock_host.queue_free()
-	else:
-		remove_control_from_bottom_panel(_dock)
-		_dock.queue_free()
+	_remove_dock(_dock, _dock_host)
+	_remove_dock(_tests, _tests_host)
 	_runner.stop()
 
 
@@ -326,8 +364,8 @@ func _show_markers() -> void:
 		return
 	if not Settings.value(Settings.SHOW_IN_GUTTER):
 		_markers.clear(code_edit)
-		return
-	_markers.show(code_edit, _dock.problems_for(path))
+	else:
+		_markers.show(code_edit, _dock.problems_for(path))
 
 
 func _on_script_changed(_script: Script) -> void:
@@ -338,9 +376,14 @@ func _on_script_changed(_script: Script) -> void:
 		code_edit.gutter_clicked.connect(on_click)
 		_connected_code_edits[code_edit.get_instance_id()] = on_click
 	_show_markers()
+	_show_test_marks()
 
 
 func _on_gutter_clicked(line: int, gutter: int, code_edit: CodeEdit) -> void:
+	var test_name := _tests_gutter.test_at(code_edit, line, gutter)
+	if test_name != "":
+		_run_tests_and_show(PackedStringArray(["%s::%s" % [_current_script_path(), test_name]]))
+		return
 	var problems := _markers.problems_at(code_edit, line, gutter)
 	if problems.is_empty():
 		return
@@ -349,6 +392,60 @@ func _on_gutter_clicked(line: int, gutter: int, code_edit: CodeEdit) -> void:
 		messages.append("%s (%s)" % [problem.message, problem.rule])
 	var has_error := problems.any(func(p: Dictionary) -> bool: return p.severity == "error")
 	_toast("\n".join(messages), has_error)
+
+
+# --- Tests ------------------------------------------------------------------
+
+
+func _run_tests_and_show(targets: PackedStringArray) -> void:
+	if Runner.gdtest_program() == "":
+		_toast("Run `gdsuite test` once in a terminal to set up the tests", true)
+		return
+	_tests.run(targets)
+	_show_tests()
+
+
+func _run_script_tests() -> void:
+	var path := _current_script_path()
+	if path == "" or _tests.tests_of(path).is_empty():
+		_toast("The current script has no tests")
+		return
+	_run_tests_and_show(PackedStringArray([path]))
+
+
+## The test marks in the gutter of the script being edited.
+func _show_test_marks() -> void:
+	var code_edit := _current_code_edit()
+	if code_edit == null:
+		return
+	var tests := _tests.tests_of(_current_script_path())
+	if tests.is_empty():
+		_tests_gutter.clear(code_edit)
+	else:
+		_tests_gutter.show(code_edit, tests)
+
+
+func _open_test(file: String, test_name: String) -> void:
+	var script := load(file) as Script
+	if script == null:
+		return
+	EditorInterface.edit_script(script)
+	if test_name == "":
+		return
+	var code_edit := _code_edit_for(file)
+	var line := -1 if code_edit == null else TestsGutter.line_of(code_edit, test_name)
+	if line >= 0:
+		EditorInterface.edit_script(script, line + 1)
+
+
+func _on_watch_toggled(enabled: bool) -> void:
+	Settings.set_personal(Settings.RUN_TESTS_ON_SAVE, enabled)
+	_tests.set_watch(Settings.value(Settings.RUN_TESTS_ON_SAVE))
+
+
+func _on_filesystem_changed() -> void:
+	_read_project_settings()
+	_discover_timer.start()
 
 
 # --- Saving and formatting --------------------------------------------------
@@ -451,12 +548,32 @@ func _read_project_settings() -> void:
 		PackedStringArray(["config", "get", "editor"]),
 		func(result: Dictionary) -> void:
 			Settings.project_values = result.json if result.json is Dictionary else {}
+			_tests.set_watch(Settings.value(Settings.RUN_TESTS_ON_SAVE))
 	)
+	var key := "commands.default_test_target"
+	_runner.run(PackedStringArray(["config", "get", key]), _on_test_folder)
+
+
+## Reads the folder `gdsuite test` runs, then finds its tests.
+func _on_test_folder(result: Dictionary) -> void:
+	# JSON.new().parse, unlike JSON.parse_string, prints nothing on bad input.
+	var json := JSON.new()
+	var folder: Variant = null
+	if result.code == 0 and json.parse(str(result.output).strip_edges()) == OK:
+		folder = json.data
+	if not folder is String or folder == "":
+		folder = "test/"
+	if not folder.begins_with("res://"):
+		folder = "res://" + folder.trim_prefix("./")
+	_tests.test_folder = folder
+	_tests.discover()
 
 
 func _on_setting_toggled(key: String, _enabled: bool) -> void:
 	if key == Settings.SHOW_IN_GUTTER:
 		_show_markers()
+	elif key == Settings.RUN_TESTS_ON_SAVE:
+		_tests.set_watch(Settings.value(key))
 
 
 func _open_config() -> void:
@@ -501,13 +618,50 @@ func _on_menu(id: int) -> void:
 			_refresh_project()
 		MENU_CONFIG:
 			_open_config()
+		MENU_RUN_TESTS:
+			_run_tests_and_show(PackedStringArray())
+		MENU_TESTS:
+			_show_tests()
 
 
 func _show_dock() -> void:
-	if _dock_host != null:
-		_dock_host.call("make_visible")
+	_show_in_dock(_dock, _dock_host)
+
+
+func _show_tests() -> void:
+	_show_in_dock(_tests, _tests_host)
+
+
+## Adds `control` as a dock of its own: an EditorDock on Godot 4.6 and newer,
+## which it returns, or a bottom panel on 4.5, returning null.
+func _add_dock(control: Control, title: String, layout_key: String) -> Control:
+	if not ClassDB.class_exists("EditorDock"):
+		add_control_to_bottom_panel(control, title)
+		return null
+	var host: Control = ClassDB.instantiate("EditorDock")
+	host.set("title", title)
+	host.set("layout_key", layout_key)
+	host.set("default_slot", SLOT_BOTTOM)
+	host.set("available_layouts", LAYOUT_HORIZONTAL | LAYOUT_FLOATING)
+	host.add_child(control)
+	call("add_dock", host)
+	return host
+
+
+func _remove_dock(control: Control, host: Control) -> void:
+	if host != null:
+		call("remove_dock", host)
+		host.queue_free()
 	else:
-		make_bottom_panel_item_visible(_dock)
+		remove_control_from_bottom_panel(control)
+		control.queue_free()
+
+
+func _show_in_dock(control: Control, host: Control) -> void:
+	if host != null:
+		host.call("make_visible")
+	else:
+		make_bottom_panel_item_visible(control)
 
 
 func _current_script_path() -> String:
