@@ -20,6 +20,24 @@ const RULE_DOCS := DOCS + "/reference/lint-rules#"
 ## Covers its own line and the next, as gdtidy reads it.
 const IGNORE_COMMENT := "  # gdtidy: ignore=%s"
 
+## The toolbar's icons, drawn white and coloured by the state they show.
+const CHECK_ICON := (
+	'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+	+ '<path d="M7.5 14.5H3v-13h6.5L13 5v3" fill="none" stroke="#fff" stroke-width="1.5" '
+	+ 'stroke-linejoin="round"/><path d="M8.5 11.5l2.2 2.2 4-4.4" fill="none" stroke="#fff" '
+	+ 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+)
+const TESTS_ICON := (
+	'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+	+ '<path d="M5.5 1.5h5M6.5 1.5V6l-4 7.2a.9.9 0 0 0 .8 1.3h9.4a.9.9 0 0 0 .8-1.3L9.5 6V1.5" '
+	+ 'fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" '
+	+ 'stroke-linejoin="round"/><path d="M4.4 10h7.2l1.5 3H2.9z" fill="#fff"/></svg>'
+)
+const STATE_NONE := "none"
+const STATE_OK := "ok"
+const STATE_WARNING := "warning"
+const STATE_ERROR := "error"
+
 const SHORTCUT_FORMAT := "gdsuite/format_script"
 const COMMAND_FORMAT := "gdsuite/format_script"
 const COMMAND_CHECK := "gdsuite/check"
@@ -66,6 +84,10 @@ var _tests_menu: TestsMenu
 ## Waits for the file system to settle before finding the tests again.
 var _discover_timer: Timer
 var _check_button: Button
+var _tests_button: Button
+var _check_running := false
+## The steps of the last check, for the Check icon's tooltip.
+var _check_lines := PackedStringArray()
 var _menu: PopupMenu
 var _format_shortcut: Shortcut
 var _type_check_timer: Timer
@@ -96,17 +118,17 @@ func _enter_tree() -> void:
 	_tests.results_changed.connect(_show_test_marks)
 	_tests.open_requested.connect(_open_test)
 	_tests.watch_toggled.connect(_on_watch_toggled)
+	_tests.results_changed.connect(_show_tests_state)
 	_tests_host = _add_dock(_tests, "Tests", "gdsuite_tests")
 	_tests_menu = TestsMenu.new()
 	_tests_menu.run_paths = _run_tests_and_show
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _tests_menu)
 
-	_check_button = Button.new()
-	_check_button.text = "Check"
-	_check_button.flat = true
-	_check_button.tooltip_text = "Run the project's check: the steps of [check] in gdsuite.toml"
-	_check_button.pressed.connect(_run_check)
+	_check_button = _status_button(CHECK_ICON, _run_check)
+	_tests_button = _status_button(TESTS_ICON, _on_tests_button)
 	add_control_to_container(CONTAINER_TOOLBAR, _check_button)
+	add_control_to_container(CONTAINER_TOOLBAR, _tests_button)
+	_dock.problems_changed.connect(_show_check_state)
 
 	_menu = PopupMenu.new()
 	_menu.add_item("Format script", MENU_FORMAT)
@@ -147,21 +169,25 @@ func _enter_tree() -> void:
 	add_child(_discover_timer)
 
 	resource_saved.connect(_on_resource_saved)
+	scene_saved.connect(_on_scene_saved)
 	var script_editor := EditorInterface.get_script_editor()
 	script_editor.editor_script_changed.connect(_on_script_changed)
 	EditorInterface.get_resource_filesystem().filesystem_changed.connect(_on_filesystem_changed)
 
 	if _runner.find_program() == "":
 		_dock.set_status(NOT_FOUND)
-		_set_check_state("", "gdsuite not found. Install GDSuite: " + INSTALL_DOCS)
+		_paint(_check_button, STATE_NONE, "gdsuite not found. Install GDSuite: " + INSTALL_DOCS)
+		_paint(_tests_button, STATE_NONE, "gdsuite not found. Install GDSuite: " + INSTALL_DOCS)
 		return
 	_read_project_settings()
-	_set_check_state("", "Run the project's check")
+	_show_check_state()
+	_show_tests_state()
 	_refresh_project()
 
 
 func _exit_tree() -> void:
 	resource_saved.disconnect(_on_resource_saved)
+	scene_saved.disconnect(_on_scene_saved)
 	var script_editor := EditorInterface.get_script_editor()
 	if script_editor.editor_script_changed.is_connected(_on_script_changed):
 		script_editor.editor_script_changed.disconnect(_on_script_changed)
@@ -182,7 +208,9 @@ func _exit_tree() -> void:
 	remove_tool_menu_item("GDSuite")
 	remove_context_menu_plugin(_tests_menu)
 	remove_control_from_container(CONTAINER_TOOLBAR, _check_button)
+	remove_control_from_container(CONTAINER_TOOLBAR, _tests_button)
 	_check_button.queue_free()
+	_tests_button.queue_free()
 	_remove_dock(_dock, _dock_host)
 	_remove_dock(_tests, _tests_host)
 	_runner.stop()
@@ -204,40 +232,149 @@ func _run_check() -> void:
 	if _runner.program == "":
 		_toast("gdsuite not found. Install GDSuite: " + INSTALL_DOCS, true)
 		return
-	_check_button.disabled = true
-	_set_check_state("Reload", "Checking...")
+	if _check_running:
+		return
+	_check_running = true
+	_show_check_state()
 	_runner.run(PackedStringArray(["check", "--report", "json"]), _on_check_done)
 
 
 func _on_check_done(result: Dictionary) -> void:
-	_check_button.disabled = false
+	_check_running = false
 	var report: Variant = result.json
 	if not report is Dictionary:
 		var output := str(result.output).strip_edges()
-		_set_check_state("StatusError", "The check could not run:\n" + output)
+		_check_lines = PackedStringArray(["The check could not run:", output])
+		_show_check_state()
 		return
-	var lines := PackedStringArray()
+	_check_lines = PackedStringArray()
 	for step: Dictionary in report.get("steps", []):
 		var mark := "✔" if step.get("status") == "ok" else "✖"
-		lines.append("%s %s: %s" % [mark, step.get("name", ""), step.get("summary", "")])
-	var passed: bool = report.get("status") == "ok"
-	_set_check_state("StatusSuccess" if passed else "StatusError", "\n".join(lines))
+		_check_lines.append("%s %s: %s" % [mark, step.get("name", ""), step.get("summary", "")])
 	_refresh_project()
-	if not passed:
+	if report.get("status") != "ok":
 		_show_dock()
 
 
-func _set_check_state(icon_name: String, tooltip: String) -> void:
-	_check_button.icon = null if icon_name == "" else _icon(icon_name)
-	_check_button.tooltip_text = tooltip
+## The Check icon: grey until format, lint and the type check have all run,
+## then red for errors, yellow for warnings, green for none.
+func _show_check_state() -> void:
+	var lines := PackedStringArray()
+	var state := STATE_NONE
+	if _check_running:
+		lines.append("Checking...")
+	elif not _dock.is_known():
+		lines.append("Looking at the project...")
+	else:
+		var count := _dock.counts()
+		if count.errors > 0:
+			state = STATE_ERROR
+		elif count.warnings > 0:
+			state = STATE_WARNING
+		else:
+			state = STATE_OK
+		var counted := "%d errors, %d warnings" % [count.errors, count.warnings]
+		lines.append(counted + " (format, lint, types)")
+	lines.append("Click to run the project's check: the steps of [check] in gdsuite.toml")
+	if not _check_lines.is_empty():
+		lines.append("")
+		lines.append("Last check:")
+		lines.append_array(_check_lines)
+	_paint(_check_button, state, "\n".join(lines))
+
+
+## The Tests icon: grey while some tests have not run since they changed,
+## red when one fails, green when all ran and pass.
+func _show_tests_state() -> void:
+	var state := STATE_NONE
+	match _tests.state():
+		TestsDock.STATE_FAIL:
+			state = STATE_ERROR
+		TestsDock.STATE_PASS:
+			state = STATE_OK
+	_paint(_tests_button, state, _tests.summary() + "\nClick to run all tests")
+
+
+func _on_tests_button() -> void:
+	if _tests.is_running():
+		_show_tests()
+	else:
+		_run_tests_and_show(PackedStringArray())
+
+
+func _status_button(svg: String, pressed: Callable) -> Button:
+	var button := Button.new()
+	button.flat = true
+	button.icon = _svg_icon(svg)
+	button.pressed.connect(pressed)
+	return button
+
+
+func _paint(button: Button, state: String, tooltip: String) -> void:
+	var theme := EditorInterface.get_editor_theme()
+	var color := Color(0.6, 0.6, 0.6)
+	match state:
+		STATE_OK:
+			color = theme.get_color("success_color", "Editor")
+		STATE_WARNING:
+			color = Color(1.0, 0.8, 0.25)
+		STATE_ERROR:
+			color = theme.get_color("error_color", "Editor")
+	for color_name: String in [
+		"icon_normal_color",
+		"icon_hover_color",
+		"icon_pressed_color",
+		"icon_hover_pressed_color",
+		"icon_focus_color",
+	]:
+		button.add_theme_color_override(color_name, color)
+	button.tooltip_text = tooltip
+
+
+func _svg_icon(svg: String) -> Texture2D:
+	var image := Image.new()
+	image.load_svg_from_string(svg, EditorInterface.get_editor_scale())
+	return ImageTexture.create_from_image(image)
 
 
 # --- Problems ---------------------------------------------------------------
 
 
 func _refresh_project() -> void:
+	_format_check(PackedStringArray())
 	_lint(PackedStringArray())
 	_type_check()
+
+
+## Finds the scripts of `paths` ("res://" paths), or of the project, that
+## formatting would change.
+func _format_check(paths: PackedStringArray) -> void:
+	if _runner.program == "":
+		return
+	var args := PackedStringArray(["fmt", "--", "--check", "--format", "json"])
+	if paths.is_empty():
+		args.append(".")
+	for path in paths:
+		args.append(path.trim_prefix("res://"))
+	_runner.run(args, _on_format_check_done.bind(paths))
+
+
+func _on_format_check_done(result: Dictionary, paths: PackedStringArray) -> void:
+	if not result.json is Dictionary:
+		_dock.set_status("The format check could not run: " + str(result.output).strip_edges())
+		return
+	var problems := []
+	for path: Variant in result.json.get("changed", []):
+		problems.append({
+			"file": "res://" + str(path).replace("\\", "/").trim_prefix("./"),
+			"line": 1,
+			"column": 1,
+			"severity": "warning",
+			"message": "Not formatted: Shift+Alt+F formats it",
+			"rule": "format",
+			"fixable": true,
+		})
+	_dock.set_format(paths, problems)
 
 
 ## Lints `paths` ("res://" paths), or the whole project when it is empty.
@@ -326,15 +463,20 @@ func _open(problem: Dictionary) -> void:
 	EditorInterface.edit_script(script, int(problem.line), int(problem.get("column", 1)) - 1)
 
 
-## Fixes the script on disk, then shows the result in the open editor. A
-## script with unsaved changes is left alone: they would be lost.
+## Fixes the script on disk (formats it, for a format problem), then shows
+## the result in the open editor. A script with unsaved changes is left
+## alone: they would be lost.
 func _fix(problem: Dictionary) -> void:
 	var code_edit := _code_edit_for(problem.file)
 	if code_edit != null and code_edit.get_version() != code_edit.get_saved_version():
 		_toast("Save the script first: fixing works on the saved file", true)
 		return
+	var file: String = problem.file.trim_prefix("res://")
+	var args := PackedStringArray(["lint", "--", "--fix", file])
+	if problem.get("source") == "format":
+		args = PackedStringArray(["fmt", "--", file])
 	_runner.run(
-		PackedStringArray(["lint", "--", "--fix", problem.file.trim_prefix("res://")]),
+		args,
 		func(_result: Dictionary) -> void:
 			var text := FileAccess.get_file_as_string(problem.file)
 			var script := load(problem.file) as GDScript
@@ -342,6 +484,7 @@ func _fix(problem: Dictionary) -> void:
 				script.source_code = text
 			if code_edit != null and is_instance_valid(code_edit) and text != "":
 				_replace_text(code_edit, text, true)
+			_format_check(PackedStringArray([problem.file]))
 			_lint(PackedStringArray([problem.file]))
 	)
 
@@ -365,7 +508,11 @@ func _show_markers() -> void:
 	if not Settings.value(Settings.SHOW_IN_GUTTER):
 		_markers.clear(code_edit)
 	else:
-		_markers.show(code_edit, _dock.problems_for(path))
+		# A script that is not formatted has no line to mark.
+		var problems := _dock.problems_for(path).filter(
+			func(p: Dictionary) -> bool: return p.source != "format"
+		)
+		_markers.show(code_edit, problems)
 
 
 func _on_script_changed(_script: Script) -> void:
@@ -452,18 +599,28 @@ func _on_filesystem_changed() -> void:
 
 
 func _on_resource_saved(resource: Resource) -> void:
-	if _saving or not resource is GDScript or _runner.program == "":
+	if _saving or _runner.program == "":
 		return
 	var path := resource.resource_path
-	# Built-in scripts are saved with their scene.
+	# Built-in scripts and resources are saved with their scene.
 	if path == "" or path.contains("::"):
+		return
+	if not resource is GDScript:
+		_tests.file_saved(path)
 		return
 	if Settings.value(Settings.FORMAT_ON_SAVE):
 		_format_saved(resource as GDScript)
+	_format_check(PackedStringArray([path]))
+	_tests.file_saved(path)
 	if Settings.value(Settings.LINT_ON_SAVE):
 		_lint(PackedStringArray([path]))
 	if Settings.value(Settings.TYPE_CHECK_ON_SAVE):
 		_type_check_timer.start()
+
+
+func _on_scene_saved(path: String) -> void:
+	if not _saving:
+		_tests.file_saved(path)
 
 
 func _format_current_script() -> void:

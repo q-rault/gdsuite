@@ -23,6 +23,8 @@ const FILES: &[(&str, &str)] = &[
     addon_file!("plugin.cfg"),
     addon_file!("plugin.gd"),
     addon_file!("plugin.gd.uid"),
+    addon_file!("column_resizer.gd"),
+    addon_file!("column_resizer.gd.uid"),
     addon_file!("markers.gd"),
     addon_file!("markers.gd.uid"),
     addon_file!("problems_dock.gd"),

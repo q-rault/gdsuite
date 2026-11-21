@@ -102,22 +102,33 @@ pub fn write_gdtest_addons(dir: &Path) -> Result<PathBuf> {
 /// Replaced when gdsuite changed since.
 pub fn refresh_link(launcher: &Path) -> Result<()> {
     let gdsuite = std::env::current_exe().context("failed to find the gdsuite program")?;
-    if is_current(launcher, &gdsuite) {
+    refresh_link_to(launcher, &gdsuite)
+}
+
+/// Makes `launcher` the program at `gdsuite`. The editor starts several
+/// gdsuite processes at once, and each may refresh the same launcher: the new
+/// one is made under a name of its own, then renamed over the old one in one
+/// step. Replacing the launcher in place let one process copy gdsuite onto a
+/// link another had just made to gdsuite itself, which emptied both.
+fn refresh_link_to(launcher: &Path, gdsuite: &Path) -> Result<()> {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if is_current(launcher, gdsuite) {
         return Ok(());
     }
-    if let Some(parent) = launcher.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+    let parent = launcher.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    let name = launcher.file_name().unwrap_or_default().to_string_lossy();
+    let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = parent.join(format!(".{name}.{}.{next}.tmp", std::process::id()));
+    let _ = fs::remove_file(&temp);
+    if fs::hard_link(gdsuite, &temp).is_err() {
+        fs::copy(gdsuite, &temp).with_context(|| format!("failed to write {}", temp.display()))?;
     }
-    if launcher.exists() {
-        fs::remove_file(launcher)
-            .with_context(|| format!("failed to replace {}", launcher.display()))?;
-    }
-    if fs::hard_link(&gdsuite, launcher).is_err() {
-        fs::copy(&gdsuite, launcher)
-            .with_context(|| format!("failed to write {}", launcher.display()))?;
-    }
-    Ok(())
+    let renamed = fs::rename(&temp, launcher);
+    // When `launcher` already is `gdsuite` (another process got there
+    // first), the rename leaves `temp` in place.
+    let _ = fs::remove_file(&temp);
+    renamed.with_context(|| format!("failed to replace {}", launcher.display()))
 }
 
 /// Whether `launcher` is this gdsuite: same size, and not older.
@@ -130,4 +141,39 @@ fn is_current(launcher: &Path, gdsuite: &Path) -> bool {
         _ => false,
     };
     launcher.len() == gdsuite.len() && not_older
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launchers_refreshed_at_once_stay_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let gdsuite = dir.path().join("gdsuite-new");
+        fs::write(&gdsuite, vec![7u8; 64 * 1024]).unwrap();
+        let launcher = dir.path().join("bin").join("gdsuite");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        for _ in 0..20 {
+            // An older gdsuite, as after an update.
+            let _ = fs::remove_file(&launcher);
+            fs::write(&launcher, b"old").unwrap();
+            let threads: Vec<_> = (0..8)
+                .map(|_| {
+                    let (launcher, gdsuite) = (launcher.clone(), gdsuite.clone());
+                    std::thread::spawn(move || refresh_link_to(&launcher, &gdsuite))
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap().unwrap();
+            }
+            assert_eq!(fs::read(&launcher).unwrap().len(), 64 * 1024);
+            assert_eq!(fs::read(&gdsuite).unwrap().len(), 64 * 1024);
+        }
+        let leftovers: Vec<_> = fs::read_dir(launcher.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from("gdsuite")]);
+    }
 }

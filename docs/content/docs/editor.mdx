@@ -24,27 +24,40 @@ It works best with Godot 4.7 and newer; Godot 4.5 is supported.
 
 ## Check the project
 
-The **Check** button in the editor's top bar runs the project's check: the
-steps of `[check]` in `gdsuite.toml`, as [`gdsuite check`](/check) does. When
-it ends, the button shows whether everything passed, and its tooltip lists
-each step:
+Two icons in the editor's top bar show where the project stands:
 
-```text
-✔ fmt: format check passed
-✖ lint: 1 lint problem in 4 files
-```
+- **Check** (a page with a tick): grey until GDSuite has looked at the
+  project, then red when there are errors, yellow when there are only
+  warnings, green when there are none. It counts what formatting, linting and
+  the type check found, as listed in the Problems dock. Click it to run the
+  project's check: the steps of `[check]` in `gdsuite.toml`, as
+  [`gdsuite check`](/check) does. Its tooltip then lists each step:
+
+  ```text
+  ✔ fmt: format check passed
+  ✖ lint: 1 lint problem in 4 files
+  ```
+
+- **Tests** (a flask): red when a test fails, green when every test ran and
+  passes, grey when some tests have not run yet or must run again because a
+  script changed. Click it to run all tests.
 
 ## The Problems dock
 
 The **Problems** dock lists what [linting](/linting) and the [type
-check](/type-checking) found, grouped by script:
+check](/type-checking) found, and the scripts that are not
+[formatted](/formatting), grouped by script:
 
 - **Double-click** a problem to open the script at its line.
-- **Errors**, **Warnings**, **Lint** and **Types** filter the list; **Whole
-  project** or **Current script** chooses which scripts it shows.
+- **Errors**, **Warnings**, **Format**, **Lint** and **Types** filter the
+  list; a filter that is off is faded. **Whole project** or **Current script**
+  chooses which scripts it shows.
 - **Right-click** a lint problem to fix it (when it can be fixed), ignore it on
   this line, turn its rule off for the whole project (written in
-  `gdsuite.toml`), or read what the rule means.
+  `gdsuite.toml`), or read what the rule means. Right-click a script that is
+  not formatted to format it.
+- Drag the edge of the **Where** or **Rule** column to make it wider or
+  narrower; the widths are kept for the project.
 
 The list shows the whole project, including problems in scripts you haven't
 opened: a broken reference in a scene, a script loading a file that was
@@ -77,13 +90,32 @@ A script with a syntax error is left as it is.
 The **Tests** dock lists the project's tests: the ones `gdsuite test` runs,
 from the folder in `[commands] default_test_target`.
 
-- The buttons at the top run every test, the tests you selected, or again
-  only the tests that failed.
-- **Right-click** a test, a file or a folder in the list to run it, and
-  **double-click** a test to open it.
+- **Run all** runs every test; while tests run, it becomes **Stop**.
+- **Run failed** runs again the tests that failed, and says how many.
+- The **▶** at the end of each row runs that script or that test.
+  **Right-click** runs the selected tests, and **double-click** opens a test.
+- **Watch** runs tests again when you save a script, a scene or a resource:
+  only the tests that use it, directly or through other scripts, scenes and
+  resources (`extends`, `preload`/`load`, `class_name`, autoloads), and the
+  scenes they were seen loading when they last ran. A test script runs its own
+  tests; a change to `project.godot` or an autoload runs them all. See [what a
+  change affects](https://q-rault.github.io/gdtest/docs/running-tests#only-what-your-change-affects).
+- **Search tests** keeps the tests whose name or script matches.
+- **✖ failed**, **✔ passed** and **🕑 to run** count the tests of each kind;
+  click one to hide those tests, or show them again. "To run" are the tests
+  not run yet, and those whose scripts changed since they ran.
 - Select a test that failed to read why.
-- **Rerun on save** keeps the tests running: when you save a script, the tests
-  run again, only those of the test script when you saved a test.
+
+While tests run, a bar under the buttons fills, green, or red once a test
+failed, and the count shows where the run is (`Running 120 / 358, 2 failed`).
+Each test shows where it is: a clock while it waits, a spinner while it runs,
+then its result. The tests of the last run have a tinted row; a test that has
+not run, or whose script changed since it ran, is faded. The list keeps its
+order, and what you unfolded stays unfolded.
+
+The **Time** column shows how long each test took, and each script the time
+of its tests. Click its title to put the slowest first, and the **Test**
+title to sort by name again. Drag its edge to resize it.
 
 In the script editor, a test script gets a ▶ next to each test. Click it to
 run that test; after a run, it shows whether the test passed. Folders and
@@ -94,7 +126,8 @@ The command palette has **Run All Tests**, **Rerun Failed Tests** and **Run
 Tests in Script**.
 
 Tests run in the background with the Godot of your editor, as `gdsuite test`
-runs them, so they don't stop you from working.
+runs them, so they don't stop you from working. They run in parallel: one
+Godot per processor core, each taking the next test waiting.
 
 If you used the gdtest panel before (`addons/gdtest_editor/`), `gdsuite test`
 removes it: the Tests dock replaces it. If you changed its files, they are kept
@@ -111,7 +144,7 @@ GDSuite**:
 | Format on save | Off | Formats the script when you save it |
 | Lint on save | On | Lints the script you saved, and updates its problems |
 | Type check after saving | On | Type checks the project a moment after you save, in the background |
-| Rerun tests on save | Off | Runs the tests again when you save a script; also the switch in the Tests dock |
+| Watch: run the affected tests on save | Off | Runs the tests a saved file affects; also the **Watch** button of the Tests dock |
 | Show problems in the script editor | On | The icons and tints in the script editor |
 
 These are yours: they apply to every project on your computer.

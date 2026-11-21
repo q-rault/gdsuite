@@ -26,8 +26,10 @@ func show(code_edit: CodeEdit, tests: Array) -> void:
 				icon = "StatusSuccess"
 			"fail", "error":
 				icon = "StatusError"
+			"queued":
+				icon = "Time"
 			"running":
-				icon = "Reload"
+				icon = "Progress1"
 		code_edit.set_line_gutter_icon(line, gutter, theme.get_icon(icon, "EditorIcons"))
 		code_edit.set_line_gutter_clickable(line, gutter, true)
 		code_edit.set_line_gutter_metadata(line, gutter, test_name)

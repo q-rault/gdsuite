@@ -71,7 +71,7 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
 | **Formatting** | Script editor: "Format script" in a GDSuite menu, the command palette and a shortcut. No panel. | On request; on save if you turn it on | No |
 | **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (on by default); the project on Check | No |
 | **Type check** | Same Problems dock, its own filter | In the background a moment after you save; on Check | No |
-| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; "rerun on save" if you turn it on | **Yes**: the dock floats well on a second monitor |
+| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; on save with **Watch** on | **Yes**: the dock floats well on a second monitor |
 | **Code health** | A Health dock you open when you need it (content decided later) | On request, and after a Check | **Yes**: it floats, to have room for the overview |
 | **Check** | A button with a status dot in the editor's top bar | On request | No |
 
@@ -120,11 +120,12 @@ on a side, or float:
   and its last result shows as an icon there.
 - **Run tests** in the FileSystem dock's context menu, on a folder or a
   script.
-- **Rerun on save** (off by default) runs gdtest's watch mode in the
-  background while it's on: it reruns the tests of a saved test script, and
-  the tests that use a saved script when gdtest can tell. If the watch mode
-  turns out to be too heavy to keep running, the dock runs the affected tests
-  once per save instead.
+- **Watch** (off by default): the dock runs the affected tests once
+  per save of a script, scene or resource, as `gdtest --affected-by` lists
+  them from the project's dependency graph. Saves during a run wait
+  for it to end. (A first version kept gdtest's watch mode running; it
+  started a full run when turned on and its runs could not show progress, so
+  the dock now starts each run itself.)
 
 ### Code health: a dock you open when you need it
 
@@ -162,7 +163,7 @@ button:
 | Format on save | Off |
 | Lint on save | On |
 | Type check after saving | On (in the background) |
-| Rerun tests on save | Off |
+| Watch: run the affected tests on save | Off |
 | Show problems in the gutter | On |
 | `gdsuite` program | Found automatically |
 
@@ -236,7 +237,7 @@ Each phase ships on its own and is usable without the next.
 - **Godot's own warnings and errors:** the Problems dock shows everything the
   type check reports, including what Godot also shows for open scripts, so
   nothing disappears from the list when a script is opened.
-- **Rerun on save:** gdtest's watch mode, with a per-save run as a fallback if
-  it proves too heavy.
+- **Watch:** one run per save, started by the dock, of the tests
+  `gdtest --affected-by` lists.
 - **Code health:** a dock opened when needed, not a main screen tab. Its
   content is decided later, with the tool.
