@@ -175,7 +175,7 @@ fn setup_impl(
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     output.step("saving tool manifest");
     tooling::save_manifest(context, &install.manifest)?;
-    output.step("installing gdtest addons");
+    output.step("installing the gdtest addon");
     let addon_report = tooling::install_gdtest_addons(context, &config)
         .map_err(|error| command_error(EXIT_SETUP_ERROR, error.to_string()))?;
     if let Some(upgrade) = &addon_report.upgrade {
@@ -189,7 +189,7 @@ fn setup_impl(
             )
         };
         output.warn(format!(
-            "upgraded the gdtest addons from harness {} to {}{backup}",
+            "upgraded the gdtest addon from harness {} to {}{backup}",
             upgrade.from_version, upgrade.to_version
         ));
     }
@@ -785,7 +785,7 @@ fn install_test_addons_if_needed(
     };
     match &report.upgrade {
         Some(upgrade) => eprintln!(
-            "gdsuite: upgraded the gdtest addons from {} to {}; the files they replaced are in {}",
+            "gdsuite: upgraded the gdtest addon from {} to {}; the files it replaced are in {}",
             upgrade.from_version,
             upgrade.to_version,
             upgrade.backup_dir.display()

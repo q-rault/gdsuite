@@ -1084,7 +1084,7 @@ fn setup_upgrades_gdtest_addons_from_another_harness_version() {
         .assert()
         .success()
         .stdout(predicate::str::contains(pin(
-            "upgraded the gdtest addons from harness 0.1.1 to {gdtest}",
+            "upgraded the gdtest addon from harness 0.1.1 to {gdtest}",
         )))
         .stdout(predicate::str::contains("skipped modified").not());
 

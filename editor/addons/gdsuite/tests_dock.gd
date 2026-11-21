@@ -210,38 +210,8 @@ func _gdtest_args(options: PackedStringArray, targets: PackedStringArray) -> Pac
 		"--reporter", "json",
 	])
 	args.append_array(options)
-	# gdtest reads paths from the project's folder; it doesn't walk a
-	# "res://" folder. One test is chosen with --filter, which keeps the JSON
-	# output: a "file::test" target doesn't.
-	var paths := PackedStringArray()
-	var patterns := PackedStringArray()
-	var one_test := false
-	for target in targets:
-		var file := target.get_slice("::", 0)
-		var path := file.trim_prefix("res://")
-		if not path in paths:
-			paths.append(path if path != "" else ".")
-		var pattern := _regex_escape(file)
-		if file.ends_with("/"):
-			pattern += ".*"
-		pattern += " :: "
-		if "::" in target:
-			one_test = true
-			pattern += _regex_escape(target.get_slice("::", 1)) + "$"
-		patterns.append(pattern)
-	if one_test:
-		args.append_array(PackedStringArray(["--filter", "^(%s)" % "|".join(patterns)]))
-	args.append_array(paths)
+	args.append_array(targets)
 	return args
-
-
-static func _regex_escape(text: String) -> String:
-	var escaped := ""
-	for character in text:
-		if character in "\\.^$|?*+()[]{}":
-			escaped += "\\"
-		escaped += character
-	return escaped
 
 
 func _on_event(line: String) -> void:

@@ -1463,11 +1463,21 @@ fn is_unchanged_copy(root: &Path, dir: &Path, shipped: &[(String, &str)]) -> Res
             return Ok(false);
         };
         let current = fs::read_to_string(&path).unwrap_or_default();
-        if current.replace("\r\n", "\n") != contents.replace("\r\n", "\n") {
+        if comparable(&current) != comparable(contents) {
             return Ok(false);
         }
     }
     Ok(true)
+}
+
+/// A file's text as compared with gdtest's: line endings as Git may have
+/// changed them, and without plugin.cfg's version, which every release
+/// changes.
+fn comparable(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.starts_with("version="))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<()> {
@@ -1770,6 +1780,21 @@ mod tests {
             "uid://x",
         )
         .unwrap();
+        // As an older gdtest wrote it: only the version differs.
+        let cfg = dir.path().join("addons/gdtest_editor/plugin.cfg");
+        let older: String = fs::read_to_string(&cfg)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                if line.starts_with("version=") {
+                    "version=\"0.2.1\""
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        fs::write(&cfg, older).unwrap();
         fs::write(
             dir.path().join("project.godot"),
             "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/gdtest_editor/plugin.cfg\", \"res://addons/gdsuite/plugin.cfg\")\n",
