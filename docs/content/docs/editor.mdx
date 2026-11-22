@@ -29,7 +29,7 @@ Two icons in the editor's top bar show where the project stands:
 - **Check** (a page with a tick): grey until GDSuite has looked at the
   project, then red when there are errors, yellow when there are only
   warnings, green when there are none. It counts what formatting, linting and
-  the type check found, as listed in the Problems dock. Click it to run the
+  the compile check found, as listed in the Problems dock. Click it to run the
   project's check: the steps of `[check]` in `gdsuite.toml`, as
   [`gdsuite check`](/check) does. Its tooltip then lists each step:
 
@@ -44,32 +44,93 @@ Two icons in the editor's top bar show where the project stands:
 
 ## The Problems dock
 
-The **Problems** dock lists what [linting](/linting) and the [type
-check](/type-checking) found, and the scripts that are not
-[formatted](/formatting), grouped by script:
+The **Problems** dock lists what [formatting](/formatting),
+[linting](/linting) and the [compile check](/type-checking) found, by script:
 
+```text
+⚠  1 script not formatted  ·  double-click to format it
+v player/player.gd    1 ×  ·  1 ⚠  ·  not formatted
+   ⚠   8  The local variable "dir" is declared but never used…   unused-variable · compile
+   ×   9  Identifier "sped" not declared in the current scope.                 compile
+v enemies/glow.gdshader    1 ×
+   ×   4  Invalid arguments for the built-in function: "vec4(float,float,float)".  compile
+```
+
+The script you're editing comes first, then the scripts with errors, then the
+others. Click a script to fold or unfold its problems, or fold them all with
+the button next to **Current**. Each problem says:
+
+- whether it's an **error** or a **warning**: its line is red (×) or
+  yellow (⚠);
+- its **line**, and the column when the tool knows it;
+- the **message**;
+- its **code** and the **tool** that found it. The code is the lint rule
+  (`max-line-length`) or the name of Godot's warning (`unused-variable`,
+  which is `UNUSED_VARIABLE` in Project Settings). Godot's errors have no
+  name, so only the tool is shown. The tool is `format`, `lint`, or
+  `compile`: Godot's own compiler, which also reads shaders, scenes and
+  resources.
+
+Scripts that formatting would change are one row at the top: double-click it
+to format them all (scripts with unsaved changes are left as they are). A
+script listed for other problems also says it is "not formatted".
+
+### Find your way
+
+- **Alt+F8** opens the next problem after the caret, and **Shift+Alt+F8** the
+  one before, in the order of the list, around its end. Not F8, as in VS
+  Code: Godot uses it to stop the running project. Change them in **Editor
+  Settings → Shortcuts**; the command palette has **Next Problem** and
+  **Previous Problem**.
 - **Double-click** a problem to open the script at its line.
-- **Errors**, **Warnings**, **Format**, **Lint** and **Types** filter the
-  list; a filter that is off is faded. **Whole project** or **Current script**
-  chooses which scripts it shows.
-- **Right-click** a lint problem to fix it (when it can be fixed), ignore it on
-  this line, turn its rule off for the whole project (written in
-  `gdsuite.toml`), or read what the rule means. Right-click a script that is
-  not formatted to format it.
-- Drag the edge of the **Where** or **Rule** column to make it wider or
-  narrower; the widths are kept for the project.
+- **Select** a problem to see, under the list, all of its message, what its
+  code means, and buttons for what can be done: **Open**, **Fix** (a lint
+  problem that can be fixed), **Ignore on this line**, **Turn off** its rule
+  for the whole project (written in `gdsuite.toml`), **What does it mean?**,
+  and **Copy**. **Right-click** shows the same actions. Click on empty space,
+  or press **Escape**, to select nothing.
+- Hover a problem for its **copy** button: it copies it as a compiler prints
+  it, `enemies/math.gd:5: warning[integer-division]: … (compile)`.
+
+### Filter
+
+- The error and warning icons count what the project has (hover one for its
+  name), and hide or show those problems; a filter that is off is faded.
+- **Format**, **Lint** and **Compile** count what each tool found, errors in
+  red and warnings in yellow, and hide or show its problems. While a tool
+  checks, a spinner turns next to its name.
+- **Project** or **Current**: the whole project, or the script you're
+  editing.
+
+### Is it up to date?
+
+- The bar says when the last check reported: "Checked 12 s ago".
+- A script you edited since it was checked has its problems faded, and says
+  "edited since checked", until it's checked again when you save.
+- **Check** looks at the whole project again: format, lint and compile.
+- The dock's title counts the problems: **Problems 8**, in red when one is an
+  error, in yellow when they're all warnings. It shows a green **Problems ✓**
+  when every check reported nothing on what your scripts hold now.
+
+When the dock is narrow, its buttons go on two lines rather than widening
+the bottom panel.
+
+Drag the edge of the **Line** or **Code and tool** column to resize it;
+**⚙ → Columns** shows or hides each column and resets the widths. Both are
+kept for the project.
 
 The list shows the whole project, including problems in scripts you haven't
 opened: a broken reference in a scene, a script loading a file that was
-renamed. Godot's own warnings and errors are in it too, so a problem doesn't
-disappear from the list when you open its script.
+renamed. For a syntax error, Godot reports only the first one of a script,
+where the script editor also lists the errors that follow from it: fix the
+first and save.
 
 Like any dock, you can move it to a side, or make it a window of its own.
 
 ## Problems in the script editor
 
-In the script you're editing, a line with a problem gets an icon in the
-margin and a light red or yellow tint. Click the icon to read the problem.
+In the script you're editing, a line with a problem gets a red × or a yellow
+⚠ in the margin and a light tint of the same colour. Click the mark to read the problem.
 
 ## Format a script
 
@@ -92,30 +153,54 @@ from the folder in `[commands] default_test_target`.
 
 - **Run all** runs every test; while tests run, it becomes **Stop**.
 - **Run failed** runs again the tests that failed, and says how many.
-- The **▶** at the end of each row runs that script or that test.
+- Hover a row for its **▶**: it runs that script or that test.
   **Right-click** runs the selected tests, and **double-click** opens a test.
+  Click on empty space, or press **Escape**, to select nothing.
 - **Watch** runs tests again when you save a script, a scene or a resource:
   only the tests that use it, directly or through other scripts, scenes and
   resources (`extends`, `preload`/`load`, `class_name`, autoloads), and the
   scenes they were seen loading when they last ran. A test script runs its own
   tests; a change to `project.godot` or an autoload runs them all. See [what a
   change affects](https://q-rault.github.io/gdtest/docs/running-tests#only-what-your-change-affects).
+  Watch doesn't run tests for nothing:
+  - It waits for your saves to stop for a moment, so several saves in a row
+    make one run.
+  - A save while tests run stops that run, which runs code that has changed
+    since, and starts another: the tests the save affects, and those the
+    stopped run had yet to finish.
+  - When the script you saved doesn't compile, its tests wait, and the bar
+    says "Waiting for hud.gd to compile": they could only fail to load. They
+    run once the compile check after a save finds it fixed (with **Compile
+    check after saving** on; off, Watch runs them at once).
+  - When you save a script back to what it was when its tests last ran, say
+    after renaming a variable and renaming it back, nothing runs: its tests
+    are up to date again.
 - **Search tests** keeps the tests whose name or script matches.
-- **✖ failed**, **✔ passed** and **🕑 to run** count the tests of each kind;
-  click one to hide those tests, or show them again. "To run" are the tests
-  not run yet, and those whose scripts changed since they ran.
-- Select a test that failed to read why.
+- The ✗ (in red), ✓ (in green) and clock icons count the tests that failed,
+  passed, and are to run (hover one for its name); click one to hide those
+  tests, or show them again. "To run"
+  are the tests not run yet, and those whose scripts changed since they ran.
+- Select a test that failed to read why, under the list: what each assertion
+  expected and got, **at** which line (click it to open the script there),
+  that line of code, and the test's local variables then. Click the test's
+  name to open it. To see the local variables, turn on **Project Settings →
+  Debug → GDScript → Always Track Local Variables**; see [reading a
+  failure](https://q-rault.github.io/gdtest/docs/running-tests#reading-a-failure).
 
 While tests run, a bar under the buttons fills, green, or red once a test
-failed, and the count shows where the run is (`Running 120 / 358, 2 failed`).
+failed, and the bar shows where the run is (`120/358 · 4.2 s`).
 Each test shows where it is: a clock while it waits, a spinner while it runs,
-then its result. The tests of the last run have a tinted row; a test that has
-not run, or whose script changed since it ran, is faded. The list keeps its
-order, and what you unfolded stays unfolded.
+then its result. A test that failed is red; a test that has not run, or
+whose script changed since it ran, is faded. After a run, the scripts with a
+test that failed are unfolded. Otherwise the list keeps its order, and what
+you unfolded stays unfolded; click a script to fold or unfold it. When Watch
+starts a run, the bar says why: "affected by hud.gd". The dock's title counts
+the tests that failed, in red: **Tests ✗ 1**. It shows a green **Tests ✓** when
+every test passed with the code as it is now, none left to run.
 
 The **Time** column shows how long each test took, and each script the time
-of its tests. Click its title to put the slowest first, and the **Test**
-title to sort by name again. Drag its edge to resize it.
+of its tests; under a millisecond, nothing. Click its title to put the
+slowest first, and the **Test** title to sort by name again. Drag its edge to resize it.
 
 In the script editor, a test script gets a ▶ next to each test. Click it to
 run that test; after a run, it shows whether the test passed. Folders and
@@ -143,7 +228,7 @@ GDSuite**:
 | --- | --- | --- |
 | Format on save | Off | Formats the script when you save it |
 | Lint on save | On | Lints the script you saved, and updates its problems |
-| Type check after saving | On | Type checks the project a moment after you save, in the background |
+| Compile check after saving | On | Checks the project with Godot a moment after you save, in the background |
 | Watch: run the affected tests on save | Off | Runs the tests a saved file affects; also the **Watch** button of the Tests dock |
 | Show problems in the script editor | On | The icons and tints in the script editor |
 

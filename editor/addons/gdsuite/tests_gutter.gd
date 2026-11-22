@@ -22,10 +22,11 @@ func show(code_edit: CodeEdit, tests: Array) -> void:
 			continue
 		var icon := "Play"
 		match statuses[test_name]:
+			# Coloured marks without a badge behind them, as in the Tests dock.
 			"pass":
-				icon = "StatusSuccess"
+				icon = "ImportCheck"
 			"fail", "error":
-				icon = "StatusError"
+				icon = "ImportFail"
 			"queued":
 				icon = "Time"
 			"running":
