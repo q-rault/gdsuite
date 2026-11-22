@@ -18,7 +18,7 @@ include = ["/src/**", "/editor/addons/**", "/.gdsuite-release.toml", "/Cargo.tom
 # records the same versions. To try a tool's unreleased changes, add to
 # .cargo/config.toml: [patch.crates-io] gdtest = { path = "../gdtest/crates/gdtest" }
 gdhealth = "=0.3.6"
-gdtest = "=0.2.10"
+gdtest = "=0.2.11"
 gdtidy = "=0.3.5"
 gdtypecheck = "=0.2.5"
 anstream = "1.0"
