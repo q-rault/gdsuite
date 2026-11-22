@@ -39,6 +39,8 @@ const FILES: &[(&str, &str)] = &[
     addon_file!("tests_gutter.gd.uid"),
     addon_file!("tests_menu.gd"),
     addon_file!("tests_menu.gd.uid"),
+    addon_file!("ui.gd"),
+    addon_file!("ui.gd.uid"),
 ];
 
 /// Where gdsuite keeps a copy of each addon file as it wrote it, to tell a

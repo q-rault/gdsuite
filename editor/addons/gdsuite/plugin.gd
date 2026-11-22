@@ -41,12 +41,26 @@ const STATE_ERROR := "error"
 const SHORTCUT_FORMAT := "gdsuite/format_script"
 const COMMAND_FORMAT := "gdsuite/format_script"
 const COMMAND_CHECK := "gdsuite/check"
+## How the dock words each kind of change gdtidy reports.
+const FORMAT_CHANGES := {
+	"spacing": "Spaces to add or remove",
+	"blank-lines": "Blank lines to add or remove",
+	"indentation": "Indentation to fix",
+	"trailing-whitespace": "Trailing whitespace to remove",
+	"line-wrapping": "Lines to wrap or join",
+	"quotes": "Quotes to change",
+	"other": "Code to reformat",
+}
 const COMMAND_PROBLEMS := "gdsuite/show_problems"
 const COMMAND_REFRESH := "gdsuite/refresh_problems"
 const COMMAND_RUN_TESTS := "gdsuite/run_all_tests"
 const COMMAND_RERUN_FAILED := "gdsuite/rerun_failed_tests"
 const COMMAND_RUN_SCRIPT_TESTS := "gdsuite/run_script_tests"
 const COMMAND_SHOW_TESTS := "gdsuite/show_tests"
+const COMMAND_NEXT_PROBLEM := "gdsuite/next_problem"
+const COMMAND_PREVIOUS_PROBLEM := "gdsuite/previous_problem"
+const SHORTCUT_NEXT_PROBLEM := "gdsuite/next_problem"
+const SHORTCUT_PREVIOUS_PROBLEM := "gdsuite/previous_problem"
 const COMMANDS := [
 	COMMAND_FORMAT,
 	COMMAND_CHECK,
@@ -56,6 +70,8 @@ const COMMANDS := [
 	COMMAND_RERUN_FAILED,
 	COMMAND_RUN_SCRIPT_TESTS,
 	COMMAND_SHOW_TESTS,
+	COMMAND_NEXT_PROBLEM,
+	COMMAND_PREVIOUS_PROBLEM,
 ]
 
 const MENU_FORMAT := 0
@@ -90,6 +106,8 @@ var _check_running := false
 var _check_lines := PackedStringArray()
 var _menu: PopupMenu
 var _format_shortcut: Shortcut
+var _next_shortcut: Shortcut
+var _previous_shortcut: Shortcut
 var _type_check_timer: Timer
 var _type_check_running := false
 var _type_check_again := false
@@ -106,6 +124,7 @@ func _enter_tree() -> void:
 	Settings.register()
 
 	_dock = ProblemsDock.new()
+	_dock.set_check_icon(_svg_icon(CHECK_ICON))
 	_dock.action_requested.connect(_on_problem_action)
 	_dock.refresh_requested.connect(_refresh_project)
 	_dock.problems_changed.connect(_show_markers)
@@ -115,8 +134,12 @@ func _enter_tree() -> void:
 
 	_tests = TestsDock.new()
 	_tests.runner = _runner
+	_tests.compile_state = _compile_state
 	_tests.results_changed.connect(_show_test_marks)
 	_tests.open_requested.connect(_open_test)
+	_tests.open_line_requested.connect(
+		func(file: String, line: int) -> void: _open({ "file": file, "line": line, "column": 1 })
+	)
 	_tests.watch_toggled.connect(_on_watch_toggled)
 	_tests.results_changed.connect(_show_tests_state)
 	_tests_host = _add_dock(_tests, "Tests", "gdsuite_tests")
@@ -129,12 +152,15 @@ func _enter_tree() -> void:
 	add_control_to_container(CONTAINER_TOOLBAR, _check_button)
 	add_control_to_container(CONTAINER_TOOLBAR, _tests_button)
 	_dock.problems_changed.connect(_show_check_state)
+	_dock.problems_changed.connect(_update_titles)
+	_dock.state_changed.connect(_update_titles)
+	_tests.results_changed.connect(_update_titles)
 
 	_menu = PopupMenu.new()
 	_menu.add_item("Format script", MENU_FORMAT)
 	_menu.add_item("Check the project", MENU_CHECK)
 	_menu.add_item("Show problems", MENU_PROBLEMS)
-	_menu.add_item("Lint and type check the project", MENU_REFRESH)
+	_menu.add_item("Look for problems again", MENU_REFRESH)
 	_menu.add_separator()
 	_menu.add_item("Run all tests", MENU_RUN_TESTS)
 	_menu.add_item("Show tests", MENU_TESTS)
@@ -143,7 +169,10 @@ func _enter_tree() -> void:
 	_menu.id_pressed.connect(_on_menu)
 	add_tool_submenu_item("GDSuite", _menu)
 
-	_format_shortcut = _register_shortcut()
+	_format_shortcut = _register_shortcut(SHORTCUT_FORMAT, KEY_F, true)
+	# Not F8, as in VS Code: Godot stops the running project with it.
+	_next_shortcut = _register_shortcut(SHORTCUT_NEXT_PROBLEM, KEY_F8, false)
+	_previous_shortcut = _register_shortcut(SHORTCUT_PREVIOUS_PROBLEM, KEY_F8, true)
 	var palette := EditorInterface.get_command_palette()
 	var format_keys := _format_shortcut.get_as_text()
 	palette.add_command("Format Script", COMMAND_FORMAT, _format_current_script, format_keys)
@@ -155,6 +184,11 @@ func _enter_tree() -> void:
 	palette.add_command("Rerun Failed Tests", COMMAND_RERUN_FAILED, _tests.rerun_failed)
 	palette.add_command("Run Tests in Script", COMMAND_RUN_SCRIPT_TESTS, _run_script_tests)
 	palette.add_command("Show Tests", COMMAND_SHOW_TESTS, _show_tests)
+	var next := _step_problem.bind(1)
+	var previous := _step_problem.bind(-1)
+	palette.add_command("Next Problem", COMMAND_NEXT_PROBLEM, next, _next_shortcut.get_as_text())
+	var previous_keys := _previous_shortcut.get_as_text()
+	palette.add_command("Previous Problem", COMMAND_PREVIOUS_PROBLEM, previous, previous_keys)
 
 	_type_check_timer = Timer.new()
 	_type_check_timer.one_shot = true
@@ -199,7 +233,8 @@ func _exit_tree() -> void:
 		if is_instance_valid(code_edit):
 			_markers.clear(code_edit)
 			_tests_gutter.clear(code_edit)
-			code_edit.gutter_clicked.disconnect(_connected_code_edits[id])
+			code_edit.gutter_clicked.disconnect(_connected_code_edits[id][0])
+			code_edit.text_changed.disconnect(_connected_code_edits[id][1])
 	_connected_code_edits.clear()
 
 	var palette := EditorInterface.get_command_palette()
@@ -223,6 +258,26 @@ func _shortcut_input(event: InputEvent) -> void:
 	if in_scripts and _format_shortcut.matches_event(event):
 		_format_current_script()
 		get_viewport().set_input_as_handled()
+	elif _next_shortcut.matches_event(event):
+		_step_problem(1)
+		get_viewport().set_input_as_handled()
+	elif _previous_shortcut.matches_event(event):
+		_step_problem(-1)
+		get_viewport().set_input_as_handled()
+
+
+## Opens the problem after (1) or before (-1) the caret, in the order of the
+## Problems dock.
+func _step_problem(direction: int) -> void:
+	var code_edit := _current_code_edit()
+	var line := 0
+	if code_edit != null and EditorInterface.get_script_editor().is_visible_in_tree():
+		line = code_edit.get_caret_line() + 1
+	var problem := _dock.step(_current_script_path(), line, direction)
+	if problem.is_empty():
+		_toast("No problems")
+		return
+	_open(problem)
 
 
 # --- Check ------------------------------------------------------------------
@@ -274,7 +329,7 @@ func _show_check_state() -> void:
 		else:
 			state = STATE_OK
 		var counted := "%d errors, %d warnings" % [count.errors, count.warnings]
-		lines.append(counted + " (format, lint, types)")
+		lines.append(counted + " (format, lint, compile)")
 	lines.append("Click to run the project's check: the steps of [check] in gdsuite.toml")
 	if not _check_lines.is_empty():
 		lines.append("")
@@ -293,6 +348,41 @@ func _show_tests_state() -> void:
 		TestsDock.STATE_PASS:
 			state = STATE_OK
 	_paint(_tests_button, state, _tests.summary() + "\nClick to run all tests")
+
+
+## The docks' titles say what they have: "Problems 8" in red with an error,
+## in yellow with warnings only; "Tests ✗ 2" in red; a green ✓ when there is
+## nothing, checked or run with the code as it is now. Godot 4.5's bottom
+## panels keep their titles.
+func _update_titles() -> void:
+	var theme := EditorInterface.get_editor_theme()
+	var none := Color(0, 0, 0, 0)
+	var green := theme.get_color("success_color", "Editor")
+	if _dock_host != null:
+		var count := _dock.counts()
+		var total: int = count.errors + count.warnings
+		var title := "Problems"
+		var color := none
+		if total > 0:
+			title += " %d" % total
+			color = ProblemsDock.severity_color("error" if count.errors > 0 else "warning")
+		elif _dock.is_clean():
+			title += " ✓"
+			color = green
+		_dock_host.set("title", title)
+		_dock_host.set("title_color", color)
+	if _tests_host != null:
+		var failed := _tests.failed_count()
+		var title := "Tests"
+		var color := none
+		if failed > 0:
+			title += " ✗ %d" % failed
+			color = theme.get_color("error_color", "Editor")
+		elif _tests.all_pass():
+			title += " ✓"
+			color = green
+		_tests_host.set("title", title)
+		_tests_host.set("title_color", color)
 
 
 func _on_tests_button() -> void:
@@ -356,25 +446,50 @@ func _format_check(paths: PackedStringArray) -> void:
 		args.append(".")
 	for path in paths:
 		args.append(path.trim_prefix("res://"))
+	_dock.set_running(ProblemsDock.SOURCE_FORMAT, true)
 	_runner.run(args, _on_format_check_done.bind(paths))
 
 
 func _on_format_check_done(result: Dictionary, paths: PackedStringArray) -> void:
+	_dock.set_running(ProblemsDock.SOURCE_FORMAT, false)
 	if not result.json is Dictionary:
 		_dock.set_status("The format check could not run: " + str(result.output).strip_edges())
 		return
 	var problems := []
+	# gdtidy 0.3.5 and newer say where each script would change, and how.
+	var all_changes: Dictionary = result.json.get("changes", {})
 	for path: Variant in result.json.get("changed", []):
+		var changes: Array = all_changes.get(path, [])
+		var first: Dictionary = changes[0] if not changes.is_empty() else {}
 		problems.append({
 			"file": "res://" + str(path).replace("\\", "/").trim_prefix("./"),
-			"line": 1,
-			"column": 1,
+			"line": int(first.get("first", 0)),
+			"column": 0,
 			"severity": "warning",
-			"message": "Not formatted: Shift+Alt+F formats it",
-			"rule": "format",
+			"message": _format_message(changes),
+			"rule": str(first.get("kind", "not-formatted")),
 			"fixable": true,
 		})
 	_dock.set_format(paths, problems)
+
+
+## What formatting would change, from gdtidy's `changes`: the first change
+## says what, the rest are counted. "Spacing to fix on lines 12–14, and 3
+## more places".
+static func _format_message(changes: Array) -> String:
+	if changes.is_empty():
+		return "Not formatted"
+	var first: Dictionary = changes[0]
+	var what: String = FORMAT_CHANGES.get(str(first.kind), FORMAT_CHANGES.other)
+	var from := int(first.first)
+	var to := int(first.last)
+	var lines := "line %d" % from if from == to else "lines %d–%d" % [from, to]
+	var text := "%s on %s" % [what, lines]
+	if changes.size() == 2:
+		text += ", and 1 more place"
+	elif changes.size() > 2:
+		text += ", and %d more places" % (changes.size() - 1)
+	return text
 
 
 ## Lints `paths` ("res://" paths), or the whole project when it is empty.
@@ -386,10 +501,12 @@ func _lint(paths: PackedStringArray) -> void:
 		args.append(".")
 	for path in paths:
 		args.append(path.trim_prefix("res://"))
+	_dock.set_running(ProblemsDock.SOURCE_LINT, true)
 	_runner.run(args, _on_lint_done.bind(paths))
 
 
 func _on_lint_done(result: Dictionary, paths: PackedStringArray) -> void:
+	_dock.set_running(ProblemsDock.SOURCE_LINT, false)
 	if not result.json is Dictionary:
 		_dock.set_status("Lint could not run: " + str(result.output).strip_edges())
 		return
@@ -403,19 +520,40 @@ func _type_check() -> void:
 		_type_check_again = true
 		return
 	_type_check_running = true
-	_dock.set_status("Type checking...")
+	_dock.set_running(ProblemsDock.SOURCE_TYPES, true)
 	_runner.run(PackedStringArray(["typecheck", "--report", "json"]), _on_type_check_done)
 
 
 func _on_type_check_done(result: Dictionary) -> void:
 	_type_check_running = false
+	_dock.set_running(ProblemsDock.SOURCE_TYPES, false)
 	if result.json is Dictionary:
-		_dock.set_types(_problems_from(result.json))
+		var problems := _problems_from(result.json)
+		# Godot reports lines only: a column would be made up.
+		for problem: Dictionary in problems:
+			problem.column = 0
+		_dock.set_types(problems)
 	else:
-		_dock.set_status("The type check could not run: " + str(result.output).strip_edges())
+		_dock.set_status("The compile check could not run: " + str(result.output).strip_edges())
 	if _type_check_again:
 		_type_check_again = false
 		_type_check()
+	_tests.run_waiting()
+
+
+## Whether the script at `path` compiles, for Watch: "pending" while the
+## compile check after a save has yet to report. Without that check, Watch
+## doesn't wait.
+func _compile_state(path: String) -> String:
+	if not Settings.value(Settings.TYPE_CHECK_ON_SAVE) or path.get_extension() != "gd":
+		return "clean"
+	if _type_check_running or not _type_check_timer.is_stopped():
+		return "pending"
+	var has_error := _dock.problems_for(path).any(
+		func(p: Dictionary) -> bool:
+			return p.source == ProblemsDock.SOURCE_TYPES and p.severity == "error"
+	)
+	return "errors" if has_error else "clean"
 
 
 ## The findings of a `--report json` result, as the dock's problems.
@@ -440,6 +578,8 @@ func _on_problem_action(action: String, problem: Dictionary) -> void:
 			_open(problem)
 		"fix":
 			_fix(problem)
+		"format_all":
+			_format_all(problem.files)
 		"ignore_here":
 			_ignore_here(problem)
 		"disable_rule":
@@ -460,7 +600,9 @@ func _open(problem: Dictionary) -> void:
 	var script := load(problem.file) as Script
 	if script == null:
 		return
-	EditorInterface.edit_script(script, int(problem.line), int(problem.get("column", 1)) - 1)
+	var line := maxi(int(problem.line), 1)
+	var column := maxi(int(problem.get("column", 1)), 1) - 1
+	EditorInterface.edit_script(script, line, column)
 
 
 ## Fixes the script on disk (formats it, for a format problem), then shows
@@ -486,6 +628,41 @@ func _fix(problem: Dictionary) -> void:
 				_replace_text(code_edit, text, true)
 			_format_check(PackedStringArray([problem.file]))
 			_lint(PackedStringArray([problem.file]))
+	)
+
+
+## Formats the scripts of `paths` on disk, and shows them in their open
+## editors. Scripts with unsaved changes are left alone: they would be lost.
+func _format_all(paths: Array) -> void:
+	var files := PackedStringArray()
+	var skipped := 0
+	for path: String in paths:
+		var code_edit := _code_edit_for(path)
+		if code_edit != null and code_edit.get_version() != code_edit.get_saved_version():
+			skipped += 1
+		else:
+			files.append(path)
+	if skipped > 0:
+		_toast("%d script%s with unsaved changes left as they are: save first" % [
+			skipped, "" if skipped == 1 else "s"
+		], true)
+	if files.is_empty():
+		return
+	var args := PackedStringArray(["fmt", "--"])
+	for path in files:
+		args.append(path.trim_prefix("res://"))
+	_runner.run(
+		args,
+		func(_result: Dictionary) -> void:
+			for path in files:
+				var text := FileAccess.get_file_as_string(path)
+				var script := load(path) as GDScript
+				if script != null and text != "":
+					script.source_code = text
+				var code_edit := _code_edit_for(path)
+				if code_edit != null and text != "":
+					_replace_text(code_edit, text, true)
+			_format_check(files)
 	)
 
 
@@ -517,13 +694,22 @@ func _show_markers() -> void:
 
 func _on_script_changed(_script: Script) -> void:
 	_dock.set_current_script(_current_script_path())
+	_tests.remember(_current_script_path())
 	var code_edit := _current_code_edit()
 	if code_edit != null and not _connected_code_edits.has(code_edit.get_instance_id()):
 		var on_click := _on_gutter_clicked.bind(code_edit)
 		code_edit.gutter_clicked.connect(on_click)
-		_connected_code_edits[code_edit.get_instance_id()] = on_click
+		# Its problems may be gone once edited: faded until checked again.
+		var on_edit := _on_text_changed.bind(code_edit, _current_script_path())
+		code_edit.text_changed.connect(on_edit)
+		_connected_code_edits[code_edit.get_instance_id()] = [on_click, on_edit]
 	_show_markers()
 	_show_test_marks()
+
+
+func _on_text_changed(code_edit: CodeEdit, path: String) -> void:
+	if not _saving and code_edit.get_version() != code_edit.get_saved_version():
+		_dock.mark_stale(path)
 
 
 func _on_gutter_clicked(line: int, gutter: int, code_edit: CodeEdit) -> void:
@@ -744,19 +930,21 @@ func _open_config() -> void:
 	OS.shell_open(path)
 
 
-func _register_shortcut() -> Shortcut:
+## The shortcut `name`, as the user set it in Editor Settings > Shortcuts,
+## or else Alt+`keycode`, with Shift when `shift`.
+func _register_shortcut(name: String, keycode: Key, shift: bool) -> Shortcut:
 	var settings := EditorInterface.get_editor_settings()
-	if settings.has_method("get_shortcut") and settings.call("has_shortcut", SHORTCUT_FORMAT):
-		return settings.call("get_shortcut", SHORTCUT_FORMAT)
+	if settings.has_method("get_shortcut") and settings.call("has_shortcut", name):
+		return settings.call("get_shortcut", name)
 	var key := InputEventKey.new()
-	key.keycode = KEY_F
-	key.shift_pressed = true
+	key.keycode = keycode
+	key.shift_pressed = shift
 	key.alt_pressed = true
 	var shortcut := Shortcut.new()
 	shortcut.events = [key]
 	# Godot 4.6 and newer list it in Editor Settings > Shortcuts, to rebind.
 	if settings.has_method("add_shortcut"):
-		settings.call("add_shortcut", SHORTCUT_FORMAT, shortcut)
+		settings.call("add_shortcut", name, shortcut)
 	return shortcut
 
 

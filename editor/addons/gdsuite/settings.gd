@@ -31,7 +31,7 @@ const PROJECT_KEYS := {
 const LABELS := {
 	FORMAT_ON_SAVE: "Format on save",
 	LINT_ON_SAVE: "Lint on save",
-	TYPE_CHECK_ON_SAVE: "Type check after saving",
+	TYPE_CHECK_ON_SAVE: "Compile check after saving",
 	RUN_TESTS_ON_SAVE: "Watch: run the affected tests on save",
 	SHOW_IN_GUTTER: "Show problems in the script editor",
 }

@@ -1103,6 +1103,10 @@ impl JsonLintReport {
             severity: String,
             rule: String,
             message: String,
+            /// gdtypecheck 0.2.5 and newer: what exactly Godot reported, such
+            /// as `unused-variable`, within `rule`.
+            #[serde(default)]
+            code: Option<String>,
         }
         let stderr = output
             .stderr
@@ -1148,7 +1152,7 @@ impl JsonLintReport {
                     column: 1,
                     severity: d.severity,
                     message: d.message,
-                    rule: Some(d.rule),
+                    rule: Some(d.code.unwrap_or(d.rule)),
                     fixable: false,
                 })
                 .collect(),
