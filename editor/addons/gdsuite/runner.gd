@@ -7,6 +7,8 @@ const Settings = preload("settings.gd")
 
 var program := ""
 var _threads: Array[Thread] = []
+## Processes `stream` started and that are still running.
+var _pids: Array[int] = []
 
 
 ## The project's folder, where gdsuite runs.
@@ -71,8 +73,91 @@ func _finish(thread: Thread, result: Dictionary, done: Callable) -> void:
 		done.call(result)
 
 
-## Waits for the commands still running, before the addon is unloaded.
+## The gdtest gdsuite keeps in the project for the editor: gdsuite itself,
+## started as gdtest. Empty when the project has none yet.
+static func gdtest_program() -> String:
+	var path := project_root().path_join(".gdsuite/tools/gdtest/bin/gdtest")
+	if OS.get_name() == "Windows":
+		path += ".exe"
+	return path if FileAccess.file_exists(path) else ""
+
+
+## Starts `path` with `args`, calls `on_line` with each line it prints, then
+## `on_exit` with its exit code, all on the main thread. Returns the process
+## id, or -1 when it could not start.
+func stream(path: String, args: PackedStringArray, on_line: Callable, on_exit: Callable) -> int:
+	# Not blocking: on Windows, a pipe can stay open after the process ends,
+	# so reading until its end would never return.
+	var process := OS.execute_with_pipe(path, args, false)
+	if process.is_empty():
+		return -1
+	var pid: int = process.pid
+	_pids.append(pid)
+	var reader := Thread.new()
+	_threads.append(reader)
+	reader.start(_read_lines.bind(reader, process, on_line, on_exit))
+	return pid
+
+
+## Ends a process `stream` started.
+func kill(pid: int) -> void:
+	if pid > 0 and OS.is_process_running(pid):
+		OS.kill(pid)
+
+
+## Reads the process's output until it ended and nothing is left. What it
+## prints on stderr is read too, and dropped: a full pipe would stop it.
+func _read_lines(thread: Thread, process: Dictionary, on_line: Callable, on_exit: Callable) -> void:
+	var pid: int = process.pid
+	var stdout: FileAccess = process.stdio
+	var stderr: FileAccess = process.stderr
+	var pending := PackedByteArray()
+	while true:
+		# Checked before reading: once it ended, one more read gets the rest.
+		var running := OS.is_process_running(pid)
+		var chunk := stdout.get_buffer(65536)
+		stderr.get_buffer(65536)
+		if chunk.is_empty():
+			if not running:
+				break
+			OS.delay_msec(10)
+			continue
+		pending.append_array(chunk)
+		var newline := pending.find(10)
+		while newline >= 0:
+			var line := pending.slice(0, newline).get_string_from_utf8().strip_edges()
+			pending = pending.slice(newline + 1)
+			if line != "":
+				_deliver.call_deferred(on_line, line)
+			newline = pending.find(10)
+	var last := pending.get_string_from_utf8().strip_edges()
+	if last != "":
+		_deliver.call_deferred(on_line, last)
+	stdout.close()
+	stderr.close()
+	var code := OS.get_process_exit_code(pid)
+	_stream_done.call_deferred(thread, pid, on_exit, code)
+
+
+func _deliver(on_line: Callable, line: String) -> void:
+	if on_line.is_valid():
+		on_line.call(line)
+
+
+func _stream_done(thread: Thread, pid: int, on_exit: Callable, code: int) -> void:
+	thread.wait_to_finish()
+	_threads.erase(thread)
+	_pids.erase(pid)
+	if on_exit.is_valid():
+		on_exit.call(code)
+
+
+## Ends the processes still running and waits for their threads, before the
+## addon is unloaded.
 func stop() -> void:
+	for pid in _pids:
+		kill(pid)
+	_pids.clear()
 	for thread in _threads:
 		if thread.is_started():
 			thread.wait_to_finish()
