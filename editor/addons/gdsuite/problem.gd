@@ -167,3 +167,18 @@ static func format_message(changes: Array) -> String:
 	elif changes.size() > 2:
 		text += ", and %d more places" % (changes.size() - 1)
 	return text
+
+
+## The Problems dock's status: "Checking…", or when the last check reported
+## (`checked_msec`, 0 for never), in minutes: seconds would catch the eye.
+static func status(checking: bool, checked_msec: int) -> String:
+	if checking:
+		return "Checking…"
+	if checked_msec == 0:
+		return ""
+	var minutes := (Time.get_ticks_msec() - checked_msec) / 60000
+	if minutes < 1:
+		return "Checked <1 min ago"
+	if minutes < 60:
+		return "Checked %d min ago" % minutes
+	return "Checked %d h ago" % (minutes / 60)

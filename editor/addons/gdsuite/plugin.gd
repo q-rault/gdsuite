@@ -87,6 +87,8 @@ var _dock: ProblemsDock
 var _dock_host: Control
 var _tests: TestsDock
 var _tests_host: Control
+## The dots of the docks' tabs, by colour: see `_set_dot`.
+var _dots := {}
 var _tests_gutter := TestsGutter.new()
 var _tests_menu: TestsMenu
 ## Waits for the file system to settle before finding the tests again.
@@ -348,33 +350,44 @@ func _show_tests_state() -> void:
 ## panels keep their titles.
 func _update_titles() -> void:
 	var theme := EditorInterface.get_editor_theme()
-	var none := Color(0, 0, 0, 0)
+	var gray := Color(theme.get_color("font_color", "Editor"), 0.5)
 	var green := theme.get_color("success_color", "Editor")
 	if _dock_host != null:
 		var count := _dock.counts()
-		var total: int = count.errors + count.warnings
-		var title := "Problems"
-		var color := none
-		if total > 0:
-			title += " %d" % total
-			color = Problem.severity_color("error" if count.errors > 0 else "warning")
+		var color := gray
+		if count.errors > 0:
+			color = Problem.severity_color("error")
+		elif count.warnings > 0:
+			color = Problem.severity_color("warning")
 		elif _dock.is_clean():
-			title += " ✓"
 			color = green
-		_dock_host.set("title", title)
-		_dock_host.set("title_color", color)
+		_set_dot(_dock_host, color)
 	if _tests_host != null:
-		var failed := _tests.failed_count()
-		var title := "Tests"
-		var color := none
-		if failed > 0:
-			title += " ✗ %d" % failed
+		var color := gray
+		if _tests.failed_count() > 0:
 			color = theme.get_color("error_color", "Editor")
 		elif _tests.all_pass():
-			title += " ✓"
 			color = green
-		_tests_host.set("title", title)
-		_tests_host.set("title_color", color)
+		_set_dot(_tests_host, color)
+
+
+## A dot of `color` before a dock's name, as the Output dock has: red for
+## errors, yellow for warnings, green when all is checked and well, grey when
+## not checked, or checked before the last changes.
+func _set_dot(host: Object, color: Color) -> void:
+	var key := color.to_html()
+	if not _dots.has(key):
+		var theme := EditorInterface.get_editor_theme()
+		var image := theme.get_icon("Warning", "EditorIcons").get_image()
+		image.convert(Image.FORMAT_RGBA8)
+		for y in image.get_height():
+			for x in image.get_width():
+				var alpha := image.get_pixel(x, y).a
+				image.set_pixel(x, y, Color(color, color.a * alpha))
+		_dots[key] = ImageTexture.create_from_image(image)
+	host.set("dock_icon", _dots[key])
+	host.set("force_show_icon", true)
+	host.set("title_color", Color(0, 0, 0, 0))
 
 
 func _on_tests_button() -> void:
