@@ -162,6 +162,48 @@ pub fn ensure_gitignored(context: &ProjectContext) -> Result<()> {
     fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))
 }
 
+/// The addons gdsuite installs: copies of its own files, not the project's code.
+const GENERATED: [&str; 2] = ["addons/gdsuite/**", "addons/gdtest/**"];
+
+/// Marks the installed addons as generated in the project's .gitattributes, so
+/// GitHub folds them in pull request diffs and leaves them out of the language
+/// stats. Keeps what the file has, and leaves alone a pattern it already has a
+/// rule for, even one turning the mark off.
+pub fn ensure_marked_generated(context: &ProjectContext) -> Result<()> {
+    let path = context.root.join(".gitattributes");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let has_rule = |pattern: &str| {
+        existing.lines().any(|line| {
+            let mut words = line.split_whitespace();
+            words.next().map(|first| first.trim_start_matches('/')) == Some(pattern)
+                && words.any(|attribute| attribute.contains("linguist-generated"))
+        })
+    };
+    let missing: Vec<&str> = GENERATED
+        .into_iter()
+        .filter(|pattern| !has_rule(pattern))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let mut updated = existing.clone();
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    updated.push_str(
+        "# Written by `gdsuite setup`: folded in PR diffs, left out of language stats.\n",
+    );
+    for pattern in missing {
+        updated.push_str(pattern);
+        updated.push_str(" linguist-generated=true\n");
+    }
+    fs::write(&path, updated).with_context(|| format!("failed to write {}", path.display()))
+}
+
 pub fn load_dotenv_if_present(context: &ProjectContext) -> Result<()> {
     let path = context.root.join(".env");
     if !path.exists() {
@@ -521,6 +563,7 @@ pub fn ensure_test_addons(
     }
     context.ensure_dirs()?;
     ensure_gitignored(context)?;
+    ensure_marked_generated(context)?;
     bundled::write_gdtest_addons(&tool_source_cache_dir(context, "gdtest"))?;
     let report = install_gdtest_addons(context, config)?;
     refresh_editor_links(context)?;
@@ -1768,6 +1811,41 @@ mod tests {
                 fs::write(target, contents).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn test_marks_the_addons_generated_once_and_keeps_other_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ProjectContext::new(dir.path().to_path_buf());
+        let path = dir.path().join(".gitattributes");
+        fs::write(
+            &path,
+            "* text=auto eol=lf\n/addons/gdtest/** -linguist-generated",
+        )
+        .unwrap();
+
+        ensure_marked_generated(&context).unwrap();
+        ensure_marked_generated(&context).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "* text=auto eol=lf\n/addons/gdtest/** -linguist-generated\n\n\
+             # Written by `gdsuite setup`: folded in PR diffs, left out of language stats.\n\
+             addons/gdsuite/** linguist-generated=true\n"
+        );
+    }
+
+    #[test]
+    fn test_marks_the_addons_generated_in_a_new_gitattributes() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = ProjectContext::new(dir.path().to_path_buf());
+
+        ensure_marked_generated(&context).unwrap();
+
+        let attributes = fs::read_to_string(dir.path().join(".gitattributes")).unwrap();
+        assert!(attributes.starts_with("# Written by"), "{attributes}");
+        assert!(attributes.contains("addons/gdsuite/** linguist-generated=true\n"));
+        assert!(attributes.contains("addons/gdtest/** linguist-generated=true\n"));
     }
 
     #[test]

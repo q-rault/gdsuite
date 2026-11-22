@@ -908,6 +908,41 @@ fn setup_extends_an_existing_gitignore_once() {
 }
 
 #[test]
+fn setup_marks_the_addons_generated_once_and_keeps_other_rules() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fs::write(
+        fixture.root.join(".gitattributes"),
+        "* text=auto eol=lf\n/addons/gdtest/** -linguist-generated",
+    )
+    .unwrap();
+
+    fixture.cmd().arg("init").assert().success();
+    fixture.cmd().arg("setup").assert().success();
+    fixture.cmd().arg("setup").assert().success();
+
+    let attributes = fs::read_to_string(fixture.root.join(".gitattributes")).unwrap();
+    assert!(
+        attributes.starts_with("* text=auto eol=lf\n/addons/gdtest/** -linguist-generated\n"),
+        "{attributes}"
+    );
+    assert_eq!(
+        attributes
+            .matches("addons/gdsuite/** linguist-generated=true")
+            .count(),
+        1,
+        "{attributes}"
+    );
+    // The project turned the mark off for gdtest: that stays its choice.
+    assert!(
+        !attributes.contains("addons/gdtest/** linguist-generated=true"),
+        "{attributes}"
+    );
+}
+
+#[test]
 fn setup_converts_an_existing_gdlintrc_and_keeps_it() {
     let fixture = Fixture::new();
     fixture.seed_project();

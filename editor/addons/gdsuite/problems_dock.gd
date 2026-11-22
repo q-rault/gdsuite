@@ -537,8 +537,9 @@ func _rebuild() -> void:
 	_update_fold_button()
 
 
-## The scripts listed, in order: the one being edited, then those with
-## errors, then the others, each by name.
+## The scripts listed, in order: those with errors, then the others, each by
+## name. The script being edited is not moved up: stepping through the problems
+## opens other scripts, and the order has to stay put while it does.
 func _listed_paths() -> Array:
 	var files := {}
 	for source: String in _problems:
@@ -547,12 +548,10 @@ func _listed_paths() -> Array:
 				files[path] = true
 	var paths := files.keys()
 	var rank := func(path: String) -> int:
-		if path == _current_script:
-			return 0
 		var has_error := problems_for(path).any(
 			func(p: Dictionary) -> bool: return p.severity == "error"
 		)
-		return 1 if has_error else 2
+		return 0 if has_error else 1
 	paths.sort_custom(
 		func(a: String, b: String) -> bool:
 			var rank_a: int = rank.call(a)
