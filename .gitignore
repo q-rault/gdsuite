@@ -7,3 +7,5 @@ target-verification*/
 /.claude
 /AGENTS.md
 /CLAUDE.md
+
+.DS_STORE

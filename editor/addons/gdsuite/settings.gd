@@ -7,6 +7,7 @@ extends RefCounted
 const FORMAT_ON_SAVE := "gdsuite/on_save/format"
 const LINT_ON_SAVE := "gdsuite/on_save/lint"
 const TYPE_CHECK_ON_SAVE := "gdsuite/on_save/type_check"
+const RUN_TESTS_ON_SAVE := "gdsuite/on_save/run_tests"
 const SHOW_IN_GUTTER := "gdsuite/problems/show_in_gutter"
 const PROGRAM := "gdsuite/program"
 
@@ -14,6 +15,7 @@ const DEFAULTS := {
 	FORMAT_ON_SAVE: false,
 	LINT_ON_SAVE: true,
 	TYPE_CHECK_ON_SAVE: true,
+	RUN_TESTS_ON_SAVE: false,
 	SHOW_IN_GUTTER: true,
 	PROGRAM: "",
 }
@@ -23,12 +25,14 @@ const PROJECT_KEYS := {
 	FORMAT_ON_SAVE: "format_on_save",
 	LINT_ON_SAVE: "lint_on_save",
 	TYPE_CHECK_ON_SAVE: "type_check_on_save",
+	RUN_TESTS_ON_SAVE: "run_tests_on_save",
 }
 
 const LABELS := {
 	FORMAT_ON_SAVE: "Format on save",
 	LINT_ON_SAVE: "Lint on save",
 	TYPE_CHECK_ON_SAVE: "Type check after saving",
+	RUN_TESTS_ON_SAVE: "Watch: run the affected tests on save",
 	SHOW_IN_GUTTER: "Show problems in the script editor",
 }
 

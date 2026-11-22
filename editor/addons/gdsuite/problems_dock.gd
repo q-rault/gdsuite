@@ -14,9 +14,11 @@ signal setting_toggled(key: String, enabled: bool)
 signal open_config_requested
 
 const Settings = preload("settings.gd")
+const ColumnResizer = preload("column_resizer.gd")
 
 const SOURCE_LINT := "lint"
 const SOURCE_TYPES := "types"
+const SOURCE_FORMAT := "format"
 const SCOPE_PROJECT := 0
 const SCOPE_SCRIPT := 1
 
@@ -37,23 +39,30 @@ const SETTING_IDS := [
 
 ## source -> { "res://path.gd": [problem, ...] }. A problem is a Dictionary:
 ## {file, line, column, severity, message, rule, fixable, source}.
-var _problems := { SOURCE_LINT: {}, SOURCE_TYPES: {} }
+var _problems := { SOURCE_FORMAT: {}, SOURCE_LINT: {}, SOURCE_TYPES: {} }
+## The sources that reported at least once: until all have, the project's
+## state is not known.
+var _reported := {}
 var _current_script := ""
 
 var _tree: Tree
 var _status: Label
 var _errors_button: Button
 var _warnings_button: Button
+var _format_button: Button
 var _lint_button: Button
 var _types_button: Button
 var _scope: OptionButton
 var _settings_menu: MenuButton
 var _context_menu: PopupMenu
 var _context_problem := {}
+var _resizer := ColumnResizer.new()
 
 
 func _ready() -> void:
 	name = "Problems"
+	# The addon is in English: Godot would translate the words it knows.
+	auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED
 	size_flags_vertical = SIZE_EXPAND_FILL
 	custom_minimum_size = Vector2(0, 120)
 
@@ -63,6 +72,7 @@ func _ready() -> void:
 	_errors_button = _toggle(bar, "Errors", "StatusError", "Show errors")
 	_warnings_button = _toggle(bar, "Warnings", "StatusWarning", "Show warnings")
 	bar.add_child(VSeparator.new())
+	_format_button = _toggle(bar, "Format", "", "Show scripts that are not formatted")
 	_lint_button = _toggle(bar, "Lint", "", "Show lint findings")
 	_types_button = _toggle(bar, "Types", "", "Show type check findings")
 	bar.add_child(VSeparator.new())
@@ -103,10 +113,8 @@ func _ready() -> void:
 	_tree.set_column_title(0, "Where")
 	_tree.set_column_title(1, "Problem")
 	_tree.set_column_title(2, "Rule")
-	_tree.set_column_expand(0, false)
-	_tree.set_column_custom_minimum_width(0, 220)
-	_tree.set_column_expand(2, false)
-	_tree.set_column_custom_minimum_width(2, 200)
+	var scale := EditorInterface.get_editor_scale()
+	_resizer.attach(_tree, "problems_columns", { 0: int(220 * scale), 2: int(200 * scale) })
 	_tree.allow_rmb_select = true
 	_tree.item_activated.connect(_on_item_activated)
 	_tree.item_mouse_selected.connect(_on_item_mouse_selected)
@@ -128,6 +136,16 @@ func set_lint(files: PackedStringArray, problems: Array) -> void:
 ## Replaces every type check finding: the type check covers the project.
 func set_types(problems: Array) -> void:
 	_replace(SOURCE_TYPES, PackedStringArray(), problems)
+
+
+## Replaces the format findings of `files`, or of the whole project.
+func set_format(files: PackedStringArray, problems: Array) -> void:
+	_replace(SOURCE_FORMAT, files, problems)
+
+
+## Whether format, lint and the type check have each reported once.
+func is_known() -> bool:
+	return _reported.size() == _problems.size()
 
 
 func set_status(text: String) -> void:
@@ -165,6 +183,8 @@ func counts() -> Dictionary:
 
 
 func _replace(source: String, files: PackedStringArray, problems: Array) -> void:
+	if files.is_empty():
+		_reported[source] = true
 	var by_file: Dictionary = _problems[source]
 	if files.is_empty():
 		by_file.clear()
@@ -212,7 +232,9 @@ func _rebuild() -> void:
 			item.set_text(1, problem.message)
 			item.set_tooltip_text(1, problem.message)
 			item.set_text(2, problem.rule)
-			var source := "lint" if problem.source == SOURCE_LINT else "type check"
+			var source: String = {
+				SOURCE_LINT: "lint", SOURCE_TYPES: "type check", SOURCE_FORMAT: "format",
+			}[problem.source]
 			item.set_tooltip_text(2, "%s (%s)" % [problem.rule, source])
 			item.set_metadata(0, problem)
 			shown += 1
@@ -234,6 +256,8 @@ func _is_shown(problem: Dictionary) -> bool:
 	if problem.source == SOURCE_LINT and not _lint_button.button_pressed:
 		return false
 	if problem.source == SOURCE_TYPES and not _types_button.button_pressed:
+		return false
+	if problem.source == SOURCE_FORMAT and not _format_button.button_pressed:
 		return false
 	return true
 
@@ -260,6 +284,8 @@ func _on_item_mouse_selected(_position: Vector2, button: int) -> void:
 		var turn_off := 'Turn off "%s" for the project' % _context_problem.rule
 		_context_menu.add_item(turn_off, MENU_DISABLE)
 		_context_menu.add_item('What does "%s" mean?' % _context_problem.rule, MENU_DOCS)
+	elif _context_problem.source == SOURCE_FORMAT:
+		_context_menu.add_item("Format the script", MENU_FIX)
 	_context_menu.add_item("Copy the message", MENU_COPY)
 	_context_menu.position = Vector2i(get_screen_position() + get_local_mouse_position())
 	_context_menu.reset_size()
@@ -316,7 +342,19 @@ func _toggle(bar: HBoxContainer, text: String, icon_name: String, tooltip: Strin
 	button.tooltip_text = tooltip
 	if icon_name != "":
 		button.icon = _icon(icon_name)
-	button.toggled.connect(func(_on: bool) -> void: _rebuild())
+	# On, it looks like any button; off, it is faded. The theme's pressed
+	# colour would make "on" look like a state of its own.
+	var theme := EditorInterface.get_editor_theme()
+	var font_color := theme.get_color("font_color", "Button")
+	for state in ["font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		button.add_theme_color_override(state, font_color)
+	for state in ["icon_pressed_color", "icon_hover_pressed_color", "icon_focus_color"]:
+		button.add_theme_color_override(state, Color.WHITE)
+	button.toggled.connect(
+		func(on: bool) -> void:
+			button.modulate.a = 1.0 if on else 0.4
+			_rebuild()
+	)
 	bar.add_child(button)
 	return button
 

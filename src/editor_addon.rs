@@ -1,7 +1,10 @@
 //! The GDSuite addon for the Godot editor, built into gdsuite and installed in
 //! projects as `addons/gdsuite/`. Its source is `editor/addons/gdsuite/`.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 
@@ -20,6 +23,8 @@ const FILES: &[(&str, &str)] = &[
     addon_file!("plugin.cfg"),
     addon_file!("plugin.gd"),
     addon_file!("plugin.gd.uid"),
+    addon_file!("column_resizer.gd"),
+    addon_file!("column_resizer.gd.uid"),
     addon_file!("markers.gd"),
     addon_file!("markers.gd.uid"),
     addon_file!("problems_dock.gd"),
@@ -28,26 +33,63 @@ const FILES: &[(&str, &str)] = &[
     addon_file!("runner.gd.uid"),
     addon_file!("settings.gd"),
     addon_file!("settings.gd.uid"),
+    addon_file!("tests_dock.gd"),
+    addon_file!("tests_dock.gd.uid"),
+    addon_file!("tests_gutter.gd"),
+    addon_file!("tests_gutter.gd.uid"),
+    addon_file!("tests_menu.gd"),
+    addon_file!("tests_menu.gd.uid"),
 ];
 
-/// Writes the addon's files that are missing or differ from this gdsuite's.
-/// Returns how many it wrote: 0 when the project has this version already.
-pub fn install(project_root: &Path) -> Result<usize> {
-    let mut written = 0;
+/// Where gdsuite keeps a copy of each addon file as it wrote it, to tell a
+/// file someone changed from one an older gdsuite wrote.
+const WRITTEN_COPY_DIR: &str = ".gdsuite/state/editor-addon";
+
+/// What `install` did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Installed {
+    /// Files written: 0 when the project has this version already.
+    pub written: usize,
+    /// Files that differ from what gdsuite wrote, kept as they are.
+    pub kept: Vec<PathBuf>,
+}
+
+/// Writes the addon's files that are missing, or that an older gdsuite wrote
+/// and nobody changed since. A file someone changed is kept.
+pub fn install(project_root: &Path) -> Result<Installed> {
+    let mut installed = Installed::default();
     for (relative, contents) in FILES {
         let path = project_root.join(relative);
-        if fs::read_to_string(&path).is_ok_and(|existing| existing == *contents) {
-            continue;
+        let written_copy = project_root.join(WRITTEN_COPY_DIR).join(relative);
+        match fs::read_to_string(&path) {
+            Ok(existing) if existing == *contents => {
+                if !written_copy.exists() {
+                    write(&written_copy, contents)?;
+                }
+                continue;
+            }
+            Ok(existing) => {
+                let as_written = fs::read_to_string(&written_copy).ok();
+                if as_written.as_deref() != Some(existing.as_str()) {
+                    installed.kept.push(path);
+                    continue;
+                }
+            }
+            Err(_) => {}
         }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        fs::write(&path, contents)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        written += 1;
+        write(&path, contents)?;
+        write(&written_copy, contents)?;
+        installed.written += 1;
     }
-    Ok(written)
+    Ok(installed)
+}
+
+fn write(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
 /// Whether the project has the addon, in any version.
@@ -62,11 +104,34 @@ mod tests {
     #[test]
     fn installs_once_then_changes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(install(dir.path()).unwrap(), FILES.len());
-        assert_eq!(install(dir.path()).unwrap(), 0);
+        assert_eq!(install(dir.path()).unwrap().written, FILES.len());
+        assert_eq!(install(dir.path()).unwrap(), Installed::default());
         assert!(is_installed(dir.path()));
+    }
 
-        fs::write(dir.path().join("addons/gdsuite/plugin.gd"), "edited").unwrap();
-        assert_eq!(install(dir.path()).unwrap(), 1);
+    #[test]
+    fn replaces_what_an_older_gdsuite_wrote_but_keeps_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        install(dir.path()).unwrap();
+        let plugin = dir.path().join("addons/gdsuite/plugin.gd");
+        let runner = dir.path().join("addons/gdsuite/runner.gd");
+        // As an older gdsuite would have written it, and recorded it.
+        fs::write(&plugin, "old").unwrap();
+        fs::write(
+            dir.path()
+                .join(WRITTEN_COPY_DIR)
+                .join("addons/gdsuite/plugin.gd"),
+            "old",
+        )
+        .unwrap();
+        // Changed by hand.
+        fs::write(&runner, "mine").unwrap();
+
+        let installed = install(dir.path()).unwrap();
+
+        assert_eq!(installed.written, 1);
+        assert_eq!(installed.kept, vec![runner.clone()]);
+        assert_ne!(fs::read_to_string(&plugin).unwrap(), "old");
+        assert_eq!(fs::read_to_string(&runner).unwrap(), "mine");
     }
 }
