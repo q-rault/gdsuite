@@ -164,6 +164,7 @@ fn setup_impl(
     output.step("writing gdsuite config");
     GdsuiteConfig::write_if_missing(&context.config_path, None)?;
     tooling::ensure_gitignored(context)?;
+    tooling::ensure_marked_generated(context)?;
     let config = tooling::load_config(context)?;
     if args.sync_product_configs {
         output.warn(
