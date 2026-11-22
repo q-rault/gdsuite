@@ -5,7 +5,7 @@ manifest_version = 1
 # The tools are built into gdsuite: `tested` is the version each one has.
 [tools.gdtest]
 acquire = { kind = "bundled" }
-tested = "==0.2.8"
+tested = "==0.2.9"
 
 [tools.gdhealth]
 acquire = { kind = "bundled" }
@@ -20,7 +20,7 @@ acquire = { kind = "bundled" }
 tested = "==0.3.4"
 
 [contracts.gdtest]
-required_harness = "==0.2.8"
+required_harness = "==0.2.9"
 
 [contracts.gdhealth]
 required_schema_version = 1

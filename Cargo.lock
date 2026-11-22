@@ -327,9 +327,9 @@ dependencies = [
 
 [[package]]
 name = "gdtest"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cafa64ba8569271018f6d13a4fa5f2ac1f432afe1f3d9130b7c19fca6a6ab69c"
+checksum = "dd04153bae7934582d6622447dee5e298b91a3d115201bf17b6568c790d94d83"
 dependencies = [
  "anyhow",
  "clap",
@@ -348,14 +348,15 @@ dependencies = [
 
 [[package]]
 name = "gdtest-analysis"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb24232428a2fe5d5012dc9ab48d2b1123c88883171cb296815c784f07661bf7"
+checksum = "01235de39bc4d12c28be78c5145e534a24da1c0ddc5f071ec9b0c557add57acb"
 dependencies = [
  "anyhow",
  "gdsyntax",
  "regex",
  "serde",
+ "serde_json",
  "walkdir",
 ]
 

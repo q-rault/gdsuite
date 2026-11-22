@@ -9,10 +9,10 @@ checked, and what is left.
 | PR | Branch | Base | What | State |
 |---|---|---|---|---|
 | #20 | `editor-panel` | `main` | Phase 1: the addon, Check, Problems dock, gutter markers, formatting, settings | Open, CI green |
-| #21 | `editor-tests` | `editor-panel` | Phase 2: the Tests dock, gutter ▶, FileSystem "Run Tests", rerun on save, retiring `gdtest_editor` | Open, stacked on #20 |
+| #21 | `editor-tests` | `editor-panel` | Phase 2: the Tests dock, gutter ▶, FileSystem "Run Tests", Watch, status icons, retiring `gdtest_editor` | Open, stacked on #20 |
 | #22 | `auto/pin-tools` | `main` | The automatic bump to gdtest 0.2.8 | Open |
 
-Merge #20 first, then retarget #21 to `main`. #21 already pins gdtest 0.2.8
+Merge #20 first, then retarget #21 to `main`. #21 already pins gdtest 0.2.9
 (`Cargo.toml` and `.gdsuite-release.toml`), so #22 is redundant once #21 is
 in; close it or let it rebase to nothing. Releases are made by hand (see
 [RELEASING](../RELEASING.md)); nothing is released from these branches yet.
@@ -36,9 +36,25 @@ in; close it or let it rebase to nothing. Releases are made by hand (see
   `.gdsuite/backups/gdtest_editor`, removed, and taken out of project.godot's
   enabled plugins. A modified copy is left alone with a warning. See
   `retire_gdtest_editor_addon` in `src/tooling.rs`.
-- Rerun on save: setting `gdsuite/on_save/run_tests`, project key
-  `[editor] run_tests_on_save`, off by default. The dock's "Rerun on save"
-  switch is the same setting.
+- Watch (once called "rerun on save"): setting `gdsuite/on_save/run_tests`,
+  project key `[editor] run_tests_on_save`, off by default. The dock's
+  **Watch** button is the same setting. On save, the dock asks
+  `gdtest --list --affected-by <file>` which tests the file reaches; Watch
+  runs them, and with Watch off they are marked to run (🕑). If gdtest fails,
+  the dock falls back to the saved script's own tests.
+- Status icons in the editor's top bar: Check (grey until run, then green,
+  yellow for warnings, red for errors) and Tests (grey when not run or some
+  tests are to run, red on a failure, green when all pass).
+- Tests toolbar, after VS Code's Testing view, JetBrains and Vitest UI:
+  Run all (Stop while running), Run failed (n), Watch, Search tests, the
+  ✖/✔/🕑 counts as filters, Collapse all, a progress bar and
+  "Running x / y". A ▶ on each row runs it; the Time title sorts by duration.
+  The tree is updated in place, so order and folding stay put during a run.
+- Problems shows format findings too (`gdsuite fmt -- --check --format
+  json`). Columns in both docks can be resized (`column_resizer.gd`); widths
+  are kept in the editor's project metadata.
+- Both docks set `auto_translate_mode` to disabled: Godot otherwise
+  translated words it knows ("Stop", "Time") into the editor language.
 - The Tests dock runs gdtest with the editor's own Godot
   (`--godot-exe OS.get_executable_path()`), `--no-auto-import` and
   `--reporter json`, and passes targets (`res://` folders, files,
@@ -54,6 +70,20 @@ Shipped in gdtest 0.2.8 (q-rault/gdtest#16, released):
   `--reporter json` it goes through the pool, so the dock gets JSON events.
 
 The workarounds the dock had for both were removed in da806ff.
+
+Shipped in gdtest 0.2.9 (q-rault/gdtest#17, released), for Watch:
+
+- A dependency graph (scripts, scenes, resources, `class_name`, autoloads,
+  uids, folders) maps a changed file to the test files that reach it:
+  `--affected-by <FILE>`, also used by `--watch` and `--changed-only`.
+  `project.godot`, `gdtest.toml`, autoloads and `addons/gdtest/` run
+  everything.
+- Workers report the scenes and scripts each test file adds to the tree;
+  gdtest keeps them in `.godot/gdtest/uses.json` and adds them to the graph,
+  so a `load()` with a computed path no longer makes a test run on every
+  change once it has been seen. `# gdtest: loads res://…` covers the rest.
+- On the 379-test game: a changed script reruns a median 13 of 52 test files
+  (39% of test time), against 43 with the static graph alone.
 
 ## Things worth knowing
 
@@ -80,22 +110,30 @@ The workarounds the dock had for both were removed in da806ff.
   Rechecked after the gdtest 0.2.8 change.
 - A real game project (379 tests), cleaned of the old gdsuite setup
   (`[tools]` pins, `.gdsuite/`, `addons/gdtest_editor`) and set up with this
-  branch: `gdsuite setup` upgraded `addons/gdtest` from 0.2.1 to 0.2.8 and
+  branch: `gdsuite setup` upgraded `addons/gdtest` from 0.2.1 to 0.2.8 (0.2.9
+  since) and
   installed `addons/gdsuite`. `gdsuite test` and the headless editor dock gave
   the same results; the few failures there exist on its main branch with the
   old gdtest too.
 
+- The windowed editor on 4.7, by hand on the game: docks, gutter ▶, Run
+  Tests, Shift+Alt+F. Feedback from that round (highlighting, status icons,
+  folding during runs, column widths, durations, live progress, format in
+  Problems) went into 1a7d918, checked in a windowed probe with screenshots.
+- Launchers in `.gdsuite/` were sometimes left empty when two setups ran at
+  once; they are now replaced atomically (`refresh_link_to` in
+  `src/bundled.rs`, with a test that failed before).
+
 ## Not checked yet
 
-- The windowed editor by hand: how the docks look, clicking the gutter ▶,
-  FileSystem "Run Tests", the Check button, Shift+Alt+F, Rerun on save while
-  typing.
+- A second hands-on pass on the reworked Tests dock and Watch, after
+  `gdsuite setup` with the 0.2.9 build.
 - Godot 4.8, and the 4.5 bottom-panel fallback in a window.
 - macOS and Linux beyond CI.
 
 ## Next steps
 
-1. Try the windowed editor on 4.7 (and 4.8), fix what turns up on #21.
+1. Try the reworked dock on 4.7 (and 4.8), fix what turns up on #21.
 2. Merge #20, retarget and merge #21, close #22.
 3. Release gdsuite by hand.
 4. Phase 3 (Health dock) waits on deciding its content; phase 4 is the
