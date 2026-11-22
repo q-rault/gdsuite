@@ -26,6 +26,8 @@ const Settings = preload("settings.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
+const DetailsPane = preload("details_pane.gd")
+const Folding = preload("folding.gd")
 
 ## The columns, by name, in their order. The message is always shown: it is
 ## the one that takes the room the others leave.
@@ -94,7 +96,7 @@ var _unchecked := {}
 ## Scripts the user folded. Nothing else folds or unfolds them.
 var _folded := {}
 var _current_script := ""
-## When a check last reported, in msec, for "Checked 12 s ago".
+## When a check last reported, in msec, for "Checked 3 min ago".
 var _checked_msec := 0
 ## What went wrong with the last check, shown until the next one reports.
 var _note := ""
@@ -107,8 +109,9 @@ var _warnings_button: Button
 var _source_buttons := {}
 ## source -> [errors Label, warnings Label, spinner] on its filter.
 var _source_counts := {}
-var _project_button: Button
 var _current_only: Button
+## Folds every script, or unfolds them all once all are folded.
+var _fold_button: Button
 var _check_button: Button
 var _check_icon: Texture2D
 var _settings_menu: MenuButton
@@ -116,6 +119,7 @@ var _columns_menu: PopupMenu
 var _context_menu: PopupMenu
 var _context_problem := {}
 var _details: RichTextLabel
+var _pane: DetailsPane
 var _actions: HBoxContainer
 ## The shown columns, in order, and column name -> index in the tree.
 var _shown: Array = []
@@ -153,15 +157,17 @@ func _ready() -> void:
 	)
 	bar.add_child(VSeparator.new())
 	# One of two: the whole project, or the script being edited.
-	var scope := ButtonGroup.new()
-	_project_button = Ui.toggle(bar, "Project", "List the problems of every script", true, _rebuild)
-	_current_only = Ui.toggle(
-		bar, "Current", "Only list the script you're editing", false, _rebuild
+	var scope := Ui.switch(
+		bar,
+		[
+			["Project", "", "List the problems of every script"],
+			["Current", "Script", "Only list the script you're editing"],
+		],
+		0,
+		func(_index: int) -> void: _rebuild()
 	)
-	_current_only.icon = Ui.icon("Script")
-	_project_button.button_group = scope
-	_current_only.button_group = scope
-	Ui.button(bar, "CollapseTree", "", "Fold every script", _fold_all)
+	_current_only = scope[1]
+	_fold_button = Ui.button(bar, "CollapseTree", "", "Fold every script", _fold_all)
 
 	_status = Label.new()
 	_status.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -189,9 +195,6 @@ func _ready() -> void:
 	_settings_menu.get_popup().add_child(_columns_menu)
 	bar.add_child(_settings_menu)
 
-	var split := VSplitContainer.new()
-	split.size_flags_vertical = SIZE_EXPAND_FILL
-	add_child(split)
 	_tree = Tree.new()
 	_tree.size_flags_vertical = SIZE_EXPAND_FILL
 	_tree.hide_root = true
@@ -207,14 +210,11 @@ func _ready() -> void:
 	_tree.empty_clicked.connect(func(_p: Vector2, _b: int) -> void: _deselect())
 	_tree.gui_input.connect(_on_tree_input)
 	_tree.mouse_exited.connect(func() -> void: _hover(null))
-	split.add_child(_tree)
 	_resizer.resized.connect(func(_column: int) -> void: _layout())
 
 	# The problem selected, as in the Tests dock: all of it, then what can be
 	# done about it.
 	var details := VBoxContainer.new()
-	details.custom_minimum_size = Vector2(0, Ui.DETAILS_HEIGHT * EditorInterface.get_editor_scale())
-	split.add_child(details)
 	_details = RichTextLabel.new()
 	_details.bbcode_enabled = true
 	_details.selection_enabled = true
@@ -225,6 +225,8 @@ func _ready() -> void:
 	details.add_child(_details)
 	_actions = HBoxContainer.new()
 	details.add_child(_actions)
+	_pane = DetailsPane.new(_tree, details, _details, "problems_details")
+	add_child(_pane)
 
 	_context_menu = PopupMenu.new()
 	_context_menu.id_pressed.connect(_on_action)
@@ -235,7 +237,7 @@ func _ready() -> void:
 	_spinner.timeout.connect(_on_spinner)
 	add_child(_spinner)
 	_clock = Timer.new()
-	_clock.wait_time = 1.0
+	_clock.wait_time = 5.0
 	_clock.timeout.connect(_update_status)
 	add_child(_clock)
 	_clock.start()
@@ -532,6 +534,7 @@ func _rebuild() -> void:
 	_update_counts()
 	_update_status()
 	_show_details()
+	_update_fold_button()
 
 
 ## The scripts listed, in order: the one being edited, then those with
@@ -751,7 +754,7 @@ func _copy(problem: Dictionary) -> void:
 
 
 func _on_tree_input(event: InputEvent) -> void:
-	Ui.fold_on_click(_tree, event)
+	Folding.on_click(_tree, event)
 	if event is InputEventMouseMotion:
 		_hover(_tree.get_item_at_position(event.position))
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
@@ -770,6 +773,7 @@ func _on_button_clicked(item: TreeItem, _column: int, id: int, _mouse_button: in
 
 
 func _on_item_collapsed(item: TreeItem) -> void:
+	_update_fold_button.call_deferred()
 	if item.get_meta("kind", "") != ROW_FILE:
 		return
 	var path: String = item.get_metadata(0).file
@@ -780,9 +784,19 @@ func _on_item_collapsed(item: TreeItem) -> void:
 
 
 func _fold_all() -> void:
-	for item in _tree.get_root().get_children():
-		if item.get_meta("kind") == ROW_FILE:
-			item.collapsed = true
+	Folding.toggle_all(_scripts())
+	_update_fold_button()
+
+
+func _update_fold_button() -> void:
+	Folding.show_state(_fold_button, _scripts())
+
+
+## The rows of the scripts listed.
+func _scripts() -> Array:
+	return _tree.get_root().get_children().filter(
+		func(item: TreeItem) -> bool: return item.get_meta("kind") == ROW_FILE
+	)
 
 
 func _on_item_activated() -> void:
@@ -827,6 +841,7 @@ func _show_details() -> void:
 	if item == null:
 		var dim := Ui.faded(Ui.text_color()).to_html()
 		_details.text = "[color=#%s]%s[/color]" % [dim, NO_SELECTION]
+		_pane.refresh_summary()
 		return
 	var problem: Dictionary = item.get_metadata(0)
 	var dim := Ui.faded(Ui.text_color()).to_html()
@@ -846,6 +861,7 @@ func _show_details() -> void:
 		_:
 			_details.text = Problem.details(problem)
 	_context_problem = problem
+	_pane.refresh_summary()
 	for action: Array in _actions_for(item):
 		Ui.button(_actions, "", action[0], "", _on_action.bind(action[1]))
 
@@ -909,27 +925,9 @@ func _update_counts() -> void:
 
 ## "Checking…", what went wrong, or how long ago the last check reported.
 func _update_status() -> void:
-	if not is_instance_valid(_status):
-		return
-	if _note != "":
-		Ui.set_status(_status, _note)
-		_status.tooltip_text = _note
-		return
-	_status.tooltip_text = ""
-	if not _running.is_empty():
-		Ui.set_status(_status, "Checking…")
-	elif _checked_msec == 0:
-		Ui.set_status(_status, "")
-	else:
-		var seconds := (Time.get_ticks_msec() - _checked_msec) / 1000
-		if seconds < 5:
-			Ui.set_status(_status, "Checked just now")
-		elif seconds < 60:
-			Ui.set_status(_status, "Checked %d s ago" % seconds)
-		elif seconds < 3600:
-			Ui.set_status(_status, "Checked %d min ago" % (seconds / 60))
-		else:
-			Ui.set_status(_status, "Checked %d h ago" % (seconds / 3600))
+	if is_instance_valid(_status):
+		var checking := not _running.is_empty()
+		Ui.set_status(_status, _note if _note != "" else Problem.status(checking, _checked_msec))
 
 
 func _on_spinner() -> void:

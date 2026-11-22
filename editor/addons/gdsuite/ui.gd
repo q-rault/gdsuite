@@ -8,8 +8,6 @@ const FONT_SCALE := 0.9
 const OFF_ALPHA := 0.4
 ## Secondary text in a row (a location already shown above, a duration).
 const FADED_ALPHA := 0.55
-## Height of the details below a list: a few lines, and a row of buttons.
-const DETAILS_HEIGHT := 110
 
 
 ## A toolbar toggle: on, it looks like any button; off, it is faded. The
@@ -39,19 +37,26 @@ static func toggle(
 	return button
 
 
-## A filter of the toolbar: an optional icon, an optional name, then a count
-## in a colour of its own (see `show_count`). With an icon, leave the name
-## out: the tooltip says it, and the toolbar stays compact. The count's Label
-## is the button's "count" meta; `add_count` adds another, `add_spinner` a
-## spinner.
+## A filter of the toolbar, as the Output dock's: on, it has the pressed
+## background; off, none, and faded. It shows an optional icon, an optional
+## name, then a count in a colour of its own (see `show_count`). With an icon,
+## leave the name out: the tooltip says it, and the toolbar stays compact. The
+## count's Label is the button's "count" meta; `add_count` adds another,
+## `add_spinner` a spinner.
 static func counted_toggle(
 	bar: Container, icon: Texture2D, text: String, tooltip: String, toggled: Callable
 ) -> Button:
-	var button := toggle(bar, "", tooltip, true, toggled)
+	var button := Button.new()
+	button.toggle_mode = true
+	button.button_pressed = true
+	button.theme_type_variation = &"EditorLogFilterButton"
+	button.focus_mode = Control.FOCUS_NONE
+	button.tooltip_text = tooltip
+	bar.add_child(button)
 	var box := HBoxContainer.new()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var scale := EditorInterface.get_editor_scale()
-	box.add_theme_constant_override("separation", roundi(3 * scale))
+	box.add_theme_constant_override("separation", roundi(2 * scale))
 	if icon != null:
 		var picture := TextureRect.new()
 		picture.texture = icon
@@ -59,29 +64,71 @@ static func counted_toggle(
 		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(picture)
 	if text != "":
-		var name_label := Label.new()
+		var name_label := _tight_label()
 		name_label.text = text
-		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(name_label)
 	button.add_child(box)
 	button.set_meta("box", box)
 	button.set_meta("count", add_count(button))
-	var style := button.get_theme_stylebox("normal")
-	var margin := Vector2(roundi(3 * scale), style.get_margin(SIDE_TOP))
+	button.toggled.connect(
+		func(pressed: bool) -> void:
+			box.modulate.a = 1.0 if pressed else OFF_ALPHA
+			toggled.call()
+	)
+	var margin := Vector2(roundi(5 * scale), roundi(2 * scale))
+	# In the middle of the button, which the toolbar's row may make taller.
 	var fit := func() -> void:
 		var size := box.get_combined_minimum_size()
-		box.position = margin
 		box.size = size
+		box.position = ((button.size - size) / 2).round()
 		button.custom_minimum_size = size + margin * 2
 	box.minimum_size_changed.connect(fit)
+	button.resized.connect(fit)
 	fit.call()
 	return button
 
 
+## One choice of a few, as one control: buttons side by side on a shared
+## background, the chosen one pressed. `choices` are [text, icon name,
+## tooltip]; `changed` is called with the index chosen.
+static func switch(bar: Container, choices: Array, chosen: int, changed: Callable) -> Array[Button]:
+	var frame := PanelContainer.new()
+	var background := StyleBoxFlat.new()
+	background.bg_color = text_color()
+	background.bg_color.a = 0.06
+	background.set_corner_radius_all(roundi(4 * EditorInterface.get_editor_scale()))
+	frame.add_theme_stylebox_override("panel", background)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 0)
+	frame.add_child(row)
+	bar.add_child(frame)
+	var group := ButtonGroup.new()
+	var buttons: Array[Button] = []
+	for index in choices.size():
+		var choice: Array = choices[index]
+		var button := Button.new()
+		button.toggle_mode = true
+		button.button_group = group
+		button.button_pressed = index == chosen
+		button.theme_type_variation = &"EditorLogFilterButton"
+		button.focus_mode = Control.FOCUS_NONE
+		button.text = choice[0]
+		button.icon = icon(choice[1])
+		button.tooltip_text = choice[2]
+		button.pressed.connect(changed.bind(index))
+		# The choice not made is faded, as a filter that is off.
+		button.modulate.a = 1.0 if index == chosen else FADED_ALPHA
+		button.toggled.connect(
+			func(pressed: bool) -> void: button.modulate.a = 1.0 if pressed else FADED_ALPHA
+		)
+		row.add_child(button)
+		buttons.append(button)
+	return buttons
+
+
 ## Another count, after the others, on a `counted_toggle`.
 static func add_count(button: Button) -> Label:
-	var count := Label.new()
-	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var count := _tight_label()
 	count.visible = false
 	(button.get_meta("box") as HBoxContainer).add_child(count)
 	return count
@@ -159,31 +206,6 @@ static func toolbar() -> HFlowContainer:
 	return bar
 
 
-## From a Tree's `gui_input`: a click on a row that has rows under it (a
-## script), past its arrow, folds or unfolds it, as the arrow does. Not with
-## Shift or Ctrl held: those select. A double-click opens the script and
-## leaves it as it was.
-static func fold_on_click(tree: Tree, event: InputEvent) -> void:
-	var click := event as InputEventMouseButton
-	if click == null or not click.pressed or click.button_index != MOUSE_BUTTON_LEFT:
-		return
-	if click.shift_pressed or click.ctrl_pressed or click.meta_pressed:
-		return
-	var item := tree.get_item_at_position(click.position)
-	if item == null or item.get_child_count() == 0:
-		return
-	# The arrow folds it already: it is in the indent before the row's text.
-	var depth := 0
-	var parent := item.get_parent()
-	while parent != null and parent != tree.get_root():
-		depth += 1
-		parent = parent.get_parent()
-	if click.position.x < (depth + 1) * tree.get_theme_constant("item_margin"):
-		return
-	var fold := func() -> void: item.collapsed = not item.collapsed
-	fold.call_deferred()
-
-
 static func error_color() -> Color:
 	return EditorInterface.get_editor_theme().get_color("error_color", "Editor")
 
@@ -232,6 +254,14 @@ static func register_shortcut(name: String, keycode: Key, shift: bool) -> Shortc
 	if settings.has_method("add_shortcut"):
 		settings.call("add_shortcut", name, shortcut)
 	return shortcut
+
+
+## A Label without the theme's padding: a count sits close to its name.
+static func _tight_label() -> Label:
+	var label := Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	return label
 
 
 ## Fills `bar` green, or red once a test failed.

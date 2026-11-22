@@ -57,8 +57,9 @@ v enemies/glow.gdshader    1 ×
 ```
 
 The script you're editing comes first, then the scripts with errors, then the
-others. Click a script to fold or unfold its problems, or fold them all with
-the button next to **Current**. Each problem says:
+others. Click a script to fold or unfold its problems. The button next to
+**Current** folds them all, and once all are folded, unfolds them all. Each
+problem says:
 
 - whether it's an **error** or a **warning**: its line is red (×) or
   yellow (⚠);
@@ -83,8 +84,8 @@ script listed for other problems also says it is "not formatted".
   Settings → Shortcuts**; the command palette has **Next Problem** and
   **Previous Problem**.
 - **Double-click** a problem to open the script at its line.
-- **Select** a problem to see, under the list, all of its message, what its
-  code means, and buttons for what can be done: **Open**, **Fix** (a lint
+- **Select** a problem to see, in the details under the list, all of its
+  message, what its code means, and buttons for what can be done: **Open**, **Fix** (a lint
   problem that can be fixed), **Ignore on this line**, **Turn off** its rule
   for the whole project (written in `gdsuite.toml`), **What does it mean?**,
   and **Copy**. **Right-click** shows the same actions. Click on empty space,
@@ -94,26 +95,38 @@ script listed for other problems also says it is "not formatted".
 
 ### Filter
 
+The filters look like the Output dock's: one that is on has a background,
+one that is off is faded.
+
 - The error and warning icons count what the project has (hover one for its
-  name), and hide or show those problems; a filter that is off is faded.
+  name), and hide or show those problems.
 - **Format**, **Lint** and **Compile** count what each tool found, errors in
   red and warnings in yellow, and hide or show its problems. While a tool
   checks, a spinner turns next to its name.
-- **Project** or **Current**: the whole project, or the script you're
-  editing.
+- **Project | Current**: the whole project, or only the script you're
+  editing. The one not chosen is faded.
 
 ### Is it up to date?
 
-- The bar says when the last check reported: "Checked 12 s ago".
+- The bar says when the last check reported, in minutes: "Checked <1 min
+  ago", "Checked 3 min ago".
 - A script you edited since it was checked has its problems faded, and says
   "edited since checked", until it's checked again when you save.
 - **Check** looks at the whole project again: format, lint and compile.
-- The dock's title counts the problems: **Problems 8**, in red when one is an
-  error, in yellow when they're all warnings. It shows a green **Problems ✓**
-  when every check reported nothing on what your scripts hold now.
+- A dot before the dock's name says where the project stands, as the Output
+  dock's does: red when there is an error, yellow when there are only
+  warnings, green when every check reported nothing on what your scripts hold
+  now, and grey before the first check, or while one runs.
 
 When the dock is narrow, its buttons go on two lines rather than widening
 the bottom panel.
+
+### The details
+
+The details of the selected problem are under the list. The buttons in
+their corner fold them to one line, which still says what is selected (click
+it to unfold them), and put them beside the list, or back under it. The Tests
+dock's details do the same. Both are kept for the project.
 
 Drag the edge of the **Line** or **Code and tool** column to resize it;
 **⚙ → Columns** shows or hides each column and resets the widths. Both are
@@ -178,8 +191,8 @@ from the folder in `[commands] default_test_target`.
 - **Search tests** keeps the tests whose name or script matches.
 - The ✗ (in red), ✓ (in green) and clock icons count the tests that failed,
   passed, and are to run (hover one for its name); click one to hide those
-  tests, or show them again. "To run"
-  are the tests not run yet, and those whose scripts changed since they ran.
+  tests, or show them again, as in the Problems dock. "To run" are the tests
+  not run yet, and those whose scripts changed since they ran.
 - Select a test that failed to read why, under the list: what each assertion
   expected and got, **at** which line (click it to open the script there),
   that line of code, and the test's local variables then. Click the test's
@@ -193,10 +206,11 @@ Each test shows where it is: a clock while it waits, a spinner while it runs,
 then its result. A test that failed is red; a test that has not run, or
 whose script changed since it ran, is faded. After a run, the scripts with a
 test that failed are unfolded. Otherwise the list keeps its order, and what
-you unfolded stays unfolded; click a script to fold or unfold it. When Watch
-starts a run, the bar says why: "affected by hud.gd". The dock's title counts
-the tests that failed, in red: **Tests ✗ 1**. It shows a green **Tests ✓** when
-every test passed with the code as it is now, none left to run.
+you unfolded stays unfolded; click a script to fold or unfold it, or fold
+them all, and unfold them all, with the button next to the search. When Watch
+starts a run, the bar says why: "affected by hud.gd". A dot before the dock's
+name is red when a test failed, green when every test passed with the code as
+it is now, none left to run, and grey otherwise.
 
 The **Time** column shows how long each test took, and each script the time
 of its tests; under a millisecond, nothing. Click its title to put the

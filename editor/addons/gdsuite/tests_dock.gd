@@ -22,6 +22,8 @@ const Result = preload("test_result.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
+const DetailsPane = preload("details_pane.gd")
+const Folding = preload("folding.gd")
 
 
 ## What the toolbar shows for the tests, from `state()`.
@@ -98,6 +100,7 @@ var _sort_by_time := false
 var _tree: Tree
 var _resizer := ColumnResizer.new()
 var _details: RichTextLabel
+var _pane: DetailsPane
 var _status: Label
 var _filter: LineEdit
 ## Runs every test, or stops the tests while they run.
@@ -173,9 +176,6 @@ func _ready() -> void:
 	_progress.visible = false
 	add_child(_progress)
 
-	var split := VSplitContainer.new()
-	split.size_flags_vertical = SIZE_EXPAND_FILL
-	add_child(split)
 	_tree = Tree.new()
 	_tree.size_flags_vertical = SIZE_EXPAND_FILL
 	_tree.hide_root = true
@@ -200,10 +200,8 @@ func _ready() -> void:
 	_tree.item_collapsed.connect(_on_item_collapsed)
 	_tree.button_clicked.connect(_on_row_button)
 	_tree.column_title_clicked.connect(_on_title_clicked)
-	split.add_child(_tree)
 	_resizer.attach(_tree, "tests_columns", { COLUMN_TIME: Result.time_width() })
 	_details = RichTextLabel.new()
-	_details.custom_minimum_size.y = Ui.DETAILS_HEIGHT * EditorInterface.get_editor_scale()
 	_details.selection_enabled = true
 	_details.bbcode_enabled = true
 	# As in the Problems dock: what failed, at the size of the list; a test's
@@ -219,7 +217,9 @@ func _ready() -> void:
 			else:
 				open_requested.emit(link.get_slice("::", 0), link.get_slice("::", 1))
 	)
-	split.add_child(_details)
+	_pane = DetailsPane.new(_tree, _details, _details, "tests_details")
+	add_child(_pane)
+	_show_details()
 
 	_context_menu = PopupMenu.new()
 	_context_menu.id_pressed.connect(_on_context_menu)
@@ -634,7 +634,7 @@ func _hover(item: TreeItem) -> void:
 
 
 func _on_tree_input(event: InputEvent) -> void:
-	Ui.fold_on_click(_tree, event)
+	Folding.on_click(_tree, event)
 	if event is InputEventMouseMotion:
 		_hover(_tree.get_item_at_position(event.position))
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
@@ -657,11 +657,18 @@ func _on_title_clicked(column: int, _mouse_button: int) -> void:
 
 
 func _collapse_all() -> void:
-	_unfolded.clear()
 	_building = true
-	for file: String in _file_items:
-		_file_items[file].collapsed = true
+	var folded := Folding.toggle_all(_file_items.values())
 	_building = false
+	_unfolded.clear()
+	if not folded:
+		for file: String in _file_items:
+			_unfolded[file] = true
+	_update_fold_button()
+
+
+func _update_fold_button() -> void:
+	Folding.show_state(_collapse, _file_items.values())
 
 
 # --- Showing ------------------------------------------------------------------
@@ -718,6 +725,7 @@ func _rebuild() -> void:
 			file_item.select(COLUMN_TEST)
 	_building = false
 	_refresh_items()
+	_update_fold_button()
 
 
 ## Shows every test's state in the tree as it is, without rebuilding it.
@@ -848,6 +856,7 @@ func _show_details() -> void:
 	var item := _tree.get_selected()
 	if item == null:
 		_details.text = "[color=#%s]%s[/color]" % [dim, NO_SELECTION]
+		_pane.refresh_summary()
 		return
 	var meta: Dictionary = item.get_metadata(0)
 	var lines := PackedStringArray()
@@ -864,12 +873,13 @@ func _show_details() -> void:
 	if lines.is_empty():
 		var result: Dictionary = _results.get(Result.key(meta.file, meta.name), {})
 		var what := Result.describe(result.get("status", Result.STATUS_IDLE)) if meta.name != "" \
-				else "%d tests" % names.size()
+				else "%d test%s" % [names.size(), "" if names.size() == 1 else "s"]
 		lines.append("[color=#%s]%s · %s[/color]" % [dim, meta.file, what])
 	elif without_locals and not ProjectSettings.get_setting(LOCALS_SETTING, false):
 		lines.append("")
 		lines.append("[color=#%s]%s[/color]" % [dim, LOCALS_HINT])
 	_details.text = "\n".join(lines)
+	_pane.refresh_summary()
 
 
 func update_status() -> void:
@@ -936,6 +946,7 @@ func _on_spinner() -> void:
 
 
 func _on_item_collapsed(item: TreeItem) -> void:
+	_update_fold_button.call_deferred()
 	if _building:
 		return
 	var meta: Variant = item.get_metadata(0)
