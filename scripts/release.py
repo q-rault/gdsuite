@@ -12,6 +12,7 @@ import sys
 
 SEMVER_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+PLUGIN_CFG = "editor/addons/gdsuite/plugin.cfg"
 
 
 def read(path: str) -> str:
@@ -51,13 +52,20 @@ def suite_version() -> str:
     return match.group(1)
 
 
+def plugin_version() -> str:
+    """The version of the editor addon, which Godot shows in Project Settings → Plugins."""
+    match = re.search(r'^version="([^"]+)"', read(PLUGIN_CFG), re.MULTILINE)
+    if match is None:
+        raise SystemExit(f"ERROR: failed to read version from {PLUGIN_CFG}")
+    return match.group(1)
+
+
 def check_version_sync() -> None:
     expected = cargo_version()
-    if suite_version() != expected:
-        sys.stderr.write(
-            f"ERROR: .gdsuite-release.toml [suite] version {suite_version()} does not match Cargo.toml {expected}\n"
-        )
-        raise SystemExit(1)
+    for name, version in ((".gdsuite-release.toml [suite]", suite_version()), (PLUGIN_CFG, plugin_version())):
+        if version != expected:
+            sys.stderr.write(f"ERROR: {name} version {version} does not match Cargo.toml {expected}\n")
+            raise SystemExit(1)
 
 
 def bump(version: str) -> None:
@@ -65,6 +73,7 @@ def bump(version: str) -> None:
     print(f"bumping to {version}")
     replace("Cargo.toml", r'^(version\s*=\s*)"[^"]+"', f'\\g<1>"{version}"')
     replace(".gdsuite-release.toml", r'^(\[suite\]\s*\nversion\s*=\s*)"[^"]+"', f'\\g<1>"{version}"')
+    replace(PLUGIN_CFG, r'^(version=)"[^"]+"', f'\\g<1>"{version}"')
 
 
 PRE_KINDS = ("alpha", "beta", "rc")
