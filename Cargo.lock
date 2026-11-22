@@ -327,9 +327,9 @@ dependencies = [
 
 [[package]]
 name = "gdtest"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb1ac611f77d49eca9ad6cff82a7874f1f4860c3581ed35c47d238058d7500cd"
+checksum = "59ace6828523cbbd04fee2bd5d52b742b9f3b41252dbdc49629c6787c46e42e0"
 dependencies = [
  "anyhow",
  "clap",
@@ -348,9 +348,9 @@ dependencies = [
 
 [[package]]
 name = "gdtest-analysis"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f338d78694d1f9aa38c3658d6ba96683e7dca2110e7e987d0a874652089fb1c8"
+checksum = "b818193726aa36e5fb5ca4d1196efc87522f907d81a455e0272f2f50834f9db1"
 dependencies = [
  "anyhow",
  "gdsyntax",
