@@ -4,7 +4,7 @@ extends RefCounted
 ## its own, as in the Problems dock, and a light tint of the same colour on
 ## the line. Click the mark to read the problem.
 
-const ProblemsDock = preload("problems_dock.gd")
+const Problem = preload("problem.gd")
 const GUTTER_NAME := "gdsuite_problems"
 
 ## Lines this addon tinted, per CodeEdit, so it never clears Godot's own marks.
@@ -14,8 +14,8 @@ var _tinted := {}
 ## Shows `problems` (of the script `code_edit` holds) in `code_edit`.
 func show(code_edit: CodeEdit, problems: Array) -> void:
 	var gutter := _gutter(code_edit)
-	var error_color := ProblemsDock.severity_color("error")
-	var warning_color := ProblemsDock.severity_color("warning")
+	var error_color := Problem.severity_color("error")
+	var warning_color := Problem.severity_color("warning")
 
 	clear(code_edit)
 	var tinted: Array[int] = []
@@ -30,13 +30,13 @@ func show(code_edit: CodeEdit, problems: Array) -> void:
 	for line: int in by_line:
 		var on_line: Array = by_line[line]
 		var is_error := on_line.any(func(p: Dictionary) -> bool: return p.severity == "error")
-		var mark := ProblemsDock.ERROR_MARK if is_error else ProblemsDock.WARNING_MARK
+		var mark := Problem.ERROR_MARK if is_error else Problem.WARNING_MARK
 		code_edit.set_line_gutter_text(line, gutter, mark)
-		code_edit.set_line_gutter_item_color(line, gutter, error_color if is_error else warning_color)
+		var color := error_color if is_error else warning_color
+		code_edit.set_line_gutter_item_color(line, gutter, color)
 		code_edit.set_line_gutter_clickable(line, gutter, true)
 		code_edit.set_line_gutter_metadata(line, gutter, on_line)
-		var color := error_color if is_error else warning_color
-		color.a = ProblemsDock.TINT_ALPHA
+		color.a = Problem.TINT_ALPHA
 		code_edit.set_line_background_color(line, color)
 		tinted.append(line)
 	_tinted[code_edit.get_instance_id()] = tinted

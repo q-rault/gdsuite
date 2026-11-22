@@ -9,6 +9,8 @@ const Runner = preload("runner.gd")
 const Settings = preload("settings.gd")
 const Markers = preload("markers.gd")
 const ProblemsDock = preload("problems_dock.gd")
+const Problem = preload("problem.gd")
+const Ui = preload("ui.gd")
 const TestsDock = preload("tests_dock.gd")
 const TestsGutter = preload("tests_gutter.gd")
 const TestsMenu = preload("tests_menu.gd")
@@ -41,16 +43,6 @@ const STATE_ERROR := "error"
 const SHORTCUT_FORMAT := "gdsuite/format_script"
 const COMMAND_FORMAT := "gdsuite/format_script"
 const COMMAND_CHECK := "gdsuite/check"
-## How the dock words each kind of change gdtidy reports.
-const FORMAT_CHANGES := {
-	"spacing": "Spaces to add or remove",
-	"blank-lines": "Blank lines to add or remove",
-	"indentation": "Indentation to fix",
-	"trailing-whitespace": "Trailing whitespace to remove",
-	"line-wrapping": "Lines to wrap or join",
-	"quotes": "Quotes to change",
-	"other": "Code to reformat",
-}
 const COMMAND_PROBLEMS := "gdsuite/show_problems"
 const COMMAND_REFRESH := "gdsuite/refresh_problems"
 const COMMAND_RUN_TESTS := "gdsuite/run_all_tests"
@@ -134,7 +126,7 @@ func _enter_tree() -> void:
 
 	_tests = TestsDock.new()
 	_tests.runner = _runner
-	_tests.compile_state = _compile_state
+	_tests.watch.compile_state = _compile_state
 	_tests.results_changed.connect(_show_test_marks)
 	_tests.open_requested.connect(_open_test)
 	_tests.open_line_requested.connect(
@@ -169,10 +161,10 @@ func _enter_tree() -> void:
 	_menu.id_pressed.connect(_on_menu)
 	add_tool_submenu_item("GDSuite", _menu)
 
-	_format_shortcut = _register_shortcut(SHORTCUT_FORMAT, KEY_F, true)
+	_format_shortcut = Ui.register_shortcut(SHORTCUT_FORMAT, KEY_F, true)
 	# Not F8, as in VS Code: Godot stops the running project with it.
-	_next_shortcut = _register_shortcut(SHORTCUT_NEXT_PROBLEM, KEY_F8, false)
-	_previous_shortcut = _register_shortcut(SHORTCUT_PREVIOUS_PROBLEM, KEY_F8, true)
+	_next_shortcut = Ui.register_shortcut(SHORTCUT_NEXT_PROBLEM, KEY_F8, false)
+	_previous_shortcut = Ui.register_shortcut(SHORTCUT_PREVIOUS_PROBLEM, KEY_F8, true)
 	var palette := EditorInterface.get_command_palette()
 	var format_keys := _format_shortcut.get_as_text()
 	palette.add_command("Format Script", COMMAND_FORMAT, _format_current_script, format_keys)
@@ -365,7 +357,7 @@ func _update_titles() -> void:
 		var color := none
 		if total > 0:
 			title += " %d" % total
-			color = ProblemsDock.severity_color("error" if count.errors > 0 else "warning")
+			color = Problem.severity_color("error" if count.errors > 0 else "warning")
 		elif _dock.is_clean():
 			title += " ✓"
 			color = green
@@ -446,12 +438,12 @@ func _format_check(paths: PackedStringArray) -> void:
 		args.append(".")
 	for path in paths:
 		args.append(path.trim_prefix("res://"))
-	_dock.set_running(ProblemsDock.SOURCE_FORMAT, true)
+	_dock.set_running(Problem.SOURCE_FORMAT, true)
 	_runner.run(args, _on_format_check_done.bind(paths))
 
 
 func _on_format_check_done(result: Dictionary, paths: PackedStringArray) -> void:
-	_dock.set_running(ProblemsDock.SOURCE_FORMAT, false)
+	_dock.set_running(Problem.SOURCE_FORMAT, false)
 	if not result.json is Dictionary:
 		_dock.set_status("The format check could not run: " + str(result.output).strip_edges())
 		return
@@ -466,30 +458,11 @@ func _on_format_check_done(result: Dictionary, paths: PackedStringArray) -> void
 			"line": int(first.get("first", 0)),
 			"column": 0,
 			"severity": "warning",
-			"message": _format_message(changes),
+			"message": Problem.format_message(changes),
 			"rule": str(first.get("kind", "not-formatted")),
 			"fixable": true,
 		})
 	_dock.set_format(paths, problems)
-
-
-## What formatting would change, from gdtidy's `changes`: the first change
-## says what, the rest are counted. "Spacing to fix on lines 12–14, and 3
-## more places".
-static func _format_message(changes: Array) -> String:
-	if changes.is_empty():
-		return "Not formatted"
-	var first: Dictionary = changes[0]
-	var what: String = FORMAT_CHANGES.get(str(first.kind), FORMAT_CHANGES.other)
-	var from := int(first.first)
-	var to := int(first.last)
-	var lines := "line %d" % from if from == to else "lines %d–%d" % [from, to]
-	var text := "%s on %s" % [what, lines]
-	if changes.size() == 2:
-		text += ", and 1 more place"
-	elif changes.size() > 2:
-		text += ", and %d more places" % (changes.size() - 1)
-	return text
 
 
 ## Lints `paths` ("res://" paths), or the whole project when it is empty.
@@ -501,16 +474,16 @@ func _lint(paths: PackedStringArray) -> void:
 		args.append(".")
 	for path in paths:
 		args.append(path.trim_prefix("res://"))
-	_dock.set_running(ProblemsDock.SOURCE_LINT, true)
+	_dock.set_running(Problem.SOURCE_LINT, true)
 	_runner.run(args, _on_lint_done.bind(paths))
 
 
 func _on_lint_done(result: Dictionary, paths: PackedStringArray) -> void:
-	_dock.set_running(ProblemsDock.SOURCE_LINT, false)
+	_dock.set_running(Problem.SOURCE_LINT, false)
 	if not result.json is Dictionary:
 		_dock.set_status("Lint could not run: " + str(result.output).strip_edges())
 		return
-	_dock.set_lint(paths, _problems_from(result.json))
+	_dock.set_lint(paths, Problem.from_report(result.json))
 
 
 func _type_check() -> void:
@@ -520,15 +493,15 @@ func _type_check() -> void:
 		_type_check_again = true
 		return
 	_type_check_running = true
-	_dock.set_running(ProblemsDock.SOURCE_TYPES, true)
+	_dock.set_running(Problem.SOURCE_TYPES, true)
 	_runner.run(PackedStringArray(["typecheck", "--report", "json"]), _on_type_check_done)
 
 
 func _on_type_check_done(result: Dictionary) -> void:
 	_type_check_running = false
-	_dock.set_running(ProblemsDock.SOURCE_TYPES, false)
+	_dock.set_running(Problem.SOURCE_TYPES, false)
 	if result.json is Dictionary:
-		var problems := _problems_from(result.json)
+		var problems := Problem.from_report(result.json)
 		# Godot reports lines only: a column would be made up.
 		for problem: Dictionary in problems:
 			problem.column = 0
@@ -538,7 +511,7 @@ func _on_type_check_done(result: Dictionary) -> void:
 	if _type_check_again:
 		_type_check_again = false
 		_type_check()
-	_tests.run_waiting()
+	_tests.watch.run_waiting()
 
 
 ## Whether the script at `path` compiles, for Watch: "pending" while the
@@ -551,25 +524,9 @@ func _compile_state(path: String) -> String:
 		return "pending"
 	var has_error := _dock.problems_for(path).any(
 		func(p: Dictionary) -> bool:
-			return p.source == ProblemsDock.SOURCE_TYPES and p.severity == "error"
+			return p.source == Problem.SOURCE_TYPES and p.severity == "error"
 	)
 	return "errors" if has_error else "clean"
-
-
-## The findings of a `--report json` result, as the dock's problems.
-func _problems_from(report: Dictionary) -> Array:
-	var problems := []
-	for finding: Dictionary in report.get("findings", []):
-		problems.append({
-			"file": "res://" + str(finding.get("file", "")).replace("\\", "/").trim_prefix("./"),
-			"line": int(finding.get("line", 1)),
-			"column": int(finding.get("column", 1)),
-			"severity": str(finding.get("severity", "warning")),
-			"message": str(finding.get("message", "")),
-			"rule": str(finding.get("rule", "")),
-			"fixable": bool(finding.get("fixable", false)),
-		})
-	return problems
 
 
 func _on_problem_action(action: String, problem: Dictionary) -> void:
@@ -644,7 +601,7 @@ func _format_all(paths: Array) -> void:
 			files.append(path)
 	if skipped > 0:
 		_toast("%d script%s with unsaved changes left as they are: save first" % [
-			skipped, "" if skipped == 1 else "s"
+			skipped, "" if skipped == 1 else "s",
 		], true)
 	if files.is_empty():
 		return
@@ -694,7 +651,7 @@ func _show_markers() -> void:
 
 func _on_script_changed(_script: Script) -> void:
 	_dock.set_current_script(_current_script_path())
-	_tests.remember(_current_script_path())
+	_tests.watch.remember(_current_script_path())
 	var code_edit := _current_code_edit()
 	if code_edit != null and not _connected_code_edits.has(code_edit.get_instance_id()):
 		var on_click := _on_gutter_clicked.bind(code_edit)
@@ -792,12 +749,12 @@ func _on_resource_saved(resource: Resource) -> void:
 	if path == "" or path.contains("::"):
 		return
 	if not resource is GDScript:
-		_tests.file_saved(path)
+		_tests.watch.file_saved(path)
 		return
 	if Settings.value(Settings.FORMAT_ON_SAVE):
 		_format_saved(resource as GDScript)
 	_format_check(PackedStringArray([path]))
-	_tests.file_saved(path)
+	_tests.watch.file_saved(path)
 	if Settings.value(Settings.LINT_ON_SAVE):
 		_lint(PackedStringArray([path]))
 	if Settings.value(Settings.TYPE_CHECK_ON_SAVE):
@@ -806,7 +763,7 @@ func _on_resource_saved(resource: Resource) -> void:
 
 func _on_scene_saved(path: String) -> void:
 	if not _saving:
-		_tests.file_saved(path)
+		_tests.watch.file_saved(path)
 
 
 func _format_current_script() -> void:
@@ -928,24 +885,6 @@ func _open_config() -> void:
 		)
 		return
 	OS.shell_open(path)
-
-
-## The shortcut `name`, as the user set it in Editor Settings > Shortcuts,
-## or else Alt+`keycode`, with Shift when `shift`.
-func _register_shortcut(name: String, keycode: Key, shift: bool) -> Shortcut:
-	var settings := EditorInterface.get_editor_settings()
-	if settings.has_method("get_shortcut") and settings.call("has_shortcut", name):
-		return settings.call("get_shortcut", name)
-	var key := InputEventKey.new()
-	key.keycode = keycode
-	key.shift_pressed = shift
-	key.alt_pressed = true
-	var shortcut := Shortcut.new()
-	shortcut.events = [key]
-	# Godot 4.6 and newer list it in Editor Settings > Shortcuts, to rebind.
-	if settings.has_method("add_shortcut"):
-		settings.call("add_shortcut", name, shortcut)
-	return shortcut
 
 
 # --- Helpers ----------------------------------------------------------------

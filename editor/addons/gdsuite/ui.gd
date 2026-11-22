@@ -8,6 +8,8 @@ const FONT_SCALE := 0.9
 const OFF_ALPHA := 0.4
 ## Secondary text in a row (a location already shown above, a duration).
 const FADED_ALPHA := 0.55
+## Height of the details below a list: a few lines, and a row of buttons.
+const DETAILS_HEIGHT := 110
 
 
 ## A toolbar toggle: on, it looks like any button; off, it is faded. The
@@ -113,10 +115,6 @@ static func show_count(label: Label, number: int, color: Color) -> void:
 	label.add_theme_color_override("font_color", color)
 
 
-## Height of the details below a list: a few lines, and a row of buttons.
-const DETAILS_HEIGHT := 110
-
-
 ## Sets a toolbar status. It takes the room the buttons leave and is cut
 ## when there is not enough: a long status never widens the dock, which would
 ## push the editor's other docks off the screen. Its tooltip has it all.
@@ -184,3 +182,60 @@ static func fold_on_click(tree: Tree, event: InputEvent) -> void:
 		return
 	var fold := func() -> void: item.collapsed = not item.collapsed
 	fold.call_deferred()
+
+
+static func error_color() -> Color:
+	return EditorInterface.get_editor_theme().get_color("error_color", "Editor")
+
+
+## A flat toolbar button: an icon (by its editor name, or none for ""), and a
+## text, whose tooltip is the text when `tooltip` is empty.
+static func button(
+	bar: Container, icon_name: String, text: String, tooltip: String, pressed: Callable
+) -> Button:
+	var new_button := Button.new()
+	new_button.flat = true
+	new_button.icon = icon(icon_name)
+	new_button.text = text
+	new_button.tooltip_text = tooltip if tooltip != "" else text
+	new_button.pressed.connect(pressed)
+	bar.add_child(new_button)
+	return new_button
+
+
+## An editor icon by name, or null when the editor has none of that name.
+static func icon(icon_name: String) -> Texture2D:
+	var theme := EditorInterface.get_editor_theme()
+	if icon_name == "" or not theme.has_icon(icon_name, "EditorIcons"):
+		return null
+	return theme.get_icon(icon_name, "EditorIcons")
+
+
+## The editor's monospace font, for durations and code.
+static func mono_font() -> Font:
+	return EditorInterface.get_editor_theme().get_font("source", "EditorFonts")
+
+
+## The shortcut `name`, as the user set it in Editor Settings > Shortcuts,
+## or else Alt+`keycode`, with Shift when `shift`.
+static func register_shortcut(name: String, keycode: Key, shift: bool) -> Shortcut:
+	var settings := EditorInterface.get_editor_settings()
+	if settings.has_method("get_shortcut") and settings.call("has_shortcut", name):
+		return settings.call("get_shortcut", name)
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.shift_pressed = shift
+	key.alt_pressed = true
+	var shortcut := Shortcut.new()
+	shortcut.events = [key]
+	# Godot 4.6 and newer list it in Editor Settings > Shortcuts, to rebind.
+	if settings.has_method("add_shortcut"):
+		settings.call("add_shortcut", name, shortcut)
+	return shortcut
+
+
+## Fills `bar` green, or red once a test failed.
+static func paint_progress(bar: ProgressBar, failed: bool) -> void:
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = error_color() if failed else success_color()
+	bar.add_theme_stylebox_override("fill", fill)

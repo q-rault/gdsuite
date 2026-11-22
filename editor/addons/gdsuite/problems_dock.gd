@@ -25,11 +25,7 @@ signal open_config_requested
 const Settings = preload("settings.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
-
-const SOURCE_LINT := "lint"
-const SOURCE_TYPES := "types"
-const SOURCE_FORMAT := "format"
-const SOURCES := [SOURCE_FORMAT, SOURCE_LINT, SOURCE_TYPES]
+const Problem = preload("problem.gd")
 
 ## The columns, by name, in their order. The message is always shown: it is
 ## the one that takes the room the others leave.
@@ -53,28 +49,11 @@ const WIDTHS_KEY := "problems_widths"
 ## The share of the list's width the code and tool take at most when they
 ## size themselves: the rest is the message's.
 const SOURCE_SHARE := 0.25
-## The marks for errors and warnings, the same in the filters, the list and
-## the script editor. Not "✖": Godot draws it from a font that ignores the
-## text's colour.
-const ERROR_MARK := "×"
-const WARNING_MARK := "⚠"
-## The × is a small glyph: drawn this much larger, it matches the ⚠.
-const ERROR_MARK_SCALE := 1.45
-## Warnings in yellow on a dark theme, as the Check icon of the top bar; a
-## light theme keeps its own, darker, warning colour.
-const WARNING_YELLOW := Color(1.0, 0.8, 0.25)
-## How strongly the script editor tints a problem's line.
-const TINT_ALPHA := 0.12
-## The tool each source is, as the dock names it.
-const TOOL_NAMES := { SOURCE_FORMAT: "format", SOURCE_LINT: "lint", SOURCE_TYPES: "compile" }
-const TOOL_DESCRIPTIONS := {
-	SOURCE_FORMAT: "Found by the formatter (gdsuite fmt)",
-	SOURCE_LINT: "Found by the linter (gdsuite lint)",
-	SOURCE_TYPES: "Found by Godot's compiler (gdsuite typecheck)",
-}
-## Codes that only say "an error": the tool says as much.
-const GENERIC_CODES := ["gdscript-error", "shader-error", "load-error", "gdscript-warning"]
-
+## What the details say when no problem is selected.
+const NO_SELECTION := (
+	"Select a problem to see all of it. Alt+F8 goes to the next problem, Shift+Alt+F8 to the "
+	+ "one before."
+)
 ## What a row of the list is: its "kind" meta.
 const ROW_FILE := "file"
 const ROW_PROBLEM := "problem"
@@ -102,7 +81,7 @@ const SETTING_IDS := [
 
 ## source -> { "res://path.gd": [problem, ...] }. A problem is a Dictionary:
 ## {file, line, column, severity, message, rule, fixable, source}.
-var _problems := { SOURCE_FORMAT: {}, SOURCE_LINT: {}, SOURCE_TYPES: {} }
+var _problems := { Problem.SOURCE_FORMAT: {}, Problem.SOURCE_LINT: {}, Problem.SOURCE_TYPES: {} }
 ## The sources that reported at least once: until all have, the project's
 ## state is not known.
 var _reported := {}
@@ -159,16 +138,16 @@ func _ready() -> void:
 	var bar := Ui.toolbar()
 	add_child(bar)
 	_errors_button = Ui.counted_toggle(
-		bar, _icon("StatusError"), "", "Errors: show the errors", _rebuild
+		bar, Ui.icon("StatusError"), "", "Errors: show the errors", _rebuild
 	)
 	_warnings_button = Ui.counted_toggle(
-		bar, _icon("StatusWarning"), "", "Warnings: show the warnings", _rebuild
+		bar, Ui.icon("StatusWarning"), "", "Warnings: show the warnings", _rebuild
 	)
 	bar.add_child(VSeparator.new())
-	_source_toggle(bar, SOURCE_FORMAT, "Format", "Scripts that formatting would change")
-	_source_toggle(bar, SOURCE_LINT, "Lint", "What the linter found")
+	_source_toggle(bar, Problem.SOURCE_FORMAT, "Format", "Scripts that formatting would change")
+	_source_toggle(bar, Problem.SOURCE_LINT, "Lint", "What the linter found")
 	_source_toggle(
-		bar, SOURCE_TYPES, "Compile",
+		bar, Problem.SOURCE_TYPES, "Compile",
 		"What Godot's compiler reports: GDScript and shader errors, Godot's warnings, "
 		+ "missing files"
 	)
@@ -179,10 +158,10 @@ func _ready() -> void:
 	_current_only = Ui.toggle(
 		bar, "Current", "Only list the script you're editing", false, _rebuild
 	)
-	_current_only.icon = _icon("Script")
+	_current_only.icon = Ui.icon("Script")
 	_project_button.button_group = scope
 	_current_only.button_group = scope
-	_button(bar, "CollapseTree", "Fold every script", _fold_all)
+	Ui.button(bar, "CollapseTree", "", "Fold every script", _fold_all)
 
 	_status = Label.new()
 	_status.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -191,16 +170,15 @@ func _ready() -> void:
 	_status.modulate.a = Ui.FADED_ALPHA
 	bar.add_child(_status)
 
-	_check_button = _button(
-		bar, "", "Check the whole project again: format, lint and compile",
+	_check_button = Ui.button(
+		bar, "", "Check", "Check the whole project again: format, lint and compile",
 		func() -> void: refresh_requested.emit()
 	)
-	_check_button.text = "Check"
 	_check_button.icon = _check_icon
 
 	_settings_menu = MenuButton.new()
 	_settings_menu.flat = true
-	_settings_menu.icon = _icon("Tools")
+	_settings_menu.icon = Ui.icon("Tools")
 	_settings_menu.tooltip_text = "GDSuite settings, and the columns to show"
 	_settings_menu.about_to_popup.connect(_fill_settings_menu)
 	_settings_menu.get_popup().id_pressed.connect(_on_settings_menu)
@@ -272,17 +250,17 @@ func _ready() -> void:
 ## Replaces the lint findings of `files` ("res://" paths), or of the whole
 ## project when `files` is empty.
 func set_lint(files: PackedStringArray, problems: Array) -> void:
-	_replace(SOURCE_LINT, files, problems)
+	_replace(Problem.SOURCE_LINT, files, problems)
 
 
 ## Replaces every type check finding: the type check covers the project.
 func set_types(problems: Array) -> void:
-	_replace(SOURCE_TYPES, PackedStringArray(), problems)
+	_replace(Problem.SOURCE_TYPES, PackedStringArray(), problems)
 
 
 ## Replaces the format findings of `files`, or of the whole project.
 func set_format(files: PackedStringArray, problems: Array) -> void:
-	_replace(SOURCE_FORMAT, files, problems)
+	_replace(Problem.SOURCE_FORMAT, files, problems)
 
 
 ## A tool started or ended a check: its filter shows a spinner meanwhile.
@@ -495,7 +473,9 @@ func _set_column_shown(column: String, shown: bool) -> void:
 		return
 	if shown and column not in _shown:
 		_shown.append(column)
-		_shown.sort_custom(func(a: String, b: String) -> bool: return COLUMNS.find(a) < COLUMNS.find(b))
+		_shown.sort_custom(
+			func(a: String, b: String) -> bool: return COLUMNS.find(a) < COLUMNS.find(b)
+		)
 	elif not shown:
 		_shown.erase(column)
 	EditorInterface.get_editor_settings().set_project_metadata(
@@ -535,7 +515,7 @@ func _rebuild() -> void:
 
 	for path: String in _listed_paths():
 		var problems := problems_for(path).filter(
-			func(p: Dictionary) -> bool: return p.source != SOURCE_FORMAT and _is_shown(p)
+			func(p: Dictionary) -> bool: return p.source != Problem.SOURCE_FORMAT and _is_shown(p)
 		)
 		if problems.is_empty():
 			continue
@@ -581,10 +561,11 @@ func _listed_paths() -> Array:
 
 ## The scripts not formatted that the filters let through.
 func _unformatted() -> Array:
-	if not _source_buttons[SOURCE_FORMAT].button_pressed or not _warnings_button.button_pressed:
+	var shown: bool = _source_buttons[Problem.SOURCE_FORMAT].button_pressed
+	if not shown or not _warnings_button.button_pressed:
 		return []
 	var paths := []
-	for path: String in _problems[SOURCE_FORMAT]:
+	for path: String in _problems[Problem.SOURCE_FORMAT]:
 		if not _current_only.button_pressed or path == _current_script:
 			paths.append(path)
 	paths.sort()
@@ -595,15 +576,17 @@ func _unformatted() -> Array:
 func _format_row(root: TreeItem, paths: Array) -> TreeItem:
 	var item := _tree.create_item(root)
 	item.set_meta("kind", ROW_FORMAT)
-	item.set_metadata(0, { "files": paths, "severity": "warning", "source": SOURCE_FORMAT })
-	var text := "This script is not formatted" if paths.size() == 1 and _current_only.button_pressed \
-		else "%d script%s not formatted" % [paths.size(), "" if paths.size() == 1 else "s"]
+	item.set_metadata(0, { "files": paths, "severity": "warning", "source": Problem.SOURCE_FORMAT })
+	var one := paths.size() == 1 and _current_only.button_pressed
+	var text := "This script is not formatted" if one \
+			else "%d script%s not formatted" % [paths.size(), "" if paths.size() == 1 else "s"]
 	item.set_text(0, "%s  %s   ·   double-click to format %s" % [
-		WARNING_MARK, text, "it" if paths.size() == 1 else "them all",
+		Problem.WARNING_MARK, text, "it" if paths.size() == 1 else "them all",
 	])
 	item.set_expand_right(0, true)
-	item.set_tooltip_text(0, "\n".join(paths.map(func(p: String) -> String: return p.trim_prefix("res://"))))
-	item.set_custom_color(0, severity_color("warning"))
+	var names := paths.map(func(p: String) -> String: return p.trim_prefix("res://"))
+	item.set_tooltip_text(0, "\n".join(names))
+	item.set_custom_color(0, Problem.severity_color("warning"))
 	return item
 
 
@@ -616,9 +599,9 @@ func _file_row(root: TreeItem, path: String, problems: Array, unformatted: bool)
 	var warnings := problems.size() - errors
 	var parts := PackedStringArray()
 	if errors > 0:
-		parts.append("%d %s" % [errors, ERROR_MARK])
+		parts.append("%d %s" % [errors, Problem.ERROR_MARK])
 	if warnings > 0:
-		parts.append("%d %s" % [warnings, WARNING_MARK])
+		parts.append("%d %s" % [warnings, Problem.WARNING_MARK])
 	if unformatted:
 		parts.append("not formatted")
 	if _stale.has(path):
@@ -637,21 +620,21 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	item.set_meta("kind", ROW_PROBLEM)
 	var is_error: bool = problem.severity == "error"
 	item.set_metadata(0, problem)
-	_cell(item, COLUMN_MARK, ERROR_MARK if is_error else WARNING_MARK,
-		"Error" if is_error else "Warning")
+	_cell(item, COLUMN_MARK, Problem.ERROR_MARK if is_error else Problem.WARNING_MARK,
+			"Error" if is_error else "Warning")
 	if _index.has(COLUMN_MARK):
 		item.set_text_alignment(_index[COLUMN_MARK], HORIZONTAL_ALIGNMENT_CENTER)
 		if is_error:
 			var size := _tree.get_theme_font_size("font_size")
-			item.set_custom_font_size(_index[COLUMN_MARK], roundi(size * ERROR_MARK_SCALE))
-	_cell(item, COLUMN_LINE, _line(problem), _where(problem))
+			item.set_custom_font_size(_index[COLUMN_MARK], roundi(size * Problem.ERROR_MARK_SCALE))
+	_cell(item, COLUMN_LINE, Problem.line(problem), Problem.where(problem))
 	if _index.has(COLUMN_LINE):
 		item.set_text_alignment(_index[COLUMN_LINE], HORIZONTAL_ALIGNMENT_RIGHT)
 	_cell(item, COLUMN_MESSAGE, problem.message, problem.message)
-	_cell(item, COLUMN_SOURCE, _source_text(problem), _code_tooltip(problem))
+	_cell(item, COLUMN_SOURCE, Problem.source_text(problem), Problem.code_tooltip(problem))
 	if _index.has(COLUMN_SOURCE):
 		item.set_text_alignment(_index[COLUMN_SOURCE], HORIZONTAL_ALIGNMENT_RIGHT)
-	var color := severity_color(problem.severity)
+	var color := Problem.severity_color(problem.severity)
 	if _stale.has(problem.file):
 		color = Ui.faded(color)
 	for column: String in _shown:
@@ -693,7 +676,7 @@ func _layout() -> void:
 			var text := item.get_text(_index[column])
 			var size := font_size
 			if column == COLUMN_MARK and item.get_metadata(0).severity == "error":
-				size = roundi(font_size * ERROR_MARK_SCALE)
+				size = roundi(font_size * Problem.ERROR_MARK_SCALE)
 			widths[column] = maxf(widths[column], _text_width(text, font, size))
 	if widths.has(COLUMN_SOURCE):
 		widths[COLUMN_SOURCE] = minf(widths[COLUMN_SOURCE], width * SOURCE_SHARE - padding)
@@ -714,61 +697,12 @@ static func _text_width(text: String, font: Font, font_size: int) -> float:
 	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 
 
-## "12" or "12:5": the line, and the column when the tool gives one.
-static func _line(problem: Dictionary) -> String:
-	if int(problem.line) <= 0:
-		return ""
-	if int(problem.get("column", 0)) > 0:
-		return "%d:%d" % [problem.line, problem.column]
-	return str(problem.line)
-
-
-## "integer-division · compile", or the tool alone when the code only says
-## "error".
-static func _source_text(problem: Dictionary) -> String:
-	var tool: String = TOOL_NAMES[problem.source]
-	if problem.rule in GENERIC_CODES or problem.rule == "":
-		return tool
-	return "%s · %s" % [problem.rule, tool]
-
-
-## What a problem's code means: its kind, code and tool.
-func _code_tooltip(problem: Dictionary) -> String:
-	var kind := "Error" if problem.severity == "error" else "Warning"
-	return "%s %s\n%s" % [kind, problem.rule, _code_meaning(problem)]
-
-
-func _code_meaning(problem: Dictionary) -> String:
-	match problem.source:
-		SOURCE_LINT:
-			return "A lint rule of gdsuite. It can be ignored on this line, or turned off for the project."
-		SOURCE_TYPES:
-			if problem.rule in ["gdscript-error", "shader-error"]:
-				return "Godot's compiler gives its errors no name. For a syntax error, only the first one of a script is reported: fix it and check again."
-			if problem.rule == "load-error":
-				return "Godot could not load this script."
-			if problem.rule in ["missing-resource", "unsafe-access", "gdscript-warning"]:
-				return TOOL_DESCRIPTIONS[SOURCE_TYPES] + "."
-			var setting: String = problem.rule.replace("-", "_").to_upper()
-			return "Godot's warning %s: set its level in Project Settings → Debug → GDScript." % setting
-		SOURCE_FORMAT:
-			return "Formatting would change this script."
-	return ""
-
-
-## `path:line:col`, as compilers print it.
-static func _where(problem: Dictionary) -> String:
-	var where: String = problem.file.trim_prefix("res://")
-	var line := _line(problem)
-	return where if line == "" else "%s:%s" % [where, line]
-
-
 ## The problem as one line of text, as a compiler prints it:
 ## `path:line:col: error[code]: message (tool)`.
 static func _line_text(problem: Dictionary) -> String:
 	return "%s: %s[%s]: %s (%s)" % [
-		_where(problem), problem.severity, problem.rule, problem.message,
-		TOOL_NAMES[problem.source],
+		Problem.where(problem), problem.severity, problem.rule, problem.message,
+		Problem.TOOL_NAMES[problem.source],
 	]
 
 
@@ -778,17 +712,6 @@ func _is_shown(problem: Dictionary) -> bool:
 	if problem.severity != "error" and not _warnings_button.button_pressed:
 		return false
 	return _source_buttons[problem.source].button_pressed
-
-
-## The colour of an error or a warning, in the dock and the script editor.
-static func severity_color(severity: String) -> Color:
-	var theme := EditorInterface.get_editor_theme()
-	if severity == "error":
-		return theme.get_color("error_color", "Editor")
-	var base: Color = EditorInterface.get_editor_settings().get_setting("interface/theme/base_color")
-	if base.get_luminance() > 0.5:
-		return theme.get_color("warning_color", "Editor")
-	return WARNING_YELLOW
 
 
 # --- Hover, selection, details -------------------------------------------------
@@ -808,7 +731,7 @@ func _hover(item: TreeItem) -> void:
 			_hovered_item.erase_button(column, button)
 	_hovered_item = item
 	if item != null and column >= 0:
-		var color := severity_color(item.get_metadata(0).severity)
+		var color := Problem.severity_color(item.get_metadata(0).severity)
 		item.add_button(column, _copy_icon(), BUTTON_COPY, false, "Copy this line")
 		item.set_button_color(column, item.get_button_by_id(column, BUTTON_COPY), color)
 
@@ -818,7 +741,7 @@ func _last_column() -> String:
 
 
 func _copy_icon() -> Texture2D:
-	return _icon("ActionCopy")
+	return Ui.icon("ActionCopy")
 
 
 func _copy(problem: Dictionary) -> void:
@@ -878,11 +801,12 @@ func _actions_for(item: TreeItem) -> Array:
 	match item.get_meta("kind"):
 		ROW_FORMAT:
 			var count: int = problem.files.size()
-			return [["Format the script" if count == 1 else "Format all %d" % count, MENU_FORMAT_ALL]]
+			var label := "Format the script" if count == 1 else "Format all %d" % count
+			return [[label, MENU_FORMAT_ALL]]
 		ROW_FILE:
 			return [["Open", MENU_OPEN]]
 	var actions := [["Open", MENU_OPEN]]
-	if problem.source == SOURCE_LINT:
+	if problem.source == Problem.SOURCE_LINT:
 		if problem.fixable:
 			actions.append(["Fix", MENU_FIX])
 		actions.append(["Ignore on this line", MENU_IGNORE])
@@ -901,7 +825,8 @@ func _show_details() -> void:
 		child.queue_free()
 	var item := _tree.get_selected()
 	if item == null:
-		_details.text = "[color=#%s]Select a problem to see all of it. Alt+F8 goes to the next problem, Shift+Alt+F8 to the one before.[/color]" % Ui.faded(Ui.text_color()).to_html()
+		var dim := Ui.faded(Ui.text_color()).to_html()
+		_details.text = "[color=#%s]%s[/color]" % [dim, NO_SELECTION]
 		return
 	var problem: Dictionary = item.get_metadata(0)
 	var dim := Ui.faded(Ui.text_color()).to_html()
@@ -909,34 +834,20 @@ func _show_details() -> void:
 		ROW_FORMAT:
 			var lines := PackedStringArray()
 			for path: String in problem.files:
-				var first: Dictionary = _problems[SOURCE_FORMAT][path][0]
+				var first: Dictionary = _problems[Problem.SOURCE_FORMAT][path][0]
 				lines.append("%s  [color=#%s]%s[/color]" % [
-					_escape(path.trim_prefix("res://")), dim, _escape(first.message)
+					Problem.escape(path.trim_prefix("res://")), dim, Problem.escape(first.message),
 				])
 			_details.text = "\n".join(lines)
 		ROW_FILE:
 			_details.text = "%s\n[color=#%s]Double-click to open it.[/color]" % [
-				_escape(problem.file), dim
+				Problem.escape(problem.file), dim,
 			]
 		_:
-			var color := severity_color(problem.severity).to_html()
-			var head := "[color=#%s]%s[%s][/color]  [color=#%s]%s · %s[/color]" % [
-				color, problem.severity, _escape(problem.rule), dim, TOOL_NAMES[problem.source],
-				_escape(_where(problem)),
-			]
-			var meaning := _code_meaning(problem)
-			if problem.source == SOURCE_LINT:
-				meaning += " [url=docs]Read about it.[/url]"
-			_details.text = "%s\n%s\n[color=#%s]%s[/color]" % [
-				head, _escape(problem.message), dim, meaning
-			]
+			_details.text = Problem.details(problem)
 	_context_problem = problem
 	for action: Array in _actions_for(item):
-		_button(_actions, "", "", _on_action.bind(action[1])).text = action[0]
-
-
-static func _escape(text: String) -> String:
-	return text.replace("[", "[lb]")
+		Ui.button(_actions, "", action[0], "", _on_action.bind(action[1]))
 
 
 func _on_item_mouse_selected(_position: Vector2, button: int) -> void:
@@ -965,7 +876,7 @@ func _on_action(id: int) -> void:
 		MENU_DISABLE:
 			action_requested.emit("disable_rule", _context_problem)
 		MENU_DOCS:
-			if _context_problem.get("source") == SOURCE_LINT:
+			if _context_problem.get("source") == Problem.SOURCE_LINT:
 				action_requested.emit("docs", _context_problem)
 		MENU_COPY:
 			_copy(_context_problem)
@@ -980,13 +891,14 @@ func _on_action(id: int) -> void:
 ## Warnings filters, and both on each tool's.
 func _update_counts() -> void:
 	var total := counts()
-	Ui.show_count(_errors_button.get_meta("count"), total.errors, severity_color("error"))
-	Ui.show_count(_warnings_button.get_meta("count"), total.warnings, severity_color("warning"))
+	Ui.show_count(_errors_button.get_meta("count"), total.errors, Problem.severity_color("error"))
+	var yellow := Problem.severity_color("warning")
+	Ui.show_count(_warnings_button.get_meta("count"), total.warnings, yellow)
 	for source: String in _source_counts:
 		var count := counts(source)
 		var labels: Array = _source_counts[source]
-		Ui.show_count(labels[0], count.errors, severity_color("error"))
-		Ui.show_count(labels[1], count.warnings, severity_color("warning"))
+		Ui.show_count(labels[0], count.errors, Problem.severity_color("error"))
+		Ui.show_count(labels[1], count.warnings, Problem.severity_color("warning"))
 		var button: Button = _source_buttons[source]
 		button.tooltip_text = "%s\n%d error%s, %d warning%s" % [
 			button.get_meta("description"),
@@ -1080,19 +992,5 @@ func _source_toggle(bar: Container, source: String, text: String, tooltip: Strin
 	var button := Ui.counted_toggle(bar, null, text, tooltip, _rebuild)
 	button.set_meta("description", tooltip)
 	_source_buttons[source] = button
-	_source_counts[source] = [button.get_meta("count"), Ui.add_count(button), Ui.add_spinner(button)]
-
-
-func _button(bar: Container, icon_name: String, tooltip: String, pressed: Callable) -> Button:
-	var button := Button.new()
-	button.flat = true
-	if icon_name != "":
-		button.icon = _icon(icon_name)
-	button.tooltip_text = tooltip
-	button.pressed.connect(pressed)
-	bar.add_child(button)
-	return button
-
-
-func _icon(icon_name: String) -> Texture2D:
-	return EditorInterface.get_editor_theme().get_icon(icon_name, "EditorIcons")
+	var errors: Label = button.get_meta("count")
+	_source_counts[source] = [errors, Ui.add_count(button), Ui.add_spinner(button)]

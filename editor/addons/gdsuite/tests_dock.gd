@@ -17,17 +17,12 @@ signal open_line_requested(file: String, line: int)
 signal watch_toggled(enabled: bool)
 
 const Runner = preload("runner.gd")
+const TestsWatch = preload("tests_watch.gd")
+const Result = preload("test_result.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
-const ProblemsDock = preload("problems_dock.gd")
+const Problem = preload("problem.gd")
 
-const STATUS_IDLE := "idle"
-const STATUS_QUEUED := "queued"
-const STATUS_RUNNING := "running"
-const STATUS_PASS := "pass"
-const STATUS_FAIL := "fail"
-const STATUS_ERROR := "error"
-const STATUS_SKIP := "skip"
 
 ## What the toolbar shows for the tests, from `state()`.
 const STATE_NOT_RUN := "not_run"
@@ -48,15 +43,25 @@ const SHOW_PASSED := "passed"
 const SHOW_TO_RUN := "to_run"
 
 const COLUMN_TEST := 0
+## What the details say when no test is selected.
+const NO_SELECTION := "Select a test to see why it failed. Double-click opens it."
+const LOCALS_HINT := (
+	"To see the test's variables here, turn on Project Settings → Debug → GDScript → "
+	+ "Always Track Local Variables."
+)
+const WAITING_TIP := (
+	"Watch runs the tests these files affect once they compile: until then, those tests could "
+	+ "only fail to load."
+)
 ## Godot reads a test's local variables, for its failures, only with it on.
 const LOCALS_SETTING := "debug/settings/gdscript/always_track_local_variables"
 const COLUMN_TIME := 1
-## Seconds without a save before Watch asks gdtest what the saves affect.
-const SAVE_DELAY := 0.4
 
 var runner: Runner
 ## The folder `gdsuite test` runs, as "res://test/".
 var test_folder := "res://test/"
+## Runs the tests a saved file affects; the plugin tells it what is saved.
+var watch: TestsWatch = TestsWatch.new(self)
 
 ## "res://test/a.gd" -> [test name, ...], in discovery order.
 var _tests := {}
@@ -75,28 +80,8 @@ var _run_failed := 0
 var _pending: PackedStringArray = []
 ## Why `_pending` runs, when Watch restarted a run for it.
 var _pending_reason := ""
-## The files saved in the last moments: Watch waits for the saves to stop
-## (`_debounce`), so that several saves in a row make one run.
-var _saves := {}
-var _debounce: Timer
-## path -> [MD5, stale tests] of the saved files this run covers: once it
-## ends, uninterrupted, they are what the tests ran with.
-var _run_covers := {}
-var _watch_on := false
 ## Why the last run started, when it was not asked for: "affected by hud.gd".
 var _reason := ""
-## Says whether a saved script compiles: "clean", "errors", or "pending"
-## while the compile check has yet to report. Set by the plugin; a Watch run
-## waits for "clean".
-var compile_state: Callable
-## Saved files whose tests Watch runs once they compile: path -> found, as
-## `_on_affected` gets it.
-var _waiting := {}
-## path -> the MD5 of the content the tests last ran with. A file saved back
-## to it needs no run.
-var _ran_with := {}
-## path -> the tests ("file::name") its last save made stale.
-var _stale_by := {}
 
 ## "file::name" -> TreeItem, and "file" -> TreeItem.
 var _items := {}
@@ -131,6 +116,7 @@ var _context_target := ""
 
 
 func _ready() -> void:
+	add_child(watch)
 	name = "Tests"
 	# The addon is in English: Godot would translate the words it knows
 	# ("Stop", "Time") and leave the others.
@@ -143,13 +129,13 @@ func _ready() -> void:
 	var bar := Ui.toolbar()
 	add_child(bar)
 	_show[SHOW_FAILED] = Ui.counted_toggle(
-		bar, _icon("ImportFail"), "", "Failed: show the tests that failed", _rebuild
+		bar, Ui.icon("ImportFail"), "", "Failed: show the tests that failed", _rebuild
 	)
 	_show[SHOW_PASSED] = Ui.counted_toggle(
-		bar, _icon("ImportCheck"), "", "Passed: show the tests that passed", _rebuild
+		bar, Ui.icon("ImportCheck"), "", "Passed: show the tests that passed", _rebuild
 	)
 	_show[SHOW_TO_RUN] = Ui.counted_toggle(
-		bar, _icon("Time"), "",
+		bar, Ui.icon("Time"), "",
 		"To run: show the tests not run yet, or changed since they ran", _rebuild
 	)
 	for kind: String in _show:
@@ -157,12 +143,12 @@ func _ready() -> void:
 	bar.add_child(VSeparator.new())
 	_filter = LineEdit.new()
 	_filter.placeholder_text = "Search tests"
-	_filter.right_icon = _icon("Search")
+	_filter.right_icon = Ui.icon("Search")
 	_filter.clear_button_enabled = true
 	_filter.custom_minimum_size = Vector2(120 * EditorInterface.get_editor_scale(), 0)
 	_filter.text_changed.connect(func(_text: String) -> void: _rebuild())
 	bar.add_child(_filter)
-	_collapse = _button(bar, "CollapseTree", "", "Fold every script", _collapse_all)
+	_collapse = Ui.button(bar, "CollapseTree", "", "Fold every script", _collapse_all)
 	_status = Label.new()
 	_status.size_flags_horizontal = SIZE_EXPAND_FILL
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -176,10 +162,10 @@ func _ready() -> void:
 		false,
 		func() -> void: watch_toggled.emit(_watch.button_pressed),
 	)
-	_watch.icon = _icon("GuiVisibilityVisible")
+	_watch.icon = Ui.icon("GuiVisibilityVisible")
 	var failed_tip := "Run the tests that failed again"
-	_rerun_failed = _button(bar, "Reload", "Run failed", failed_tip, rerun_failed)
-	_run_button = _button(bar, "Play", "Run all", "", _on_run_button)
+	_rerun_failed = Ui.button(bar, "Reload", "Run failed", failed_tip, rerun_failed)
+	_run_button = Ui.button(bar, "Play", "Run all", "", _on_run_button)
 
 	_progress = ProgressBar.new()
 	_progress.show_percentage = false
@@ -215,9 +201,9 @@ func _ready() -> void:
 	_tree.button_clicked.connect(_on_row_button)
 	_tree.column_title_clicked.connect(_on_title_clicked)
 	split.add_child(_tree)
-	_resizer.attach(_tree, "tests_columns", { COLUMN_TIME: _time_width() })
+	_resizer.attach(_tree, "tests_columns", { COLUMN_TIME: Result.time_width() })
 	_details = RichTextLabel.new()
-	_details.custom_minimum_size = Vector2(0, Ui.DETAILS_HEIGHT * EditorInterface.get_editor_scale())
+	_details.custom_minimum_size.y = Ui.DETAILS_HEIGHT * EditorInterface.get_editor_scale()
 	_details.selection_enabled = true
 	_details.bbcode_enabled = true
 	# As in the Problems dock: what failed, at the size of the list; a test's
@@ -239,12 +225,6 @@ func _ready() -> void:
 	_context_menu.id_pressed.connect(_on_context_menu)
 	add_child(_context_menu)
 
-	_debounce = Timer.new()
-	_debounce.wait_time = SAVE_DELAY
-	_debounce.one_shot = true
-	_debounce.timeout.connect(_on_saves_settled)
-	add_child(_debounce)
-
 	_spinner = Timer.new()
 	_spinner.wait_time = 0.1
 	_spinner.timeout.connect(_on_spinner)
@@ -263,8 +243,8 @@ func discover() -> void:
 		Ui.set_status(_status, "Run `gdsuite test` once to set up the tests")
 		return
 	var found := {}
-	var args := _gdtest_args(PackedStringArray(["--list"]), PackedStringArray([test_folder]))
-	runner.stream(gdtest, args, _on_listed.bind(found), _on_list_done.bind(found))
+	var args := gdtest_args(PackedStringArray(["--list"]), PackedStringArray([test_folder]))
+	runner.stream(gdtest, args, add_listed.bind(found), _on_list_done.bind(found))
 
 
 ## Runs `targets` ("res://test/a.gd" or "res://test/a.gd::test_b"), or every
@@ -286,7 +266,7 @@ func run(targets: PackedStringArray, reason := "") -> void:
 	_finished_msec = 0
 	_start_run(targets)
 	_set_running(true)
-	var args := _gdtest_args(PackedStringArray(), targets)
+	var args := gdtest_args(PackedStringArray(), targets)
 	_pid = runner.stream(gdtest, args, _on_event, _on_run_done)
 	if _pid < 0:
 		_set_running(false)
@@ -309,105 +289,16 @@ func is_running() -> bool:
 
 ## Whether saving a file runs the tests it affects again.
 func set_watch(enabled: bool) -> void:
-	_watch_on = enabled
+	watch.enabled = enabled
 	_watch.set_pressed_no_signal(enabled)
 	_watch.modulate.a = 1.0 if enabled else Ui.OFF_ALPHA
-
-
-## A file of the project was saved: the tests it can affect are out of
-## date, and run again when Watch is on. gdtest says which: the
-## tests that use the file, directly or through other scripts, scenes and
-## resources.
-func file_saved(path: String) -> void:
-	var gdtest := Runner.gdtest_program()
-	if gdtest == "":
-		return
-	# A scene saved is reported twice, as a resource and as a scene: both
-	# land in `_saves`, and make one run.
-	# Back to what the tests last ran with, as after renaming something and
-	# then renaming it back: nothing to run.
-	if _ran_with.has(path) and _ran_with[path] == FileAccess.get_md5(path):
-		_saves.erase(path)
-		_waiting.erase(path)
-		_unstale(path)
-		return
-	_saves[path] = true
-	_debounce.start()
-	results_changed.emit()
-
-
-## No save for SAVE_DELAY: asks gdtest which tests the saved files affect.
-func _on_saves_settled() -> void:
-	var gdtest := Runner.gdtest_program()
-	var saved := _saves.keys()
-	_saves.clear()
-	for path: String in saved:
-		var found := {}
-		var options := PackedStringArray(["--list", "--affected-by", path])
-		var args := _gdtest_args(options, PackedStringArray([test_folder]))
-		if gdtest == "" or runner.stream(
-			gdtest, args, _on_listed.bind(found), _on_affected.bind(path, found)
-		) < 0:
-			_on_affected(1, path, found)
-
-
-## gdtest listed the tests `path` affects in `found`: file -> [test name].
-func _on_affected(code: int, path: String, found: Dictionary) -> void:
-	if code != 0 and found.is_empty():
-		# A gdtest older than --affected-by: a test script affects its own
-		# tests, any other file every test.
-		for file: String in _tests:
-			if file == path or not _tests.has(path):
-				found[file] = _tests[file]
-	if found.is_empty():
-		return
-	var keys := []
-	for file: String in found:
-		for test_name: String in found[file]:
-			var key := _key(file, test_name)
-			keys.append(key)
-			if _results.has(key):
-				_results[key].stale = true
-	_stale_by[path] = keys
-	_refresh_items()
-	if not _watch_on:
-		results_changed.emit()
-		return
-	_waiting[path] = found
-	run_waiting()
-
-
-## Runs the tests of the saved files that compile now. A file that doesn't
-## compile keeps its tests waiting: they would only fail to load.
-func run_waiting() -> void:
-	var files := {}
-	var reasons := PackedStringArray()
-	for path: String in _waiting.keys():
-		var state: String = compile_state.call(path) if compile_state.is_valid() else "clean"
-		if state != "clean":
-			continue
-		for file: String in _waiting[path]:
-			files[file] = true
-		reasons.append(path.get_file())
-		_waiting.erase(path)
-	_update_status()
-	if files.is_empty():
-		return
-	var reason := "affected by " + ", ".join(reasons)
-	var targets := PackedStringArray(files.keys())
-	if files.size() == _tests.size():
-		targets = PackedStringArray([test_folder])
-	if is_running():
-		_restart(targets, reason)
-	else:
-		run(targets, reason)
 
 
 ## Stops the run going, which now runs code that changed, and starts another
 ## with `targets` and the tests the stopped run had yet to finish. As in
 ## Vitest: saving three times in a row doesn't make three runs, one after the
 ## other.
-func _restart(targets: PackedStringArray, reason: String) -> void:
+func restart(targets: PackedStringArray, reason: String) -> void:
 	var next := PackedStringArray()
 	if test_folder in targets or test_folder in _pending:
 		next.append(test_folder)
@@ -415,7 +306,7 @@ func _restart(targets: PackedStringArray, reason: String) -> void:
 		var unfinished := {}
 		for key: String in _results:
 			var result: Dictionary = _results[key]
-			if result.in_run and result.status in [STATUS_QUEUED, STATUS_RUNNING]:
+			if result.in_run and result.status in [Result.STATUS_QUEUED, Result.STATUS_RUNNING]:
 				var file := key.get_slice("::", 0)
 				if not unfinished.has(file):
 					unfinished[file] = []
@@ -433,24 +324,32 @@ func _restart(targets: PackedStringArray, reason: String) -> void:
 	runner.kill(_pid)
 
 
-## Remembers the content of `path` as the one the tests ran with, when
-## nothing is known of it yet: the script opened, before it is edited.
-func remember(path: String) -> void:
-	if path != "" and not _ran_with.has(path) and FileAccess.file_exists(path):
-		_ran_with[path] = FileAccess.get_md5(path)
+## The project's tests: "res://test/a.gd" -> [test name, ...].
+func test_files() -> Dictionary:
+	return _tests
 
 
-## `path` is back to what the tests ran with: the tests its save made stale
-## are up to date again, unless another file's save made them stale too.
-func _unstale(path: String) -> void:
-	var keys: Array = _stale_by.get(path, [])
-	_stale_by.erase(path)
+## Marks the tests of `found` (file -> [test name]) to run again, and
+## returns their keys ("file::name").
+func mark_stale(found: Dictionary) -> Array:
+	var keys := []
+	for file: String in found:
+		for test_name: String in found[file]:
+			var key := Result.key(file, test_name)
+			keys.append(key)
+			if _results.has(key):
+				_results[key].stale = true
+	_refresh_items()
+	return keys
+
+
+## The tests of `keys` are up to date again.
+func mark_up_to_date(keys: Array) -> void:
 	for key: String in keys:
-		var other := _stale_by.values().any(func(k: Array) -> bool: return key in k)
-		if not other and _results.has(key):
+		if _results.has(key):
 			_results[key].stale = false
 	_refresh_items()
-	_update_status()
+	update_status()
 	results_changed.emit()
 
 
@@ -458,8 +357,8 @@ func _unstale(path: String) -> void:
 func tests_of(file: String) -> Array:
 	var tests := []
 	for test_name: String in _tests.get(file, []):
-		var result: Dictionary = _results.get(_key(file, test_name), {})
-		tests.append({ "name": test_name, "status": result.get("status", STATUS_IDLE) })
+		var result: Dictionary = _results.get(Result.key(file, test_name), {})
+		tests.append({ "name": test_name, "status": result.get("status", Result.STATUS_IDLE) })
 	return tests
 
 
@@ -467,7 +366,7 @@ func tests_of(file: String) -> Array:
 func failed_count() -> int:
 	var failed := 0
 	for key: String in _results:
-		if _results[key].status in [STATUS_FAIL, STATUS_ERROR]:
+		if _results[key].status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
 			failed += 1
 	return failed
 
@@ -483,11 +382,11 @@ func state() -> String:
 	for file: String in _tests:
 		for test_name: String in _tests[file]:
 			total += 1
-			var result: Dictionary = _results.get(_key(file, test_name), {})
-			var status: String = result.get("status", STATUS_IDLE)
-			if status in [STATUS_FAIL, STATUS_ERROR]:
+			var result: Dictionary = _results.get(Result.key(file, test_name), {})
+			var status: String = result.get("status", Result.STATUS_IDLE)
+			if status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
 				return STATE_FAIL
-			if status == STATUS_IDLE or result.get("stale", false):
+			if status == Result.STATUS_IDLE or result.get("stale", false):
 				not_run = true
 	return STATE_NOT_RUN if not_run or total == 0 else STATE_PASS
 
@@ -495,42 +394,21 @@ func state() -> String:
 ## Whether every test passed with the code as it is now: none failed, none
 ## is to run, and no save is waiting to be looked at.
 func all_pass() -> bool:
-	return state() == STATE_PASS and _saves.is_empty() and _waiting.is_empty()
+	return state() == STATE_PASS and watch.is_idle()
 
 
 ## One line on the suite, for the toolbar's tooltip.
 func summary() -> String:
 	if is_running():
 		return "Running %d of %d tests" % [_run_done, _run_total]
-	var passed := 0
-	var failed := 0
-	var never_run := 0
-	var changed := 0
-	var total := 0
-	for file: String in _tests:
-		for test_name: String in _tests[file]:
-			total += 1
-			var result: Dictionary = _results.get(_key(file, test_name), {})
-			match result.get("status", STATUS_IDLE):
-				STATUS_PASS, STATUS_SKIP:
-					passed += 1
-				STATUS_FAIL, STATUS_ERROR:
-					failed += 1
-				_:
-					never_run += 1
-			if result.get("stale", false):
-				changed += 1
-	var text := "%d tests: %d passed, %d failed, %d not run" % [total, passed, failed, never_run]
-	if changed > 0:
-		text += "\n%d to run again: their scripts changed since they ran" % changed
-	return text
+	return Result.summary(_tests, _results)
 
 
 # --- Running ------------------------------------------------------------------
 
 
-func _on_listed(line: String, found: Dictionary) -> void:
-	var event := _event(line)
+func add_listed(line: String, found: Dictionary) -> void:
+	var event := Result.event(line)
 	if event.get("kind") != "test":
 		return
 	if not found.has(event.file):
@@ -543,13 +421,13 @@ func _on_list_done(_code: int, found: Dictionary) -> void:
 		return
 	_tests = found
 	_rebuild()
-	_update_status()
+	update_status()
 	results_changed.emit()
 
 
 ## gdtest's arguments to run `targets` ("res://" folders, scripts, or
 ## "file::test") with `options`.
-func _gdtest_args(options: PackedStringArray, targets: PackedStringArray) -> PackedStringArray:
+func gdtest_args(options: PackedStringArray, targets: PackedStringArray) -> PackedStringArray:
 	var args := PackedStringArray([
 		"--godot-exe", OS.get_executable_path(),
 		"--project-path", Runner.project_root(),
@@ -562,7 +440,7 @@ func _gdtest_args(options: PackedStringArray, targets: PackedStringArray) -> Pac
 
 
 func _on_event(line: String) -> void:
-	var event := _event(line)
+	var event := Result.event(line)
 	var kind: String = event.get("kind", "")
 	if kind == "summary":
 		_counts = event
@@ -574,25 +452,25 @@ func _on_event(line: String) -> void:
 	var status := ""
 	match kind:
 		"test_start":
-			status = STATUS_RUNNING
+			status = Result.STATUS_RUNNING
 		"test_pass":
-			status = STATUS_PASS
+			status = Result.STATUS_PASS
 		"test_fail":
-			status = STATUS_FAIL
+			status = Result.STATUS_FAIL
 		"test_error":
-			status = STATUS_ERROR
+			status = Result.STATUS_ERROR
 		"test_skip", "test_pending":
-			status = STATUS_SKIP
+			status = Result.STATUS_SKIP
 		_:
 			return
-	var key := _key(file, test_name)
+	var key := Result.key(file, test_name)
 	var known: bool = _tests.has(file) and test_name in _tests[file]
 	if not known:
 		if not _tests.has(file):
 			_tests[file] = []
 		_tests[file].append(test_name)
 		# A test discovery missed (it was added since): counted in this run.
-		if not _results.has(key) or _results[key].status != STATUS_QUEUED:
+		if not _results.has(key) or _results[key].status != Result.STATUS_QUEUED:
 			_run_total += 1
 	var failures: Array = event.get("failures", [])
 	if kind == "test_error":
@@ -600,22 +478,22 @@ func _on_event(line: String) -> void:
 	var previous: Dictionary = _results.get(key, {})
 	_results[key] = {
 		"status": status,
-		"us": int(event.get("us", 0)) if status != STATUS_RUNNING else int(previous.get("us", 0)),
+		"us": int((previous if status == Result.STATUS_RUNNING else event).get("us", 0)),
 		"failures": failures,
 		"details": event.get("details", []),
 		"stale": false,
 		"in_run": true,
 	}
-	if status != STATUS_RUNNING:
+	if status != Result.STATUS_RUNNING:
 		_run_done += 1
-		if status in [STATUS_FAIL, STATUS_ERROR]:
+		if status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
 			_run_failed += 1
 	if known:
 		_update_item(file, test_name)
 	else:
 		_rebuild()
-	_update_status()
-	if status != STATUS_RUNNING:
+	update_status()
+	if status != Result.STATUS_RUNNING:
 		results_changed.emit()
 
 
@@ -627,23 +505,15 @@ func _on_run_done(_code: int) -> void:
 	var interrupted := false
 	for key: String in _results:
 		var result: Dictionary = _results[key]
-		if result.status in [STATUS_QUEUED, STATUS_RUNNING]:
-			result.status = result.get("before", STATUS_IDLE)
+		if result.status in [Result.STATUS_QUEUED, Result.STATUS_RUNNING]:
+			result.status = result.get("before", Result.STATUS_IDLE)
 			result.stale = result.get("stale_before", false)
 			result.in_run = false
 			interrupted = true
-	# The saved files whose tests all ran: what they held when the run
-	# started is what the tests ran with. Unless saved again since.
-	if not interrupted:
-		for path: String in _run_covers:
-			var cover: Array = _run_covers[path]
-			if is_same(_stale_by.get(path), cover[1]):
-				_ran_with[path] = cover[0]
-				_stale_by.erase(path)
-	_run_covers = {}
+	watch.run_ended(interrupted)
 	_last_failed = PackedStringArray()
 	for key: String in _results:
-		if _results[key].status in [STATUS_FAIL, STATUS_ERROR]:
+		if _results[key].status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
 			_last_failed.append(key)
 			# As in Vitest: a script with a test that failed opens, to show it.
 			var file := key.get_slice("::", 0)
@@ -667,16 +537,7 @@ func _on_run_done(_code: int) -> void:
 ## Marks the tests of `targets` as queued and the others as not part of this
 ## run, then shows where the run is.
 func _start_run(targets: PackedStringArray) -> void:
-	# The saved files whose tests all run now: what they hold now is what the
-	# tests run with, once the run ends without being stopped.
-	_run_covers = {}
-	for path: String in _stale_by.keys():
-		var covered := (_stale_by[path] as Array).all(
-			func(key: String) -> bool:
-				return _in_targets(key.get_slice("::", 0), key.get_slice("::", 1), targets)
-		)
-		if covered:
-			_run_covers[path] = [FileAccess.get_md5(path), _stale_by[path]]
+	watch.run_starting(targets)
 	_run_total = 0
 	_run_done = 0
 	_run_failed = 0
@@ -685,17 +546,17 @@ func _start_run(targets: PackedStringArray) -> void:
 	var first: TreeItem = null
 	for file: String in _tests:
 		for test_name: String in _tests[file]:
-			if not _in_targets(file, test_name, targets):
+			if not in_targets(file, test_name, targets):
 				continue
-			var key := _key(file, test_name)
+			var key := Result.key(file, test_name)
 			var previous: Dictionary = _results.get(key, {})
 			_results[key] = {
-				"status": STATUS_QUEUED,
+				"status": Result.STATUS_QUEUED,
 				"us": int(previous.get("us", 0)),
 				"failures": [],
 				"stale": false,
 				"in_run": true,
-				"before": previous.get("status", STATUS_IDLE),
+				"before": previous.get("status", Result.STATUS_IDLE),
 				"stale_before": previous.get("stale", false),
 			}
 			_run_total += 1
@@ -704,7 +565,7 @@ func _start_run(targets: PackedStringArray) -> void:
 	results_changed.emit()
 
 
-func _in_targets(file: String, test_name: String, targets: PackedStringArray) -> bool:
+func in_targets(file: String, test_name: String, targets: PackedStringArray) -> bool:
 	for target in targets:
 		var target_file := target.get_slice("::", 0)
 		var only := target.get_slice("::", 1) if "::" in target else ""
@@ -737,7 +598,7 @@ func _selected_targets() -> PackedStringArray:
 	var item := _tree.get_next_selected(null)
 	while item != null:
 		var meta: Dictionary = item.get_metadata(0)
-		targets.append(meta.file if meta.name == "" else _key(meta.file, meta.name))
+		targets.append(meta.file if meta.name == "" else Result.key(meta.file, meta.name))
 		item = _tree.get_next_selected(item)
 	return targets
 
@@ -753,7 +614,7 @@ func _on_row_button(item: TreeItem, _column: int, id: int, _mouse_button: int) -
 	if id != BUTTON_RUN:
 		return
 	var meta: Dictionary = item.get_metadata(0)
-	run(PackedStringArray([meta.file if meta.name == "" else _key(meta.file, meta.name)]))
+	run(PackedStringArray([meta.file if meta.name == "" else Result.key(meta.file, meta.name)]))
 
 
 ## Shows the ▶ button on `item`, the row under the mouse, as the Problems
@@ -769,7 +630,7 @@ func _hover(item: TreeItem) -> void:
 	if item != null:
 		var meta: Dictionary = item.get_metadata(0)
 		var tip := "Run the tests of this script" if meta.name == "" else "Run this test"
-		item.add_button(COLUMN_TEST, _icon("Play"), BUTTON_RUN, false, tip)
+		item.add_button(COLUMN_TEST, Ui.icon("Play"), BUTTON_RUN, false, tip)
 
 
 func _on_tree_input(event: InputEvent) -> void:
@@ -813,7 +674,7 @@ func _rebuild() -> void:
 	var item := _tree.get_next_selected(null)
 	while item != null:
 		var meta: Dictionary = item.get_metadata(0)
-		selected[_key(meta.file, meta.name)] = true
+		selected[Result.key(meta.file, meta.name)] = true
 		item = _tree.get_next_selected(item)
 
 	_building = true
@@ -849,11 +710,11 @@ func _rebuild() -> void:
 			var test_item := _tree.create_item(file_item)
 			test_item.set_text(COLUMN_TEST, test_name.trim_prefix("test_").replace("_", " "))
 			test_item.set_metadata(0, { "file": file, "name": test_name })
-			_items[_key(file, test_name)] = test_item
-			if selected.has(_key(file, test_name)):
+			_items[Result.key(file, test_name)] = test_item
+			if selected.has(Result.key(file, test_name)):
 				test_item.select(COLUMN_TEST)
 		file_item.collapsed = not (_unfolded.has(file) or filtering)
-		if selected.has(_key(file, "")):
+		if selected.has(Result.key(file, "")):
 			file_item.select(COLUMN_TEST)
 	_building = false
 	_refresh_items()
@@ -870,7 +731,7 @@ func _refresh_items() -> void:
 
 
 func _update_item(file: String, test_name: String) -> void:
-	var item: TreeItem = _items.get(_key(file, test_name))
+	var item: TreeItem = _items.get(Result.key(file, test_name))
 	var hidden_kind: bool = not _show[_kind_of(file, test_name)].button_pressed
 	# A test that moves into a hidden kind leaves the list, one that moves
 	# out of it comes in.
@@ -887,11 +748,11 @@ func _update_item(file: String, test_name: String) -> void:
 ## Which of the toolbar's kinds a test is: SHOW_FAILED, SHOW_PASSED, or
 ## SHOW_TO_RUN for a test not run yet, waiting, running, or changed since.
 func _kind_of(file: String, test_name: String) -> String:
-	var result: Dictionary = _results.get(_key(file, test_name), {})
-	match result.get("status", STATUS_IDLE):
-		STATUS_FAIL, STATUS_ERROR:
+	var result: Dictionary = _results.get(Result.key(file, test_name), {})
+	match result.get("status", Result.STATUS_IDLE):
+		Result.STATUS_FAIL, Result.STATUS_ERROR:
 			return SHOW_FAILED
-		STATUS_PASS, STATUS_SKIP:
+		Result.STATUS_PASS, Result.STATUS_SKIP:
 			return SHOW_TO_RUN if result.get("stale", false) else SHOW_PASSED
 	return SHOW_TO_RUN
 
@@ -903,7 +764,7 @@ func _update_counts() -> void:
 		for test_name: String in _tests[file]:
 			counts[_kind_of(file, test_name)] += 1
 	var colors := {
-		SHOW_FAILED: ProblemsDock.severity_color("error"),
+		SHOW_FAILED: Problem.severity_color("error"),
 		SHOW_PASSED: Ui.success_color(),
 		SHOW_TO_RUN: Ui.text_color(),
 	}
@@ -915,7 +776,7 @@ func _update_counts() -> void:
 
 
 func _test_us(file: String, test_name: String) -> int:
-	return int(_results.get(_key(file, test_name), {}).get("us", 0))
+	return int(_results.get(Result.key(file, test_name), {}).get("us", 0))
 
 
 func _file_us(file: String) -> int:
@@ -926,44 +787,45 @@ func _file_us(file: String) -> int:
 
 
 func _show_test(item: TreeItem, file: String, test_name: String) -> void:
-	var result: Dictionary = _results.get(_key(file, test_name), {})
-	var status: String = result.get("status", STATUS_IDLE)
+	var result: Dictionary = _results.get(Result.key(file, test_name), {})
+	var status: String = result.get("status", Result.STATUS_IDLE)
 	var stale: bool = result.get("stale", false)
-	item.set_icon(COLUMN_TEST, _status_icon(status))
+	item.set_icon(COLUMN_TEST, Result.icon(status, _spinner_frame))
 	item.set_icon_modulate(COLUMN_TEST, Color(1, 1, 1, 0.45 if stale else 1.0))
-	item.set_text(COLUMN_TIME, _duration(int(result.get("us", 0))))
+	item.set_text(COLUMN_TIME, Result.duration(int(result.get("us", 0))))
 	item.set_text_alignment(COLUMN_TIME, HORIZONTAL_ALIGNMENT_RIGHT)
-	item.set_custom_font(COLUMN_TIME, _mono_font())
-	var tooltip := "%s\n%s" % [test_name, _describe(status)]
+	item.set_custom_font(COLUMN_TIME, Ui.mono_font())
+	var tooltip := "%s\n%s" % [test_name, Result.describe(status)]
 	if stale:
 		tooltip += " (changed since it ran)"
 	item.set_tooltip_text(COLUMN_TEST, tooltip)
-	_paint(item, status, status == STATUS_IDLE or stale)
+	_paint(item, status, status == Result.STATUS_IDLE or stale)
 
 
 func _show_file(file: String) -> void:
 	var item: TreeItem = _file_items[file]
-	var worst := STATUS_IDLE
+	var worst := Result.STATUS_IDLE
 	var total_us := 0
 	var failed := 0
 	var stale := false
 	for test_name: String in _tests[file]:
-		var result: Dictionary = _results.get(_key(file, test_name), {})
-		var status: String = result.get("status", STATUS_IDLE)
-		worst = _worse(worst, status)
+		var result: Dictionary = _results.get(Result.key(file, test_name), {})
+		var status: String = result.get("status", Result.STATUS_IDLE)
+		worst = Result.worse(worst, status)
 		total_us += int(result.get("us", 0))
-		if status in [STATUS_FAIL, STATUS_ERROR]:
+		if status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
 			failed += 1
 		stale = stale or result.get("stale", false)
 	var text := file.trim_prefix(test_folder).trim_prefix("res://")
 	if failed > 0:
 		text += "  (%d failed)" % failed
 	item.set_text(COLUMN_TEST, text)
-	item.set_icon(COLUMN_TEST, _status_icon(worst) if worst != STATUS_IDLE else _icon("GDScript"))
+	var idle := worst == Result.STATUS_IDLE
+	item.set_icon(COLUMN_TEST, Ui.icon("GDScript") if idle else Result.icon(worst, _spinner_frame))
 	item.set_icon_modulate(COLUMN_TEST, Color(1, 1, 1, 0.45 if stale else 1.0))
-	item.set_text(COLUMN_TIME, _duration(total_us))
+	item.set_text(COLUMN_TIME, Result.duration(total_us))
 	item.set_text_alignment(COLUMN_TIME, HORIZONTAL_ALIGNMENT_RIGHT)
-	item.set_custom_font(COLUMN_TIME, _mono_font())
+	item.set_custom_font(COLUMN_TIME, Ui.mono_font())
 	_paint(item, worst, false)
 
 
@@ -972,70 +834,45 @@ func _show_file(file: String) -> void:
 ## time is faded, as secondary.
 func _paint(item: TreeItem, status: String, dim: bool) -> void:
 	var color := Ui.text_color()
-	if status in [STATUS_FAIL, STATUS_ERROR]:
-		color = ProblemsDock.severity_color("error")
+	if status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
+		color = Problem.severity_color("error")
 	if dim:
 		color = Ui.faded(color)
 	item.set_custom_color(COLUMN_TEST, color)
 	item.set_custom_color(COLUMN_TIME, Ui.faded(color))
 
 
-## Under the list: why the selected tests failed, as Vitest shows it. Each
-## failure, then where: the line, which opens the script there, its code, and
-## the test's local variables then.
+## Under the list: why the selected tests failed (see `Result.failure_lines`).
 func _show_details() -> void:
 	var dim := Ui.faded(Ui.text_color()).to_html()
 	var item := _tree.get_selected()
 	if item == null:
-		_details.text = "[color=#%s]Select a test to see why it failed. Double-click opens it.[/color]" % dim
+		_details.text = "[color=#%s]%s[/color]" % [dim, NO_SELECTION]
 		return
 	var meta: Dictionary = item.get_metadata(0)
 	var lines := PackedStringArray()
-	var red := ProblemsDock.severity_color("error").to_html()
 	var names: Array = [meta.name] if meta.name != "" else _tests.get(meta.file, [])
 	var without_locals := false
 	for test_name: String in names:
-		var result: Dictionary = _results.get(_key(meta.file, test_name), {})
-		var failures: Array = result.get("failures", [])
-		if failures.is_empty():
+		var result: Dictionary = _results.get(Result.key(meta.file, test_name), {})
+		if result.get("failures", []).is_empty():
 			continue
 		if not lines.is_empty():
 			lines.append("")
-		lines.append("[url=%s]%s[/url]" % [_key(meta.file, test_name), test_name])
-		var details: Array = result.get("details", [])
-		for index in failures.size():
-			for text: String in str(failures[index]).split("\n"):
-				lines.append("  [color=#%s]%s[/color]" % [red, _escape(text)])
-			var detail: Dictionary = details[index] if index < details.size() else {}
-			if detail.has("file") and detail.has("line"):
-				var at := "%s:%d" % [detail.file, detail.line]
-				lines.append("    [url=line:%s]at %s[/url]" % [at, _escape(at)])
-				if detail.has("code"):
-					lines.append("    [color=#%s]%d |[/color] %s" % [dim, detail.line, _escape(detail.code)])
-				var locals: Array = detail.get("locals", [])
-				if locals.is_empty():
-					without_locals = true
-				else:
-					var pairs := PackedStringArray()
-					for local: Dictionary in locals:
-						pairs.append("%s = %s" % [local.name, local.value])
-					lines.append("    [color=#%s]%s[/color]" % [dim, _escape(", ".join(pairs))])
+		lines.append_array(Result.failure_lines(meta.file, test_name, result))
+		without_locals = without_locals or Result.lacks_locals(result)
 	if lines.is_empty():
-		var result: Dictionary = _results.get(_key(meta.file, meta.name), {})
-		var what := _describe(result.get("status", STATUS_IDLE)) if meta.name != "" \
-			else "%d tests" % names.size()
+		var result: Dictionary = _results.get(Result.key(meta.file, meta.name), {})
+		var what := Result.describe(result.get("status", Result.STATUS_IDLE)) if meta.name != "" \
+				else "%d tests" % names.size()
 		lines.append("[color=#%s]%s · %s[/color]" % [dim, meta.file, what])
 	elif without_locals and not ProjectSettings.get_setting(LOCALS_SETTING, false):
 		lines.append("")
-		lines.append("[color=#%s]To see the test's variables here, turn on Project Settings → Debug → GDScript → Always Track Local Variables.[/color]" % dim)
+		lines.append("[color=#%s]%s[/color]" % [dim, LOCALS_HINT])
 	_details.text = "\n".join(lines)
 
 
-static func _escape(text: String) -> String:
-	return text.replace("[", "[lb]")
-
-
-func _update_status() -> void:
+func update_status() -> void:
 	if is_running():
 		var seconds := (Time.get_ticks_msec() - _started_msec) / 1000.0
 		# The failures have their count on the left.
@@ -1045,19 +882,16 @@ func _update_status() -> void:
 		Ui.set_status(_status, text)
 		_progress.max_value = maxi(_run_total, 1)
 		_progress.value = _run_done
-		_paint_progress(_run_failed > 0)
+		Ui.paint_progress(_progress, _run_failed > 0)
 		return
 	var total := 0
 	for file: String in _tests:
 		total += _tests[file].size()
-	var blocked := _waiting.keys().filter(
-		func(path: String) -> bool:
-			return compile_state.is_valid() and compile_state.call(path) == "errors"
-	)
+	var blocked := watch.blocked()
 	if not blocked.is_empty():
 		var names := ", ".join(blocked.map(func(path: String) -> String: return path.get_file()))
 		Ui.set_status(_status, "Waiting for %s to compile" % names)
-		_status.tooltip_text = "Watch runs the tests these files affect once they compile: until then, those tests could only fail to load."
+		_status.tooltip_text = WAITING_TIP
 		return
 	if _counts.is_empty():
 		Ui.set_status(_status, "%d tests" % total)
@@ -1073,17 +907,9 @@ func _update_status() -> void:
 	_status.tooltip_text = "The last run: " + text
 
 
-## The progress bar fills green, or red once a test failed.
-func _paint_progress(failed: bool) -> void:
-	var theme := EditorInterface.get_editor_theme()
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = theme.get_color("error_color" if failed else "success_color", "Editor")
-	_progress.add_theme_stylebox_override("fill", fill)
-
-
 func _set_running(running: bool) -> void:
 	_run_button.text = "Stop" if running else "Run all"
-	_run_button.icon = _icon("Stop" if running else "Play")
+	_run_button.icon = Ui.icon("Stop" if running else "Play")
 	_run_button.tooltip_text = "Stop the tests" if running else "Run every test"
 	_rerun_failed.disabled = running or _last_failed.is_empty()
 	_progress.visible = running
@@ -1092,21 +918,21 @@ func _set_running(running: bool) -> void:
 		_spinner.start()
 	else:
 		_spinner.stop()
-	_update_status()
+	update_status()
 
 
 func _on_spinner() -> void:
 	_spinner_frame = (_spinner_frame + 1) % 8
-	var icon := _status_icon(STATUS_RUNNING)
+	var icon := Result.icon(Result.STATUS_RUNNING, _spinner_frame)
 	var running_files := {}
 	for key: String in _items:
-		if _results.get(key, {}).get("status") == STATUS_RUNNING:
+		if _results.get(key, {}).get("status") == Result.STATUS_RUNNING:
 			_items[key].set_icon(COLUMN_TEST, icon)
 			running_files[key.get_slice("::", 0)] = true
 	for file: String in running_files:
 		if _file_items.has(file):
 			_show_file(file)
-	_update_status()
+	update_status()
 
 
 func _on_item_collapsed(item: TreeItem) -> void:
@@ -1135,7 +961,7 @@ func _on_item_mouse_selected(_position: Vector2, button: int) -> void:
 	if item == null:
 		return
 	var meta: Dictionary = item.get_metadata(0)
-	_context_target = meta.file if meta.name == "" else _key(meta.file, meta.name)
+	_context_target = meta.file if meta.name == "" else Result.key(meta.file, meta.name)
 	_context_menu.clear()
 	var selected := _selected_targets().size()
 	if selected > 1:
@@ -1159,101 +985,3 @@ func _on_context_menu(id: int) -> void:
 				_context_target.get_slice("::", 0),
 				_context_target.get_slice("::", 1) if "::" in _context_target else ""
 			)
-
-
-# --- Helpers ------------------------------------------------------------------
-
-
-static func _key(file: String, test_name: String) -> String:
-	return "%s::%s" % [file, test_name]
-
-
-func _event(line: String) -> Dictionary:
-	var trimmed := line.strip_edges()
-	if not trimmed.begins_with("{"):
-		return {}
-	# JSON.new().parse, unlike JSON.parse_string, prints nothing on bad input.
-	var json := JSON.new()
-	if json.parse(trimmed) != OK:
-		return {}
-	return json.data if json.data is Dictionary else {}
-
-
-func _worse(a: String, b: String) -> String:
-	var order := [STATUS_IDLE, STATUS_SKIP, STATUS_PASS, STATUS_QUEUED, STATUS_RUNNING]
-	order.append_array([STATUS_FAIL, STATUS_ERROR])
-	return a if order.find(a) >= order.find(b) else b
-
-
-func _describe(status: String) -> String:
-	var descriptions := {
-		STATUS_PASS: "Passed",
-		STATUS_FAIL: "Failed",
-		STATUS_ERROR: "Could not run",
-		STATUS_SKIP: "Skipped",
-		STATUS_QUEUED: "Waiting to run",
-		STATUS_RUNNING: "Running",
-	}
-	return descriptions.get(status, "Not run yet")
-
-
-func _status_icon(status: String) -> Texture2D:
-	match status:
-		# Coloured marks without a badge behind them, as in Vitest.
-		STATUS_PASS:
-			return _icon("ImportCheck")
-		STATUS_FAIL, STATUS_ERROR:
-			return _icon("ImportFail")
-		STATUS_SKIP:
-			return _icon("NodeWarning")
-		STATUS_QUEUED:
-			return _icon("Time")
-		STATUS_RUNNING:
-			return _icon("Progress%d" % (_spinner_frame + 1))
-	return null
-
-
-## "12 ms", "1.24 s", "2 m 05 s", nothing under 1 ms: short, and of one width at a
-## glance, to compare.
-func _duration(us: int) -> String:
-	# Under a millisecond, the time says nothing worth reading.
-	if us < 1000:
-		return ""
-	if us < 1000000:
-		return "%d ms" % roundi(us / 1000.0)
-	if us < 60000000:
-		return "%.2f s" % (us / 1000000.0)
-	var seconds := roundi(us / 1000000.0)
-	return "%d m %02d s" % [seconds / 60, seconds % 60]
-
-
-## Wide enough for the longest duration, at the editor's scale.
-func _time_width() -> int:
-	var font := _mono_font()
-	var size := EditorInterface.get_editor_theme().get_font_size("main_size", "EditorFonts")
-	var text_width := font.get_string_size("00 m 00 s", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	return int(text_width + 24 * EditorInterface.get_editor_scale())
-
-
-func _mono_font() -> Font:
-	return EditorInterface.get_editor_theme().get_font("source", "EditorFonts")
-
-
-func _button(
-	bar: Container, icon_name: String, text: String, tooltip: String, pressed: Callable
-) -> Button:
-	var button := Button.new()
-	button.flat = true
-	button.icon = _icon(icon_name)
-	button.text = text
-	button.tooltip_text = tooltip if tooltip != "" else text
-	button.pressed.connect(pressed)
-	bar.add_child(button)
-	return button
-
-
-func _icon(icon_name: String) -> Texture2D:
-	var theme := EditorInterface.get_editor_theme()
-	if not theme.has_icon(icon_name, "EditorIcons"):
-		return null
-	return theme.get_icon(icon_name, "EditorIcons")
