@@ -66,7 +66,7 @@ const ON_SAVE_TIP := (
 	"On save: when you save a script, a scene or a resource, run the tests it can affect"
 )
 ## The ⚙ menu: titles and settings.
-const SETTINGS := [["When you save", [Settings.TEST_ON_SAVE]]]
+const SETTINGS := [["When you save", [Settings.TEST_ON_SAVE]], ["Show", [Settings.TOP_BAR_TESTS]]]
 ## Godot reads a test's local variables, for its failures, only with it on.
 const LOCALS_SETTING := "debug/settings/gdscript/always_track_local_variables"
 const COLUMN_TIME := 1

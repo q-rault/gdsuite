@@ -86,7 +86,7 @@ const SETTINGS := [
 	["A check covers", [
 		Settings.CHECK_FORMAT, Settings.CHECK_LINT, Settings.CHECK_COMPILE, Settings.CHECK_HEALTH,
 	]],
-	["Show", [Settings.SHOW_IN_GUTTER]],
+	["Show", [Settings.SHOW_IN_GUTTER, Settings.TOP_BAR_CHECK]],
 ]
 const ON_SAVE_TIP := (
 	"On save: check again when you save a script. The ⚙ menu says what a check covers, and "

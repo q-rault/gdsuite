@@ -133,6 +133,8 @@ func _enter_tree() -> void:
 	_tests_button = _status_button(Ui.TESTS_ICON, _test_all)
 	add_control_to_container(CONTAINER_TOOLBAR, _check_button)
 	add_control_to_container(CONTAINER_TOOLBAR, _tests_button)
+	_check_button.visible = Settings.value(Settings.TOP_BAR_CHECK)
+	_tests_button.visible = Settings.value(Settings.TOP_BAR_TESTS)
 	_dock.problems_changed.connect(_show_check_state)
 	_dock.problems_changed.connect(_update_titles)
 	_dock.state_changed.connect(_update_titles)
@@ -636,6 +638,8 @@ func _show_settings() -> void:
 	_dock.show_settings()
 	_tests.show_settings()
 	_show_markers()
+	_check_button.visible = Settings.value(Settings.TOP_BAR_CHECK)
+	_tests_button.visible = Settings.value(Settings.TOP_BAR_TESTS)
 	_show_check_state()
 
 

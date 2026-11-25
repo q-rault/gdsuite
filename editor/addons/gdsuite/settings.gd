@@ -16,6 +16,9 @@ const CHECK_ON_SAVE := "gdsuite/on_save/check"
 const AUTOFIX_ON_SAVE := "gdsuite/on_save/autofix"
 const TEST_ON_SAVE := "gdsuite/on_save/test"
 const SHOW_IN_GUTTER := "gdsuite/problems/show_in_gutter"
+## The quick buttons of the editor's top bar.
+const TOP_BAR_CHECK := "gdsuite/top_bar/check"
+const TOP_BAR_TESTS := "gdsuite/top_bar/tests"
 const PROGRAM := "gdsuite/program"
 
 const DEFAULTS := {
@@ -28,6 +31,8 @@ const DEFAULTS := {
 	AUTOFIX_ON_SAVE: false,
 	TEST_ON_SAVE: false,
 	SHOW_IN_GUTTER: true,
+	TOP_BAR_CHECK: true,
+	TOP_BAR_TESTS: true,
 	PROGRAM: "",
 }
 
@@ -53,6 +58,8 @@ const LABELS := {
 	AUTOFIX_ON_SAVE: "Autofix",
 	TEST_ON_SAVE: "Run the affected tests",
 	SHOW_IN_GUTTER: "Problems in the script editor",
+	TOP_BAR_CHECK: "Check in the top bar",
+	TOP_BAR_TESTS: "Test all in the top bar",
 }
 
 const TOOLTIPS := {
@@ -65,6 +72,8 @@ const TOOLTIPS := {
 	AUTOFIX_ON_SAVE: "Saving a script formats it, and applies the lint fixes that are safe",
 	TEST_ON_SAVE: "Saving a script, a scene or a resource runs the tests it can affect",
 	SHOW_IN_GUTTER: "Marks the lines with a problem in the script editor",
+	TOP_BAR_CHECK: "The Check icon in the editor's top bar, which shows where the project stands",
+	TOP_BAR_TESTS: "The flask in the editor's top bar, which shows where the tests stand",
 }
 
 ## What these settings were before gdsuite 0.8: setting -> its old settings,
