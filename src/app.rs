@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{
-        Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, LintArgs, OutputArgs, OutputModeArg,
-        ReportArgs, RunArgs, SetupArgs,
+        CheckArgs, Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, HealthArgs, LintArgs,
+        OutputArgs, OutputModeArg, ReportArgs, SetupArgs,
     },
-    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, Manifest},
-    config_command, editor_addon, migrate,
+    config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, HealthFailOn, Manifest},
+    config_command, editor_addon, health, migrate,
     output::{CommandScope, OutputContext, OutputMode},
     process,
     tooling::{self, ProjectContext},
@@ -61,7 +61,7 @@ pub fn run() -> Result<()> {
         Commands::Lint(args) => lint(&context, args),
         Commands::Typecheck(args) => typecheck(&context, args),
         Commands::Test(args) => test(&context, args),
-        Commands::Health(args) => health(&context, args),
+        Commands::Health(args) => run_health(&context, args),
         Commands::Check(args) => check(&context, args),
         Commands::Report(args) => report(&context, args),
         Commands::Config(args) => config_command::run(&context, args.action),
@@ -630,9 +630,12 @@ fn test(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     Ok(())
 }
 
-fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
+fn run_health(context: &ProjectContext, args: HealthArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
+    if args.quick {
+        return health_quick(context, &report_mode);
+    }
     if report_mode == "json" {
         let step = run_health_step(context, args.args)?;
         let report = SuiteReport::from_steps("health", context, vec![step]);
@@ -652,6 +655,23 @@ fn health(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     }
     // gdhealth writes its bundle quietly, so say where it went.
     println!("{}", step.summary);
+    Ok(())
+}
+
+/// `gdsuite health --quick`: the findings, in the shape of `lint --report
+/// json`, with the dependency graph.
+fn health_quick(context: &ProjectContext, report_mode: &str) -> Result<()> {
+    let toolchain = load_toolchain_or_error(context)?;
+    let report = health::quick(&toolchain.gdhealth, &context.root)
+        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, format!("{error:#}")))?;
+    if report_mode == "json" {
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
+    for finding in &report.findings {
+        println!("{}", finding.line_text());
+    }
+    eprintln!("{}", report.summary);
     Ok(())
 }
 
@@ -679,10 +699,14 @@ fn typecheck(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
     Ok(())
 }
 
-fn check(context: &ProjectContext, args: RunArgs) -> Result<()> {
+fn check(context: &ProjectContext, args: CheckArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
-    let steps = run_check_steps(context, &config)?;
+    let mut steps = Vec::new();
+    if args.fix {
+        steps.push(run_fix_step(context, &config)?);
+    }
+    steps.extend(run_check_steps(context, &config)?);
     finish_check_pipeline(context, &config, report_mode, steps)
 }
 
@@ -1548,6 +1572,59 @@ fn run_check_steps(
     Ok(steps)
 }
 
+/// What `check --fix` does before the steps: the safe lint fixes, then
+/// formatting, as a fix can leave code to format. Only those of the steps the
+/// check runs. What is left is theirs to report, so this step never fails.
+fn run_fix_step(context: &ProjectContext, config: &GdsuiteConfig) -> Result<CheckStepResult> {
+    #[derive(Deserialize, Default)]
+    struct Fixed {
+        #[serde(default)]
+        fixed: usize,
+        #[serde(default)]
+        changed: Vec<String>,
+    }
+    let started = Instant::now();
+    let toolchain = load_toolchain_or_error(context)?;
+    let run = |args: &[&str]| -> Result<Fixed> {
+        let args = args.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let output = process::run(&toolchain.gdtidy, &args, &context.root)
+            .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+        Ok(serde_json::from_str(&output.stdout).unwrap_or_default())
+    };
+    let steps = &config.check.steps;
+    let mut done = Vec::new();
+    if steps.contains(&CheckStep::Lint) {
+        let fixed = run(&["lint", "--format", "json", "--fix", "."])?.fixed;
+        if fixed > 0 {
+            done.push(format!(
+                "fixed {fixed} lint problem{}",
+                if fixed == 1 { "" } else { "s" }
+            ));
+        }
+    }
+    if steps.contains(&CheckStep::Fmt) {
+        let formatted = run(&["fmt", "--format", "json", "."])?.changed.len();
+        if formatted > 0 {
+            done.push(format!(
+                "formatted {formatted} file{}",
+                if formatted == 1 { "" } else { "s" }
+            ));
+        }
+    }
+    let summary = if done.is_empty() {
+        "nothing to fix".to_string()
+    } else {
+        done.join(", ")
+    };
+    let duration_ms = started.elapsed().as_millis();
+    Ok(CheckStepResult::passed(
+        StepReport::ok("fix", duration_ms, summary.clone()),
+        &format!("Fixes: {summary}"),
+        "fix",
+        duration_ms,
+    ))
+}
+
 fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
@@ -1574,7 +1651,7 @@ fn run_fmt_step(context: &ProjectContext) -> Result<CheckStepResult> {
         duration_ms,
         diagnostics.clone(),
         format!(
-            "{}. Run `gdsuite fmt` to format the target.",
+            "{}. Run `gdsuite check --fix` (or `gdsuite fmt`) to format them.",
             format_formatting_summary(&diagnostics)
         ),
     ))
@@ -1691,11 +1768,47 @@ fn run_health_check_step(
     )?;
     let duration_ms = report.duration_ms;
     if report.status == "ok" {
-        return Ok(CheckStepResult::passed(
+        let failing = report
+            .findings
+            .iter()
+            .filter(|finding| match config.check.health_fail_on {
+                HealthFailOn::Never => false,
+                HealthFailOn::Critical => finding["severity"] == "error",
+                HealthFailOn::Warning => true,
+            })
+            .filter_map(|finding| {
+                serde_json::from_value::<health::HealthFinding>(finding.clone()).ok()
+            })
+            .map(|finding| finding.line_text())
+            .collect::<Vec<_>>();
+        if failing.is_empty() {
+            let label = match report.findings.len() {
+                0 => "Health checks passed".to_string(),
+                1 => "Health checks passed, with 1 finding to look at".to_string(),
+                count => format!("Health checks passed, with {count} findings to look at"),
+            };
+            return Ok(CheckStepResult::passed(
+                report,
+                &label,
+                "health",
+                duration_ms,
+            ));
+        }
+        let mut report = report;
+        report.status = "failed".to_string();
+        report.summary = format!(
+            "{} code health finding{} at or above the level of [check] health_fail_on",
+            failing.len(),
+            if failing.len() == 1 { "" } else { "s" }
+        );
+        let summary = format!("Found {}.", report.summary);
+        return Ok(CheckStepResult::failed(
             report,
-            "Health checks passed",
+            "Health checks failed",
             "health",
             duration_ms,
+            failing,
+            summary,
         ));
     }
     Ok(CheckStepResult::failed(
@@ -1734,6 +1847,12 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
     let args = default_health_args(&load_runtime_config(context)?, forwarded);
+    let health_json = context
+        .root
+        .join(tooling::GDHEALTH_ARTIFACT_DIR)
+        .join("health.json");
+    let written = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
+    let written_before = written(&health_json);
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
@@ -1770,6 +1889,14 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         "health failed".to_string()
     };
 
+    // The findings of this run: an older report may be there, when the
+    // arguments ask for something else than the report.
+    let findings = if written(&health_json) > written_before {
+        health::findings_of_report(&health_json)
+    } else {
+        Vec::new()
+    };
+
     Ok(StepReport {
         name: "health".to_string(),
         status: if output.status.success() {
@@ -1779,7 +1906,10 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         },
         duration_ms: started.elapsed().as_millis(),
         summary,
-        findings: Vec::new(),
+        findings: findings
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<serde_json::Result<Vec<_>>>()?,
         artifacts,
     })
 }
@@ -1923,12 +2053,10 @@ fn lint_failure_summary(report: &JsonLintReport) -> String {
     if fixable == 0 {
         format!("Found {count} lint {noun}. Fix them and rerun `gdsuite check`.")
     } else if fixable == count {
-        format!(
-            "Found {count} lint {noun}. Run `gdsuite lint -- --fix` to fix them, and rerun `gdsuite check`."
-        )
+        format!("Found {count} lint {noun}. Run `gdsuite check --fix` to fix them.")
     } else {
         format!(
-            "Found {count} lint {noun}, {fixable} fixable with `gdsuite lint -- --fix`. Fix the others and rerun `gdsuite check`."
+            "Found {count} lint {noun}, {fixable} fixable with `gdsuite check --fix`. Fix the others and rerun `gdsuite check`."
         )
     }
 }

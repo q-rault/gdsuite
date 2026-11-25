@@ -47,9 +47,9 @@ pub enum Commands {
         about = "Forward arguments to project-local gdhealth",
         long_about = "Forward arguments to project-local gdhealth.\n\nUse `gdsuite health` for the standard suite-owned health entrypoint. Use `gdsuite health -- ...` when you need direct gdhealth subcommands or flags."
     )]
-    Health(ForwardReportArgs),
+    Health(HealthArgs),
     #[command(about = "Run the default fast local validation pipeline")]
-    Check(RunArgs),
+    Check(CheckArgs),
     #[command(about = "Print a saved suite JSON report artifact")]
     Report(ReportArgs),
     #[command(
@@ -145,9 +145,25 @@ pub struct ForwardReportArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct RunArgs {
+pub struct HealthArgs {
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
+    /// List the findings and nothing else: no Git history, no report written.
+    /// With `--report json`, also prints the dependency graph. Editors use it.
+    #[arg(long, conflicts_with = "args")]
+    pub quick: bool,
+    #[arg(last = true, action = ArgAction::Append)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CheckArgs {
+    #[arg(long, value_parser = ["json", "text"])]
+    pub report: Option<String>,
+    /// Fix what can be fixed first: lint problems with a safe fix, then
+    /// formatting. Only for the steps the check runs.
+    #[arg(long)]
+    pub fix: bool,
 }
 
 #[derive(Debug, Args)]
