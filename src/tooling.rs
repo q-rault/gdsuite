@@ -1618,7 +1618,7 @@ fn install_addon_dir(
         if target_path.exists() {
             let current = fs::read_to_string(&target_path)
                 .with_context(|| format!("failed to read {}", target_path.display()))?;
-            if current == rewritten {
+            if same_text(&current, &rewritten) {
                 continue;
             }
             let Some(backup_dir) = target.backup_dir else {
@@ -1646,6 +1646,12 @@ fn install_addon_dir(
     }
 
     Ok(())
+}
+
+/// Whether two files have the same text: Git may check one out with CRLF line
+/// endings, which isn't an edit.
+fn same_text(a: &str, b: &str) -> bool {
+    a.lines().eq(b.lines())
 }
 
 fn rewrite_runtime_asset(relative: &Path, contents: &str, runtime_res_dir: &str) -> String {
@@ -1846,6 +1852,41 @@ mod tests {
         assert!(attributes.starts_with("# Written by"), "{attributes}");
         assert!(attributes.contains("addons/gdsuite/** linguist-generated=true\n"));
         assert!(attributes.contains("addons/gdtest/** linguist-generated=true\n"));
+    }
+
+    #[test]
+    fn test_install_takes_crlf_addon_files_for_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let (source, project) = (dir.path().join("source"), dir.path().join("project"));
+        let installed = project.join("addons/gdtest");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&installed).unwrap();
+        for name in ["same.gd", "edited.gd"] {
+            fs::write(source.join(name), "extends Node\nvar a = 1\n").unwrap();
+        }
+        fs::write(installed.join("same.gd"), "extends Node\r\nvar a = 1\r\n").unwrap();
+        fs::write(installed.join("edited.gd"), "extends Node\r\nvar a = 2\r\n").unwrap();
+
+        let mut report = AddonInstallReport::default();
+        install_addon_dir(
+            &source,
+            &installed,
+            AddonTarget {
+                project_root: &project,
+                backup_dir: None,
+            },
+            &mut report,
+            |_, contents| contents.to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(report.skipped_modified, [installed.join("edited.gd")]);
+        assert_eq!(report.installed_files, 0);
+        assert!(
+            fs::read_to_string(installed.join("same.gd"))
+                .unwrap()
+                .contains('\r')
+        );
     }
 
     #[test]
