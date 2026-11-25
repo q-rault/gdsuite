@@ -1450,3 +1450,36 @@ fn init_installs_the_editor_addon_and_says_how_to_turn_it_on() {
         .success()
         .stdout(predicate::str::contains("editor addon").not());
 }
+
+#[test]
+fn doctor_warns_about_an_addon_that_mixes_versions() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_tool_sources();
+    fixture.seed_path_tools();
+    fixture.cmd().arg("init").assert().success();
+    let runner = fixture.root.join("addons/gdsuite/runner.gd");
+    let original = fs::read_to_string(&runner).unwrap();
+
+    // Changed from this version: the project's choice.
+    fs::write(
+        &runner,
+        original
+            + "# mine
+",
+    )
+    .unwrap();
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .stdout(predicate::str::contains("runner.gd").not());
+
+    // Nothing says which version it was changed from.
+    fs::remove_file(fixture.root.join("addons/gdsuite/files.sha256")).unwrap();
+    fixture
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .stdout(predicate::str::contains("runner.gd, which was changed"));
+}
