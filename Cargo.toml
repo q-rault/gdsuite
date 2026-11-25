@@ -20,7 +20,7 @@ include = ["/src/**", "/editor/addons/**", "/.gdsuite-release.toml", "/Cargo.tom
 gdhealth = "=0.3.6"
 gdtest = "=0.2.12"
 gdtidy = "=0.3.5"
-gdtypecheck = "=0.2.5"
+gdtypecheck = "=0.2.6"
 anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"
