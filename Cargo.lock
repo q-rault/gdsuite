@@ -420,9 +420,9 @@ dependencies = [
 
 [[package]]
 name = "gdtypecheck"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9db8d5303a365e2e3f79d4a255f43d14b71a6787245f7b4470587e9583b3be8c"
+checksum = "8bee0fbd1c33020a09270ebfec5e2f72a6b4ad79d725b809dc3ba5b394e4909d"
 dependencies = [
  "anyhow",
  "clap",
