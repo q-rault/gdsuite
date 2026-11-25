@@ -27,9 +27,12 @@ in; close it or let it rebase to nothing. Releases are made by hand (see
 - The addon is embedded in the binary (`include_str!` in
   `src/editor_addon.rs`) and written to `addons/gdsuite/` by `gdsuite setup`
   and the first `gdsuite test`.
-- A copy of what gdsuite wrote is kept in `.gdsuite/state/editor-addon/`. On
-  an update, a file that still matches that copy is replaced; a file the user
-  changed is kept and reported.
+- The SHA-256 of each file gdsuite wrote is kept in
+  `addons/gdsuite/files.sha256`, committed with the addon. On an update or a
+  downgrade, a file that still matches its hash (line endings aside) is
+  replaced; a file the user changed is kept and reported. Releases 0.7.0 to
+  0.7.4 wrote no hashes, so `src/editor_addon_released.sha256` has those of
+  their files; nothing is added to it for later releases.
 - `addons/gdtest_editor` (the old test panel) is no longer installed. When it
   matches a known gdtest copy (ignoring `.uid` files, line endings and
   plugin.cfg's `version=` line), it is backed up to

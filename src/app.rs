@@ -209,10 +209,7 @@ fn setup_impl(
         output.step("updated the GDSuite editor addon in addons/gdsuite");
     }
     for kept in &installed.kept {
-        output.warn(format!(
-            "kept {}, which differs from this gdsuite's addon; delete it to get this version",
-            kept.display()
-        ));
+        output.warn(kept.message());
     }
     match old_editor_addon_note(context)? {
         Some((note, true)) => output.warn(note),
@@ -458,6 +455,18 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
         warnings.push(drift.message());
         if status == CompatibilityVerdict::Ok {
             status = CompatibilityVerdict::Warning;
+        }
+    }
+    // Changing this version's addon is the project's choice. A changed file
+    // that stayed behind when the rest was updated can break the addon.
+    if editor_addon::is_installed(&context.root) {
+        for kept in editor_addon::changed_files(&context.root)? {
+            if kept.other_version {
+                warnings.push(kept.message());
+                if status == CompatibilityVerdict::Ok {
+                    status = CompatibilityVerdict::Warning;
+                }
+            }
         }
     }
     // A pin is the project's choice, so it is mentioned without changing the status.
@@ -796,9 +805,12 @@ fn install_test_addons_if_needed(
         }
     }
     if !editor_addon::is_installed(&context.root) {
-        editor_addon::install(&context.root)
+        let installed = editor_addon::install(&context.root)
             .map_err(|error| command_error(EXIT_SETUP_ERROR, format!("{error:#}")))?;
         eprintln!("gdsuite: {EDITOR_ADDON_INSTALLED}");
+        for kept in &installed.kept {
+            eprintln!("warning: {}", kept.message());
+        }
     }
     for skipped in &report.skipped_modified {
         eprintln!(
@@ -874,9 +886,14 @@ fn load_toolchain_or_error(context: &ProjectContext) -> Result<tooling::Toolchai
         let _ = tooling::refresh_editor_links(context);
     }
     if editor_addon::is_installed(&context.root)
-        && editor_addon::install(&context.root).is_ok_and(|installed| installed.written > 0)
+        && let Ok(installed) = editor_addon::install(&context.root)
+        && installed.written > 0
     {
         eprintln!("gdsuite: updated the GDSuite editor addon in addons/gdsuite");
+        // Only when it was updated: setup and doctor say it every time.
+        for kept in &installed.kept {
+            eprintln!("warning: {}", kept.message());
+        }
     }
     // After updating gdsuite, or editing [tools], the installed tools lag
     // behind until `gdsuite setup` runs: say so instead of running them silently.

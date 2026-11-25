@@ -264,4 +264,10 @@ A setting in `[editor]` wins over each person's own; the ⚙ menu shows it as
 ## Your changes to the addon
 
 `gdsuite` updates `addons/gdsuite/` when you update gdsuite. A file of the
-addon you changed is kept as it is: delete it to get the new version.
+addon you changed is kept as it is: delete it to get the new version. A kept
+file may not work with the new version of the others, so `gdsuite setup` and
+`gdsuite doctor` name it.
+
+`addons/gdsuite/files.sha256` holds the hash of each file as `gdsuite` wrote
+it, which tells your changes from another version's files. Commit it with the
+addon, so that a fresh clone or a CI job can update it too.
