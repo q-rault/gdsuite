@@ -68,10 +68,10 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
 
 | | Where | Runs | Dedicated window? |
 |---|---|---|---|
-| **Formatting** | Script editor: "Format script" in a GDSuite menu, the command palette and a shortcut. No panel. | On Check (Autofix, on by default); on save with Autofix on save | No |
-| **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (**On save**, on by default); the project on Check | No |
+| **Formatting** | Script editor: "Format script" in a GDSuite menu, the command palette and a shortcut. No panel. | On Check, and on save, with Autofix on (the default) | No |
+| **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (**Check → On save**, on by default); the project on Check | No |
 | **Type check** | Same Problems dock, its own filter | In the background a moment after you save; on Check | No |
-| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; on save with the dock's **On save** on | **Yes**: the dock floats well on a second monitor |
+| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; on save with **Tests → On save** on | **Yes**: the dock floats well on a second monitor |
 | **Code health** | Its findings in the Problems dock; its dependency graph as the dock's **Graph** view; the full report in the browser | On Check, and a moment after a save | No |
 | **Check** | An icon in the editor's top bar, and the same **Check** in the Problems dock | On request | No |
 
@@ -82,8 +82,8 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
   keeping the caret and scroll position. It never rewrites a file behind an
   open, unsaved script.
 - **Check** formats the project's scripts first, with **Autofix** on (the
-  default). **Autofix on save** is off by default; it formats and fixes the
-  saved script.
+  default), and so does the check on save, on the saved script: one setting
+  for both, so what a save leaves is what Check would.
 - A file that would change meaning is left alone, as on the command line; the
   editor says why in a toast, not a dialog.
 
@@ -123,7 +123,7 @@ on a side, or float:
   and its last result shows as an icon there.
 - **Run tests** in the FileSystem dock's context menu, on a folder or a
   script.
-- **On save** (off by default): the dock runs the affected tests once
+- **On save** (off by default, in the dock's ⚙): the dock runs the affected tests once
   per save of a script, scene or resource, as `gdtest --affected-by` lists
   them from the project's dependency graph. Saves during a run wait
   for it to end. (A first version kept gdtest's watch mode running; it
@@ -155,20 +155,20 @@ does.
 
 ## Settings
 
-Two places, each for what it's good at. The ⚙ of both docks has the same
-menu: When you check (Autofix), When you save (Check, Autofix, Run the
-affected tests), A check covers (Format, Lint, Compile, Health), Show
-(Problems in the script editor). Each dock's **On save** toggle is the
-setting for what its main button does.
+Two places, each for what it's good at. Each dock's ⚙ menu holds its
+settings, with titles in the same shape: the Problems dock's Check (Autofix,
+On save), A check covers (Format, Lint, Compile, Health), Show (Problems in
+the script editor, Check in the top bar); the Tests dock's Tests (On save),
+Show (Test all in the top bar). The toolbars have no toggles of their own.
 
 **Your preferences: Editor Settings → GDSuite** (per computer, all projects):
 
 | Setting | Default |
 |---|---|
-| Autofix (when you check) | On |
+| Autofix, on Check and on save | On |
 | Check on save | On (the saved script, then the project in the background) |
-| Autofix on save | Off |
 | Run the affected tests on save | Off |
+| The top bar's Check and Test all | On |
 | A check covers: Format, Lint, Compile, Health | On |
 | Show problems in the gutter | On |
 | `gdsuite` program | Found automatically |
@@ -181,11 +181,11 @@ rebound in the editor's Shortcuts tab.
 The panel edits it for the common changes (turn a rule off, the steps of
 Check, the test folder), through a `gdsuite` command that keeps the file's
 comments, and has **Open gdsuite.toml** for the rest. A team that wants
-everyone to fix and format on save says so in `gdsuite.toml`:
+everyone to run the affected tests on save says so in `gdsuite.toml`:
 
 ```toml
 [editor]
-autofix_on_save = true
+test_on_save = true
 ```
 
 which takes precedence over the personal setting, and the settings page shows
@@ -248,4 +248,5 @@ Each phase ships on its own and is usable without the next.
 - **Code health:** a source of problems in the Problems dock, with its
   dependency graph as a view of that dock, not a dock or a main screen tab.
 - **One Check, one Test all:** the top bar and the docks run the same
-  thing, with the same icon, and both docks have the same On save and ⚙.
+  thing, with the same icon. One Autofix for Check and for save. Settings
+  live in each dock's ⚙ menu, not as toggles in its toolbar.

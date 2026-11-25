@@ -62,11 +62,8 @@ const WAITING_TIP := (
 	"The tests these files affect run once they compile: until then, they could only fail to "
 	+ "load."
 )
-const ON_SAVE_TIP := (
-	"On save: when you save a script, a scene or a resource, run the tests it can affect"
-)
 ## The ⚙ menu: titles and settings.
-const SETTINGS := [["When you save", [Settings.TEST_ON_SAVE]], ["Show", [Settings.TOP_BAR_TESTS]]]
+const SETTINGS := [["Tests", [Settings.TEST_ON_SAVE]], ["Show", [Settings.TOP_BAR_TESTS]]]
 ## Godot reads a test's local variables, for its failures, only with it on.
 const LOCALS_SETTING := "debug/settings/gdscript/always_track_local_variables"
 const COLUMN_TIME := 1
@@ -118,7 +115,6 @@ var _filter: LineEdit
 ## Runs every test, or stops the tests while they run.
 var _run_button: Button
 var _rerun_failed: Button
-var _on_save: Button
 var _collapse: Button
 var _progress: ProgressBar
 ## SHOW_* -> its toggle: it shows the count, and hides those tests when off.
@@ -170,12 +166,6 @@ func _ready() -> void:
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_status.modulate.a = Ui.FADED_ALPHA
 	bar.add_child(_status)
-	_on_save = SettingsMenu.on_save_toggle(
-		bar, Settings.TEST_ON_SAVE, ON_SAVE_TIP,
-		func() -> void:
-			Settings.set_personal(Settings.TEST_ON_SAVE, _on_save.button_pressed)
-			setting_toggled.emit(Settings.TEST_ON_SAVE)
-	)
 	var failed_tip := "Run the tests that failed again"
 	_rerun_failed = Ui.button(bar, "Reload", "Test failed", failed_tip, rerun_failed)
 	var test_all := func() -> void: test_all_requested.emit()
@@ -306,7 +296,6 @@ func is_running() -> bool:
 ## A setting changed: whether saving a file runs the tests it affects again.
 func show_settings() -> void:
 	watch.enabled = bool(Settings.value(Settings.TEST_ON_SAVE))
-	SettingsMenu.show_on_save(_on_save)
 
 
 ## Stops the run going, which now runs code that changed, and starts another

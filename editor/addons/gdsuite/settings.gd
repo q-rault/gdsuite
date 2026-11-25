@@ -4,7 +4,7 @@ extends RefCounted
 ## GDSuite. A project can set the same choices for everyone in the [editor]
 ## section of gdsuite.toml, which wins over the personal setting.
 
-## Whether Check also fixes what can be fixed.
+## Whether a check, on request or on save, fixes what can be fixed first.
 const AUTOFIX := "gdsuite/check/autofix"
 ## What a check covers.
 const CHECK_FORMAT := "gdsuite/check/format"
@@ -13,7 +13,6 @@ const CHECK_COMPILE := "gdsuite/check/compile"
 const CHECK_HEALTH := "gdsuite/check/health"
 ## What saving a file does.
 const CHECK_ON_SAVE := "gdsuite/on_save/check"
-const AUTOFIX_ON_SAVE := "gdsuite/on_save/autofix"
 const TEST_ON_SAVE := "gdsuite/on_save/test"
 const SHOW_IN_GUTTER := "gdsuite/problems/show_in_gutter"
 ## The quick buttons of the editor's top bar.
@@ -28,7 +27,6 @@ const DEFAULTS := {
 	CHECK_COMPILE: true,
 	CHECK_HEALTH: true,
 	CHECK_ON_SAVE: true,
-	AUTOFIX_ON_SAVE: false,
 	TEST_ON_SAVE: false,
 	SHOW_IN_GUTTER: true,
 	TOP_BAR_CHECK: true,
@@ -44,7 +42,6 @@ const PROJECT_KEYS := {
 	CHECK_COMPILE: "check_compile",
 	CHECK_HEALTH: "check_health",
 	CHECK_ON_SAVE: "check_on_save",
-	AUTOFIX_ON_SAVE: "autofix_on_save",
 	TEST_ON_SAVE: "test_on_save",
 }
 
@@ -54,22 +51,26 @@ const LABELS := {
 	CHECK_LINT: "Lint",
 	CHECK_COMPILE: "Compile",
 	CHECK_HEALTH: "Health",
-	CHECK_ON_SAVE: "Check",
-	AUTOFIX_ON_SAVE: "Autofix",
-	TEST_ON_SAVE: "Run the affected tests",
+	CHECK_ON_SAVE: "On save",
+	TEST_ON_SAVE: "On save",
 	SHOW_IN_GUTTER: "Problems in the script editor",
 	TOP_BAR_CHECK: "Check in the top bar",
 	TOP_BAR_TESTS: "Test all in the top bar",
 }
 
 const TOOLTIPS := {
-	AUTOFIX: "Check formats the scripts, and applies the lint fixes that are safe",
+	AUTOFIX: (
+		"A check formats the scripts first, and applies the lint fixes that are safe: Check on"
+		+ " the project, and On save on the saved script"
+	),
 	CHECK_FORMAT: "Scripts that formatting would change",
 	CHECK_LINT: "The linter's rules",
 	CHECK_COMPILE: "Godot's compiler: GDScript and shader errors, Godot's warnings, missing files",
 	CHECK_HEALTH: "Code health: scripts too big or too tangled, and how they depend on each other",
-	CHECK_ON_SAVE: "Saving a script checks it again, and the project a moment later",
-	AUTOFIX_ON_SAVE: "Saving a script formats it, and applies the lint fixes that are safe",
+	CHECK_ON_SAVE: (
+		"Saving a script checks it again, fixing it first with Autofix on, and the project a"
+		+ " moment later"
+	),
 	TEST_ON_SAVE: "Saving a script, a scene or a resource runs the tests it can affect",
 	SHOW_IN_GUTTER: "Marks the lines with a problem in the script editor",
 	TOP_BAR_CHECK: "The Check icon in the editor's top bar, which shows where the project stands",
@@ -80,12 +81,13 @@ const TOOLTIPS := {
 ## and its old keys of [editor]. On when one of the old ones is.
 const OLD_SETTINGS := {
 	CHECK_ON_SAVE: ["gdsuite/on_save/lint", "gdsuite/on_save/type_check"],
-	AUTOFIX_ON_SAVE: ["gdsuite/on_save/format"],
 	TEST_ON_SAVE: ["gdsuite/on_save/run_tests"],
 }
+## Old settings Autofix replaces, which say nothing about Check: removed.
+const DROPPED_SETTINGS := ["gdsuite/on_save/format", "gdsuite/on_save/autofix"]
 const OLD_PROJECT_KEYS := {
+	AUTOFIX: ["format_on_save"],
 	CHECK_ON_SAVE: ["lint_on_save", "type_check_on_save"],
-	AUTOFIX_ON_SAVE: ["format_on_save"],
 	TEST_ON_SAVE: ["run_tests_on_save"],
 }
 
@@ -97,6 +99,9 @@ static func register() -> void:
 	var settings := EditorInterface.get_editor_settings()
 	for key: String in OLD_SETTINGS:
 		_replace_old(settings, key)
+	for old: String in DROPPED_SETTINGS:
+		if settings.has_setting(old):
+			settings.erase(old)
 	for key: String in DEFAULTS:
 		if not settings.has_setting(key):
 			settings.set_setting(key, DEFAULTS[key])

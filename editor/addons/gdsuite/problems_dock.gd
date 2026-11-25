@@ -81,17 +81,12 @@ const MENU_RESET_WIDTHS := 200
 
 ## The ⚙ menu: titles and settings.
 const SETTINGS := [
-	["When you check", [Settings.AUTOFIX]],
-	["When you save", [Settings.CHECK_ON_SAVE, Settings.AUTOFIX_ON_SAVE]],
+	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE]],
 	["A check covers", [
 		Settings.CHECK_FORMAT, Settings.CHECK_LINT, Settings.CHECK_COMPILE, Settings.CHECK_HEALTH,
 	]],
 	["Show", [Settings.SHOW_IN_GUTTER, Settings.TOP_BAR_CHECK]],
 ]
-const ON_SAVE_TIP := (
-	"On save: check again when you save a script. The ⚙ menu says what a check covers, and "
-	+ "whether saving also fixes"
-)
 
 ## The problems, which the list and the graph show.
 var store := ProblemStore.new()
@@ -117,7 +112,6 @@ var _source_counts := {}
 var _current_only: Button
 ## Folds every script, or unfolds them all once all are folded.
 var _fold_button: Button
-var _on_save: Button
 var _check_button: Button
 var _columns_menu: PopupMenu
 var _graph: DependencyGraph
@@ -193,12 +187,6 @@ func _ready() -> void:
 	_status.modulate.a = Ui.FADED_ALPHA
 	bar.add_child(_status)
 
-	_on_save = SettingsMenu.on_save_toggle(
-		bar, Settings.CHECK_ON_SAVE, ON_SAVE_TIP,
-		func() -> void:
-			Settings.set_personal(Settings.CHECK_ON_SAVE, _on_save.button_pressed)
-			setting_toggled.emit(Settings.CHECK_ON_SAVE)
-	)
 	_check_button = Ui.button(bar, "", "Check", "", func() -> void: check_requested.emit())
 	_check_button.icon = Ui.svg_icon(Ui.CHECK_ICON)
 
@@ -295,9 +283,8 @@ func set_graph(graph: Dictionary) -> void:
 	_graph.set_graph(graph)
 
 
-## A setting changed: shows what a check covers, and what saving does.
+## A setting changed: shows what a check covers.
 func show_settings() -> void:
-	SettingsMenu.show_on_save(_on_save)
 	store.forget_unchecked_sources()
 	for source: String in Problem.SOURCES:
 		_source_buttons[source].visible = Problem.is_checked(source)

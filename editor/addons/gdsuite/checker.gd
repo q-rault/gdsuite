@@ -84,10 +84,10 @@ func check_source(source: String) -> void:
 ## A script was saved: fixes and checks it, as the settings say.
 func script_saved(script: GDScript) -> void:
 	var path := script.resource_path
-	if Settings.value(Settings.AUTOFIX_ON_SAVE):
-		_fix_saved(script)
 	if not Settings.value(Settings.CHECK_ON_SAVE):
 		return
+	if Settings.value(Settings.AUTOFIX):
+		_fix_saved(script)
 	_check_files(PackedStringArray([path]))
 	_compile_timer.start()
 

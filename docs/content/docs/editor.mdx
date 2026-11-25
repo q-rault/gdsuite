@@ -43,13 +43,14 @@ Two icons in the editor's top bar show where the project stands:
 1. With **Autofix** on (the default), it fixes what can be fixed safely:
    it formats the scripts, and applies the lint fixes that can't change what
    the code does (see [what can be fixed](/linting#what-can-be-fixed)).
-   Scripts with unsaved changes are left as they are, and the editor shows the scripts it changed
-   as they are now.
+   Scripts with unsaved changes are left as they are, and the editor shows
+   the scripts it changed as they are now.
 2. It checks what is left, with the tools a check covers: **Format**,
    **Lint**, **Compile** and **Health**, all on by default.
 
-Turn Autofix off, or leave a tool out of the check, in the **⚙** menu of
-either dock. A tool left out has no filter in the Problems dock, and its
+The same Autofix applies when saving checks a script (see [when you
+save](#when-you-save)). Turn it off, or leave a tool out of the check, in the
+**⚙** menu of the Problems dock. A tool left out has no filter in the Problems dock, and its
 problems aren't listed.
 
 ## The Problems dock
@@ -207,7 +208,8 @@ from the folder in `[commands] default_test_target`.
 - Hover a row for its **▶**: it runs that script or that test.
   **Right-click** runs the selected tests, and **double-click** opens a test.
   Click on empty space, or press **Escape**, to select nothing.
-- **On save** runs tests again when you save a script, a scene or a resource:
+- With **⚙ → Tests → On save** on, saving a script, a scene or a resource
+  runs the tests again:
   only the tests that use it, directly or through other scripts, scenes and
   resources (`extends`, `preload`/`load`, `class_name`, autoloads), and the
   scenes they were seen loading when they last ran. A test script runs its own
@@ -221,8 +223,8 @@ from the folder in `[commands] default_test_target`.
     stopped run had yet to finish.
   - When the script you saved doesn't compile, its tests wait, and the bar
     says "Waiting for hud.gd to compile": they could only fail to load. They
-    run once the check after a save finds it compiles (with **On save →
-    Check** on; off, they run at once).
+    run once the check after a save finds it compiles (with **⚙ → Check →
+    On save** on in the Problems dock; off, they run at once).
   - When you save a script back to what it was when its tests last ran, say
     after renaming a variable and renaming it back, nothing runs: its tests
     are up to date again.
@@ -272,47 +274,46 @@ and you can delete the folder.
 
 ## When you save
 
-Both docks have an **On save** toggle, at the same place, next to their main
-button: on, saving does what that button does, on what you saved.
+Each dock's **⚙** menu has an **On save** setting: on, saving does what the
+dock's main button does, on what you saved.
 
-- In the Problems dock, saving a script checks it again, and the project a
-  moment later, in the background.
-- In the Tests dock, saving a script, a scene or a resource runs the tests it
-  can affect.
+- **Check → On save** (Problems dock): saving a script checks it again, and
+  the project a moment later, in the background. With **Autofix** on, the
+  same setting as for **Check**, the script is fixed and formatted first.
+- **Tests → On save** (Tests dock): saving a script, a scene or a resource
+  runs the tests it can affect.
 
-The **⚙** menu of both docks has the same settings, under what they are for:
+The settings of the **⚙** menus:
 
-| Section | Setting | Default | What it does |
+| Dock | Setting | Default | What it does |
 | --- | --- | --- | --- |
-| When you check | Autofix | On | **Check** formats the scripts, and applies the safe lint fixes, before it checks |
-| When you save | Check | On | Saving a script checks it, and the project a moment later (the Problems dock's **On save**) |
-| When you save | Autofix | Off | Saving a script formats it, and applies the safe lint fixes |
-| When you save | Run the affected tests | Off | Saving runs the tests it can affect (the Tests dock's **On save**) |
-| A check covers | Format, Lint, Compile, Health | On | The tools **Check** runs, and whose problems are listed |
-| Show | Problems in the script editor | On | The icons and tints in the script editor |
-| Show | Check in the top bar (Problems dock), Test all in the top bar (Tests dock) | On | The Check icon and the flask in the editor's top bar |
+| Problems | Check → Autofix | On | A check formats the scripts, and applies the safe lint fixes, first: the project's on **Check**, the saved script's on save |
+| Problems | Check → On save | On | Saving a script checks it, and the project a moment later |
+| Problems | A check covers → Format, Lint, Compile, Health | On | The tools a check runs, and whose problems are listed |
+| Problems | Show → Problems in the script editor | On | The icons and tints in the script editor |
+| Problems | Show → Check in the top bar | On | The Check icon in the editor's top bar |
+| Tests | Tests → On save | Off | Saving runs the tests it can affect |
+| Tests | Show → Test all in the top bar | On | The flask in the editor's top bar |
 
 They are also in **Editor Settings → GDSuite**. These are yours: they apply
 to every project on your computer.
 
 ### The same choice for the whole team
 
-To make everyone's saves fix their scripts, say so in the project's
+To make everyone run the affected tests on save, say so in the project's
 `gdsuite.toml`:
 
 ```toml
 [editor]
-autofix_on_save = true
+test_on_save = true
 ```
 
-A setting in `[editor]` wins over each person's own; the ⚙ menu and the On
-save toggle show it as "set by this project". The keys are `autofix`,
-`check_format`, `check_lint`, `check_compile`, `check_health`,
-`check_on_save`, `autofix_on_save` and `test_on_save` (see
+A setting in `[editor]` wins over each person's own; the ⚙ menu shows it as
+"set by this project". The keys are `autofix`, `check_format`, `check_lint`,
+`check_compile`, `check_health`, `check_on_save` and `test_on_save` (see
 [gdsuite.toml](/reference/gdsuite-toml)). The keys of GDSuite 0.7 and earlier
 still count: `lint_on_save` and `type_check_on_save` for `check_on_save`,
-`format_on_save` for `autofix_on_save`, `run_tests_on_save` for
-`test_on_save`.
+`format_on_save` for `autofix`, `run_tests_on_save` for `test_on_save`.
 
 ## Your changes to the addon
 

@@ -2,7 +2,6 @@
 extends MenuButton
 ## The ⚙ of a dock's toolbar, the same in the Problems and Tests docks: the
 ## settings under a title each, then the dock's own items, then gdsuite.toml.
-## And the "On save" toggle both have.
 
 ## A setting was turned on or off.
 signal setting_toggled(key: String)
@@ -62,27 +61,3 @@ func _on_pressed(id: int) -> void:
 		var key: String = _keys[id]
 		Settings.set_personal(key, not bool(Settings.value(key)))
 		setting_toggled.emit(key)
-
-
-## The "On save" toggle, the same in every dock: whether saving does what the
-## dock's main button does, on what was saved. `setting` is its setting.
-static func on_save_toggle(
-	bar: Container, setting: String, tooltip: String, toggled: Callable
-) -> Button:
-	var button := Ui.counted_toggle(bar, Ui.icon("Save"), "On save", tooltip, toggled)
-	button.set_meta("setting", setting)
-	button.set_meta("description", tooltip)
-	return button
-
-
-## Shows the setting in effect on an `on_save_toggle`.
-static func show_on_save(button: Button) -> void:
-	var setting: String = button.get_meta("setting")
-	var on := bool(Settings.value(setting))
-	var by_project := Settings.is_set_by_project(setting)
-	button.set_pressed_no_signal(on)
-	(button.get_meta("box") as Control).modulate.a = 1.0 if on else Ui.OFF_ALPHA
-	button.disabled = by_project
-	button.tooltip_text = button.get_meta("description")
-	if by_project:
-		button.tooltip_text += "\nSet by this project, in gdsuite.toml"
