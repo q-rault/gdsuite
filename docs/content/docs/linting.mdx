@@ -74,6 +74,22 @@ test/test_player.gd:12:24: warning[duplicated-load]: duplicated loading of "res:
 2 lint problems in 3 files
 ```
 
+## What can be fixed
+
+`gdsuite check --fix`, **Check** in the [editor](/editor) and `gdsuite lint --
+--fix` apply only the fixes that can't change what the code does:
+
+| Rule | The fix |
+| --- | --- |
+| `unnecessary-pass` | Removes the `pass` |
+| `comment-space` | Adds the space after `#` |
+| `no-elif-return` | `elif` after a `return` becomes `if` |
+| `no-else-return` | Removes the `else:` after a `return`, and dedents its body, unless a name it declares would clash |
+| `doc-tag` | Adds the colon a doc tag lacks: `@deprecated:` |
+
+Formatting fixes the rest of the layout. A problem that can be fixed says
+so; the others are yours to fix.
+
 ## When you disagree with a rule
 
 Rules are advice. Turn one off for the whole project in `gdsuite.toml`:

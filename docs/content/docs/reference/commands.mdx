@@ -16,10 +16,10 @@ description: Every gdsuite command, its options, and how to pass options to the 
 | `gdsuite lint` | [Lint](/linting) the project's scripts |
 | `gdsuite typecheck` | [Type check](/type-checking) the project |
 | `gdsuite test` | Run the [tests](/testing) in `default_test_target` (`test/`) |
-| `gdsuite health` | Measure [code health](/code-health) |
-| `gdsuite check` | Run the [check](/check) steps in order, stopping at the first that fails |
+| `gdsuite health` | Measure [code health](/code-health). `--quick` prints the findings and the dependency graph without Git history, as the editor shows them |
+| `gdsuite check` | Run the [check](/check) steps in order, stopping at the first that fails. `--fix` first fixes what can be fixed safely |
 | `gdsuite report [NAME]` | Print a saved [report](/reference/reports): `latest` (the default), `check`, `test`, `health`, or `ci` to combine them |
-| `gdsuite config get\|set\|unset\|add\|remove KEY [VALUE]` | Read or change `gdsuite.toml`, keeping its comments. Keys are dotted (`lint.disable`, `editor.format_on_save`); a change gdsuite can't read is undone |
+| `gdsuite config get\|set\|unset\|add\|remove KEY [VALUE]` | Read or change `gdsuite.toml`, keeping its comments. Keys are dotted (`lint.disable`, `editor.autofix_on_save`); a change gdsuite can't read is undone |
 
 ## Options
 

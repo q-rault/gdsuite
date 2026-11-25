@@ -28,24 +28,35 @@ Two icons in the editor's top bar show where the project stands:
 
 - **Check** (a page with a tick): grey until GDSuite has looked at the
   project, then red when there are errors, yellow when there are only
-  warnings, green when there are none. It counts what formatting, linting and
-  the compile check found, as listed in the Problems dock. Click it to run the
-  project's check: the steps of `[check]` in `gdsuite.toml`, as
-  [`gdsuite check`](/check) does. Its tooltip then lists each step:
-
-  ```text
-  ✔ fmt: format check passed
-  ✖ lint: 1 lint problem in 4 files
-  ```
+  warnings, green when there are none. It counts what formatting, linting,
+  the compile check and code health found, as listed in the Problems dock.
+  Click it to check the project; it does what **Check** in the Problems dock
+  does.
 
 - **Tests** (a flask): red when a test fails, green when every test ran and
   passes, grey when some tests have not run yet or must run again because a
-  script changed. Click it to run all tests.
+  script changed. Click it to run all tests, or to stop them while they run;
+  it does what **Test all** in the Tests dock does, and has the same icon.
+
+### What Check does
+
+1. With **Autofix** on (the default), it fixes what can be fixed safely:
+   it formats the scripts, and applies the lint fixes that can't change what
+   the code does (see [what can be fixed](/linting#what-can-be-fixed)).
+   Scripts with unsaved changes are left as they are, and the editor shows the scripts it changed
+   as they are now.
+2. It checks what is left, with the tools a check covers: **Format**,
+   **Lint**, **Compile** and **Health**, all on by default.
+
+Turn Autofix off, or leave a tool out of the check, in the **⚙** menu of
+either dock. A tool left out has no filter in the Problems dock, and its
+problems aren't listed.
 
 ## The Problems dock
 
 The **Problems** dock lists what [formatting](/formatting),
-[linting](/linting) and the [compile check](/type-checking) found, by script:
+[linting](/linting), the [compile check](/type-checking) and [code
+health](/code-health) found, by script:
 
 ```text
 ⚠  1 script not formatted  ·  double-click to format it
@@ -68,9 +79,9 @@ problem says:
 - its **code** and the **tool** that found it. The code is the lint rule
   (`max-line-length`) or the name of Godot's warning (`unused-variable`,
   which is `UNUSED_VARIABLE` in Project Settings). Godot's errors have no
-  name, so only the tool is shown. The tool is `format`, `lint`, or
-  `compile`: Godot's own compiler, which also reads shaders, scenes and
-  resources.
+  name, so only the tool is shown. The tool is `format`, `lint`,
+  `compile` (Godot's own compiler, which also reads shaders, scenes and
+  resources), or `health`.
 
 Scripts that formatting would change are one row at the top: double-click it
 to format them all (scripts with unsaved changes are left as they are). A
@@ -100,7 +111,7 @@ one that is off is faded.
 
 - The error and warning icons count what the project has (hover one for its
   name), and hide or show those problems.
-- **Format**, **Lint** and **Compile** count what each tool found, errors in
+- **Format**, **Lint**, **Compile** and **Health** count what each tool found, errors in
   red and warnings in yellow, and hide or show its problems. While a tool
   checks, a spinner turns next to its name.
 - **Project | Current**: the whole project, or only the script you're
@@ -112,7 +123,8 @@ one that is off is faded.
   ago", "Checked 3 min ago".
 - A script you edited since it was checked has its problems faded, and says
   "edited since checked", until it's checked again when you save.
-- **Check** looks at the whole project again: format, lint and compile.
+- **Check** looks at the whole project again, and fixes what it can (see
+  [what Check does](#what-check-does)).
 - A dot before the dock's name says where the project stands, as the Output
   dock's does: red when there is an error, yellow when there are only
   warnings, green when every check reported nothing on what your scripts hold
@@ -140,6 +152,31 @@ first and save.
 
 Like any dock, you can move it to a side, or make it a window of its own.
 
+### Code health and the graph
+
+Code health findings are listed with the other problems: a function too long
+or too complex, a script too big, scripts that use each other in a cycle.
+Critical findings are errors, the others warnings. They don't fail
+`gdsuite check` unless the project says so (see [the check](/check#code-health)).
+A finding that a lint rule also reports, on the same line, is listed once,
+as the lint problem. Select a finding for what it means, the scripts it
+involves, and what to do: "Breaking one dependency ends the cycle: a → b".
+
+**List | Graph** switches the list for a graph of which script uses which:
+the scripts that use others on the left, what they use on the right, arrows
+in red where they make a cycle. Each script shows how many problems it has,
+in their colour. With **Current**, the graph shows the script you're editing,
+the scripts that use it and those it uses.
+
+- Scroll to zoom, drag to move. Double-click empty space to see it all.
+- Click a script to see, in the details, what it uses and what uses it.
+  Double-click it to open it.
+- A health problem's **Show in the graph** selects its script there.
+
+Health in the editor is a quick look: it skips what needs Git history.
+**⚙ → Open the full health report** runs [`gdsuite health`](/code-health) and
+opens its report in your browser.
+
 ## Problems in the script editor
 
 In the script you're editing, a line with a problem gets a red × or a yellow
@@ -164,18 +201,19 @@ A script with a syntax error is left as it is.
 The **Tests** dock lists the project's tests: the ones `gdsuite test` runs,
 from the folder in `[commands] default_test_target`.
 
-- **Run all** runs every test; while tests run, it becomes **Stop**.
-- **Run failed** runs again the tests that failed, and says how many.
+- **Test all** runs every test; while tests run, it becomes **Stop**. The
+  flask in the top bar does the same.
+- **Test failed** runs again the tests that failed, and says how many.
 - Hover a row for its **▶**: it runs that script or that test.
   **Right-click** runs the selected tests, and **double-click** opens a test.
   Click on empty space, or press **Escape**, to select nothing.
-- **Watch** runs tests again when you save a script, a scene or a resource:
+- **On save** runs tests again when you save a script, a scene or a resource:
   only the tests that use it, directly or through other scripts, scenes and
   resources (`extends`, `preload`/`load`, `class_name`, autoloads), and the
   scenes they were seen loading when they last ran. A test script runs its own
   tests; a change to `project.godot` or an autoload runs them all. See [what a
   change affects](https://q-rault.github.io/gdtest/docs/running-tests#only-what-your-change-affects).
-  Watch doesn't run tests for nothing:
+  It doesn't run tests for nothing:
   - It waits for your saves to stop for a moment, so several saves in a row
     make one run.
   - A save while tests run stops that run, which runs code that has changed
@@ -183,8 +221,8 @@ from the folder in `[commands] default_test_target`.
     stopped run had yet to finish.
   - When the script you saved doesn't compile, its tests wait, and the bar
     says "Waiting for hud.gd to compile": they could only fail to load. They
-    run once the compile check after a save finds it fixed (with **Compile
-    check after saving** on; off, Watch runs them at once).
+    run once the check after a save finds it compiles (with **On save →
+    Check** on; off, they run at once).
   - When you save a script back to what it was when its tests last ran, say
     after renaming a variable and renaming it back, nothing runs: its tests
     are up to date again.
@@ -207,7 +245,7 @@ then its result. A test that failed is red; a test that has not run, or
 whose script changed since it ran, is faded. After a run, the scripts with a
 test that failed are unfolded. Otherwise the list keeps its order, and what
 you unfolded stays unfolded; click a script to fold or unfold it, or fold
-them all, and unfold them all, with the button next to the search. When Watch
+them all, and unfold them all, with the button next to the search. When a save
 starts a run, the bar says why: "affected by hud.gd". A dot before the dock's
 name is red when a test failed, green when every test passed with the code as
 it is now, none left to run, and grey otherwise.
@@ -221,7 +259,7 @@ run that test; after a run, it shows whether the test passed. Folders and
 scripts in the **FileSystem** dock have **Run Tests** in their right-click
 menu.
 
-The command palette has **Run All Tests**, **Rerun Failed Tests** and **Run
+The command palette has **Test All**, **Rerun Failed Tests** and **Run
 Tests in Script**.
 
 Tests run in the background with the Godot of your editor, as `gdsuite test`
@@ -234,32 +272,46 @@ and you can delete the folder.
 
 ## When you save
 
-What runs when you save a script is your choice. Turn each one on or off
-from the **⚙** button of the Problems dock, or in **Editor Settings →
-GDSuite**:
+Both docks have an **On save** toggle, at the same place, next to their main
+button: on, saving does what that button does, on what you saved.
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Format on save | Off | Formats the script when you save it |
-| Lint on save | On | Lints the script you saved, and updates its problems |
-| Compile check after saving | On | Checks the project with Godot a moment after you save, in the background |
-| Watch: run the affected tests on save | Off | Runs the tests a saved file affects; also the **Watch** button of the Tests dock |
-| Show problems in the script editor | On | The icons and tints in the script editor |
+- In the Problems dock, saving a script checks it again, and the project a
+  moment later, in the background.
+- In the Tests dock, saving a script, a scene or a resource runs the tests it
+  can affect.
 
-These are yours: they apply to every project on your computer.
+The **⚙** menu of both docks has the same settings, under what they are for:
+
+| Section | Setting | Default | What it does |
+| --- | --- | --- | --- |
+| When you check | Autofix | On | **Check** formats the scripts, and applies the safe lint fixes, before it checks |
+| When you save | Check | On | Saving a script checks it, and the project a moment later (the Problems dock's **On save**) |
+| When you save | Autofix | Off | Saving a script formats it, and applies the safe lint fixes |
+| When you save | Run the affected tests | Off | Saving runs the tests it can affect (the Tests dock's **On save**) |
+| A check covers | Format, Lint, Compile, Health | On | The tools **Check** runs, and whose problems are listed |
+| Show | Problems in the script editor | On | The icons and tints in the script editor |
+
+They are also in **Editor Settings → GDSuite**. These are yours: they apply
+to every project on your computer.
 
 ### The same choice for the whole team
 
-To make everyone format on save, say so in the project's `gdsuite.toml`:
+To make everyone's saves fix their scripts, say so in the project's
+`gdsuite.toml`:
 
 ```toml
 [editor]
-format_on_save = true
+autofix_on_save = true
 ```
 
-A setting in `[editor]` wins over each person's own; the ⚙ menu shows it as
-"set by this project". The keys are `format_on_save`, `lint_on_save`,
-`type_check_on_save` and `run_tests_on_save`.
+A setting in `[editor]` wins over each person's own; the ⚙ menu and the On
+save toggle show it as "set by this project". The keys are `autofix`,
+`check_format`, `check_lint`, `check_compile`, `check_health`,
+`check_on_save`, `autofix_on_save` and `test_on_save` (see
+[gdsuite.toml](/reference/gdsuite-toml)). The keys of GDSuite 0.7 and earlier
+still count: `lint_on_save` and `type_check_on_save` for `check_on_save`,
+`format_on_save` for `autofix_on_save`, `run_tests_on_save` for
+`test_on_save`.
 
 ## Your changes to the addon
 

@@ -56,7 +56,7 @@ pub enum Commands {
         about = "Read or change gdsuite.toml, keeping its comments",
         long_about = "Read or change gdsuite.toml, keeping its comments and layout.
 
-Keys are dotted: `lint.disable`, `editor.format_on_save`, `check.steps`. Values are TOML (`true`, `100`, `[\"fmt\"]`); anything else is a string."
+Keys are dotted: `lint.disable`, `editor.autofix_on_save`, `check.steps`. Values are TOML (`true`, `100`, `[\"fmt\"]`); anything else is a string."
     )]
     Config(ConfigArgs),
 }
