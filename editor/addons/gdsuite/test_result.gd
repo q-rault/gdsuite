@@ -157,3 +157,14 @@ static func time_width() -> int:
 	var size := EditorInterface.get_editor_theme().get_font_size("main_size", "EditorFonts")
 	var width := Ui.mono_font().get_string_size("00 m 00 s", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	return int(width + 24 * EditorInterface.get_editor_scale())
+
+
+## Whether `targets` ("res://" folders, scripts, or "file::test") hold a test.
+static func in_targets(file: String, test_name: String, targets: PackedStringArray) -> bool:
+	for target in targets:
+		var target_file := target.get_slice("::", 0)
+		var only := target.get_slice("::", 1) if "::" in target else ""
+		var folder := target_file.trim_suffix("/") + "/"
+		if (file == target_file or file.begins_with(folder)) and (only == "" or only == test_name):
+			return true
+	return false

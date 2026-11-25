@@ -67,6 +67,9 @@ func _run_on_thread(thread: Thread, args: PackedStringArray, done: Callable) -> 
 
 
 func _finish(thread: Thread, result: Dictionary, done: Callable) -> void:
+	# `stop` waited for it already: the addon is being unloaded.
+	if not thread in _threads:
+		return
 	thread.wait_to_finish()
 	_threads.erase(thread)
 	if done.is_valid():
@@ -145,6 +148,8 @@ func _deliver(on_line: Callable, line: String) -> void:
 
 
 func _stream_done(thread: Thread, pid: int, on_exit: Callable, code: int) -> void:
+	if not thread in _threads:
+		return
 	thread.wait_to_finish()
 	_threads.erase(thread)
 	_pids.erase(pid)

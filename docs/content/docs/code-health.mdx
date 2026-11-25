@@ -88,14 +88,20 @@ settings](/reference/health-settings).
 
 ## In a check
 
-Code health is the last step of [`gdsuite check`](/check). It reports, but
-doesn't fail the check because of findings. To make critical findings fail a
-CI build, see [Run it in CI](/ci).
+Code health is the last step of [`gdsuite check`](/check). It lists its
+findings, but doesn't fail the check because of them, unless `[check]
+health_fail_on` says so (see [the check](/check#code-health)). To make
+critical findings fail a CI build, see [Run it in CI](/ci).
+
+`gdsuite health --quick` gives the findings and the graph of which script
+uses which, in a second, without what needs Git history. The editor uses it.
 
 ## In the Godot editor
 
-Not yet: a Health tab, with the top hotspots and a click to open each script,
-is planned for the GDSuite editor addon.
+The [Problems dock](/editor#code-health-and-the-graph) lists code health
+findings with the other problems, and its **Graph** view shows which script
+uses which, cycles in red, with each script's problems. **Check** runs it;
+you can leave it out of the check in the dock's **⚙** menu.
 
 ## Go further
 

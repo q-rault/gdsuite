@@ -2,39 +2,27 @@
 ## The look the Problems and Tests docks share: their toolbar toggles, the
 ## counts on them, and how their lists are drawn.
 
+## The icons of Check and of Tests, the same in the editor's top bar and in
+## the docks. Drawn white: the top bar colours them by state.
+const CHECK_ICON := (
+	'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+	+ '<path d="M7.5 14.5H3v-13h6.5L13 5v3" fill="none" stroke="#fff" stroke-width="1.5" '
+	+ 'stroke-linejoin="round"/><path d="M8.5 11.5l2.2 2.2 4-4.4" fill="none" stroke="#fff" '
+	+ 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+)
+const TESTS_ICON := (
+	'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+	+ '<path d="M5.5 1.5h5M6.5 1.5V6l-4 7.2a.9.9 0 0 0 .8 1.3h9.4a.9.9 0 0 0 .8-1.3L9.5 6V1.5" '
+	+ 'fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" '
+	+ 'stroke-linejoin="round"/><path d="M4.4 10h7.2l1.5 3H2.9z" fill="#fff"/></svg>'
+)
+
 ## The lists' text, a little smaller than the editor's, for compact rows.
 const FONT_SCALE := 0.9
 ## A toolbar toggle that is off.
 const OFF_ALPHA := 0.4
 ## Secondary text in a row (a location already shown above, a duration).
 const FADED_ALPHA := 0.55
-
-
-## A toolbar toggle: on, it looks like any button; off, it is faded. The
-## theme's pressed colour would make "on" look like a state of its own.
-static func toggle(
-	bar: Container, text: String, tooltip: String, on: bool, toggled: Callable
-) -> Button:
-	var button := Button.new()
-	button.toggle_mode = true
-	button.button_pressed = on
-	button.modulate.a = 1.0 if on else OFF_ALPHA
-	button.flat = true
-	button.text = text
-	button.tooltip_text = tooltip
-	var theme := EditorInterface.get_editor_theme()
-	var font_color := theme.get_color("font_color", "Button")
-	for state in ["font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
-		button.add_theme_color_override(state, font_color)
-	for state in ["icon_pressed_color", "icon_hover_pressed_color", "icon_focus_color"]:
-		button.add_theme_color_override(state, Color.WHITE)
-	button.toggled.connect(
-		func(pressed: bool) -> void:
-			button.modulate.a = 1.0 if pressed else OFF_ALPHA
-			toggled.call()
-	)
-	bar.add_child(button)
-	return button
 
 
 ## A filter of the toolbar, as the Output dock's: on, it has the pressed
@@ -223,6 +211,12 @@ static func button(
 	new_button.pressed.connect(pressed)
 	bar.add_child(new_button)
 	return new_button
+
+
+static func svg_icon(svg: String) -> Texture2D:
+	var image := Image.new()
+	image.load_svg_from_string(svg, EditorInterface.get_editor_scale())
+	return ImageTexture.create_from_image(image)
 
 
 ## An editor icon by name, or null when the editor has none of that name.

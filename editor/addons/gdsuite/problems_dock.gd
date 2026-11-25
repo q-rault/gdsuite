@@ -1,11 +1,11 @@
 @tool
 extends VBoxContainer
-## The Problems dock: what formatting, lint and the compile check found, by
-## script. Each script is a foldable row with its counts, then one line per
-## problem:
+## The Problems dock: what formatting, lint, the compile check and code health
+## found, by script, as a list or as the graph of which script uses which.
+## Each script is a foldable row with its counts, then one line per problem:
 ##   × or ⚠  line:col  message  code · tool
 ## where the code names the problem (`max-line-length`, `unused-variable`) and
-## the tool is the one that found it: format, lint or compile. The scripts
+## the tool is the one that found it: format, lint, compile or health. The scripts
 ## that formatting would change are one row at the top. Below the list, the
 ## problem selected: all of its message, what its code means, and what can
 ## be done about it.
@@ -17,9 +17,10 @@ signal state_changed
 ## Asks the plugin to run something on a problem: "open", "fix",
 ## "disable_rule", "ignore_here", "docs", or "format_all" with {files}.
 signal action_requested(action: String, problem: Dictionary)
-## Asks the plugin to look again: format check, lint and compile the project.
-signal refresh_requested
-signal setting_toggled(key: String, enabled: bool)
+## Asks the plugin to check the project, as the Check icon of the top bar.
+signal check_requested
+signal report_requested
+signal setting_toggled(key: String)
 signal open_config_requested
 
 const Settings = preload("settings.gd")
@@ -28,6 +29,9 @@ const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
 const DetailsPane = preload("details_pane.gd")
 const Folding = preload("folding.gd")
+const SettingsMenu = preload("settings_menu.gd")
+const DependencyGraph = preload("dependency_graph.gd")
+const ProblemStore = preload("problem_store.gd")
 
 ## The columns, by name, in their order. The message is always shown: it is
 ## the one that takes the room the others leave.
@@ -70,29 +74,25 @@ const MENU_DISABLE := 3
 const MENU_DOCS := 4
 const MENU_COPY := 5
 const MENU_FORMAT_ALL := 6
-const MENU_OPEN_CONFIG := 100
+const MENU_GRAPH := 7
+const MENU_REPORT := 100
 ## The Columns submenu: one check item per column, by its index in COLUMNS.
 const MENU_RESET_WIDTHS := 200
 
-const SETTING_IDS := [
-	Settings.FORMAT_ON_SAVE,
-	Settings.LINT_ON_SAVE,
-	Settings.TYPE_CHECK_ON_SAVE,
-	Settings.SHOW_IN_GUTTER,
+## The ⚙ menu: titles and settings.
+const SETTINGS := [
+	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE]],
+	["A check covers", [
+		Settings.CHECK_FORMAT, Settings.CHECK_LINT, Settings.CHECK_COMPILE, Settings.CHECK_HEALTH,
+	]],
+	["Show", [Settings.SHOW_IN_GUTTER, Settings.TOP_BAR_CHECK]],
 ]
 
-## source -> { "res://path.gd": [problem, ...] }. A problem is a Dictionary:
-## {file, line, column, severity, message, rule, fixable, source}.
-var _problems := { Problem.SOURCE_FORMAT: {}, Problem.SOURCE_LINT: {}, Problem.SOURCE_TYPES: {} }
-## The sources that reported at least once: until all have, the project's
-## state is not known.
-var _reported := {}
+## The problems, which the list and the graph show.
+var store := ProblemStore.new()
+
 ## source -> how many of its checks run now: its filter shows a spinner.
 var _running := {}
-## Scripts edited since they were checked: their problems may be gone.
-var _stale := {}
-## Scripts edited since they were checked, with problems or not.
-var _unchecked := {}
 ## Scripts the user folded. Nothing else folds or unfolds them.
 var _folded := {}
 var _current_script := ""
@@ -113,9 +113,11 @@ var _current_only: Button
 ## Folds every script, or unfolds them all once all are folded.
 var _fold_button: Button
 var _check_button: Button
-var _check_icon: Texture2D
-var _settings_menu: MenuButton
 var _columns_menu: PopupMenu
+var _graph: DependencyGraph
+## Shows the graph in place of the list.
+var _graph_button: Button
+var _view: Control
 var _context_menu: PopupMenu
 var _context_problem := {}
 var _details: RichTextLabel
@@ -148,13 +150,8 @@ func _ready() -> void:
 		bar, Ui.icon("StatusWarning"), "", "Warnings: show the warnings", _rebuild
 	)
 	bar.add_child(VSeparator.new())
-	_source_toggle(bar, Problem.SOURCE_FORMAT, "Format", "Scripts that formatting would change")
-	_source_toggle(bar, Problem.SOURCE_LINT, "Lint", "What the linter found")
-	_source_toggle(
-		bar, Problem.SOURCE_TYPES, "Compile",
-		"What Godot's compiler reports: GDScript and shader errors, Godot's warnings, "
-		+ "missing files"
-	)
+	for source: String in Problem.SOURCES:
+		_source_toggle(bar, source)
 	bar.add_child(VSeparator.new())
 	# One of two: the whole project, or the script being edited.
 	var scope := Ui.switch(
@@ -164,9 +161,23 @@ func _ready() -> void:
 			["Current", "Script", "Only list the script you're editing"],
 		],
 		0,
-		func(_index: int) -> void: _rebuild()
+		func(_index: int) -> void:
+			_graph.set_scope(not _current_only.button_pressed, _current_script)
+			_rebuild()
 	)
 	_current_only = scope[1]
+	# One of two ways to look at them.
+	var view := Ui.switch(
+		bar,
+		[
+			["List", "", "List the problems by script"],
+			["Graph", "", "Show which script uses which, with their problems (from Health)"],
+		],
+		0,
+		func(_index: int) -> void: _show_view()
+	)
+	_graph_button = view[1]
+	_view = view[0].get_parent().get_parent()
 	_fold_button = Ui.button(bar, "CollapseTree", "", "Fold every script", _fold_all)
 
 	_status = Label.new()
@@ -176,24 +187,19 @@ func _ready() -> void:
 	_status.modulate.a = Ui.FADED_ALPHA
 	bar.add_child(_status)
 
-	_check_button = Ui.button(
-		bar, "", "Check", "Check the whole project again: format, lint and compile",
-		func() -> void: refresh_requested.emit()
-	)
-	_check_button.icon = _check_icon
+	_check_button = Ui.button(bar, "", "Check", "", func() -> void: check_requested.emit())
+	_check_button.icon = Ui.svg_icon(Ui.CHECK_ICON)
 
-	_settings_menu = MenuButton.new()
-	_settings_menu.flat = true
-	_settings_menu.icon = Ui.icon("Tools")
-	_settings_menu.tooltip_text = "GDSuite settings, and the columns to show"
-	_settings_menu.about_to_popup.connect(_fill_settings_menu)
-	_settings_menu.get_popup().id_pressed.connect(_on_settings_menu)
+	var settings := SettingsMenu.new(SETTINGS, _add_to_settings)
+	settings.setting_toggled.connect(func(key: String) -> void: setting_toggled.emit(key))
+	settings.open_config_requested.connect(func() -> void: open_config_requested.emit())
+	settings.get_popup().id_pressed.connect(_on_settings_menu)
 	_columns_menu = PopupMenu.new()
 	_columns_menu.name = "Columns"
 	_columns_menu.hide_on_checkable_item_selection = false
 	_columns_menu.id_pressed.connect(_on_columns_menu)
-	_settings_menu.get_popup().add_child(_columns_menu)
-	bar.add_child(_settings_menu)
+	settings.get_popup().add_child(_columns_menu)
+	bar.add_child(settings)
 
 	_tree = Tree.new()
 	_tree.size_flags_vertical = SIZE_EXPAND_FILL
@@ -212,6 +218,16 @@ func _ready() -> void:
 	_tree.mouse_exited.connect(func() -> void: _hover(null))
 	_resizer.resized.connect(func(_column: int) -> void: _layout())
 
+	_graph = DependencyGraph.new()
+	_graph.visible = false
+	_graph.script_selected.connect(func(_path: String) -> void: _show_details())
+	_graph.script_opened.connect(
+		func(path: String) -> void: action_requested.emit("open", { "file": path, "line": 1 })
+	)
+	var views := MarginContainer.new()
+	views.add_child(_tree)
+	views.add_child(_graph)
+
 	# The problem selected, as in the Tests dock: all of it, then what can be
 	# done about it.
 	var details := VBoxContainer.new()
@@ -221,11 +237,11 @@ func _ready() -> void:
 	_details.size_flags_vertical = SIZE_EXPAND_FILL
 	_details.add_theme_font_size_override("normal_font_size", Ui.font_size())
 	_details.add_theme_font_size_override("bold_font_size", Ui.font_size())
-	_details.meta_clicked.connect(func(_meta: Variant) -> void: _on_action(MENU_DOCS))
+	_details.meta_clicked.connect(_on_link)
 	details.add_child(_details)
 	_actions = HBoxContainer.new()
 	details.add_child(_actions)
-	_pane = DetailsPane.new(_tree, details, _details, "problems_details")
+	_pane = DetailsPane.new(views, details, _details, "problems_details")
 	add_child(_pane)
 
 	_context_menu = PopupMenu.new()
@@ -243,26 +259,48 @@ func _ready() -> void:
 	_clock.start()
 
 	_load_columns()
-	_rebuild()
+	show_settings()
 
 
 # --- What the plugin calls ----------------------------------------------------
 
 
-## Replaces the lint findings of `files` ("res://" paths), or of the whole
+## Replaces what `source` found in `files` ("res://" paths), or in the whole
 ## project when `files` is empty.
-func set_lint(files: PackedStringArray, problems: Array) -> void:
-	_replace(Problem.SOURCE_LINT, files, problems)
+func set_problems(source: String, files: PackedStringArray, problems: Array) -> void:
+	# Turned off while it was running.
+	if not Problem.is_checked(source):
+		return
+	_checked_msec = Time.get_ticks_msec()
+	_note = ""
+	store.replace(source, files, problems)
+	_rebuild()
+	problems_changed.emit()
 
 
-## Replaces every type check finding: the type check covers the project.
-func set_types(problems: Array) -> void:
-	_replace(Problem.SOURCE_TYPES, PackedStringArray(), problems)
+## The graph of the scripts, from code health.
+func set_graph(graph: Dictionary) -> void:
+	_graph.set_graph(graph)
 
 
-## Replaces the format findings of `files`, or of the whole project.
-func set_format(files: PackedStringArray, problems: Array) -> void:
-	_replace(Problem.SOURCE_FORMAT, files, problems)
+## A setting changed: shows what a check covers.
+func show_settings() -> void:
+	store.forget_unchecked_sources()
+	for source: String in Problem.SOURCES:
+		_source_buttons[source].visible = Problem.is_checked(source)
+	_view.visible = Problem.is_checked(Problem.SOURCE_HEALTH)
+	if not _view.visible and _graph_button.button_pressed:
+		_graph_button.get_parent().get_child(0).button_pressed = true
+	_show_view()
+	_rebuild()
+	problems_changed.emit()
+
+
+## A check asked for is going, or not; `tooltip` is the one of the Check icon
+## in the top bar.
+func set_check(checking: bool, tooltip: String) -> void:
+	_check_button.disabled = checking
+	_check_button.tooltip_text = tooltip
 
 
 ## A tool started or ended a check: its filter shows a spinner meanwhile.
@@ -276,7 +314,7 @@ func set_running(source: String, running: bool) -> void:
 		return
 	if _running.is_empty():
 		_spinner.stop()
-	elif _spinner.is_stopped():
+	elif _spinner.is_stopped() and _spinner.is_inside_tree():
 		_spinner.start()
 	_on_spinner()
 	_update_status()
@@ -286,37 +324,15 @@ func set_running(source: String, running: bool) -> void:
 ## The script at `path` was edited since it was checked: its problems are
 ## faded until a check reports on it again.
 func mark_stale(path: String) -> void:
-	if not _unchecked.has(path):
-		_unchecked[path] = true
+	if store.mark_stale(path):
 		state_changed.emit()
-	if _stale.has(path) or not _has_problems(path):
-		return
-	_stale[path] = true
-	_rebuild()
+		_rebuild()
 
 
-## The Check button's icon: the plugin's, as on the Check icon of the
-## editor's top bar.
-func set_check_icon(icon: Texture2D) -> void:
-	_check_icon = icon
-	if is_instance_valid(_check_button):
-		_check_button.icon = icon
-
-
-## Whether format, lint and the type check have each reported once.
-func is_known() -> bool:
-	return _reported.size() == _problems.size()
-
-
-## Whether the project has no problem, as far as the checks of what every
-## script holds now can tell: all of them reported, none is running, and no
-## script was edited since.
+## Whether the project has no problem, and no check is going which could find
+## some.
 func is_clean() -> bool:
-	var count := counts()
-	return (
-		is_known() and _running.is_empty() and _unchecked.is_empty()
-		and count.errors + count.warnings == 0
-	)
+	return _running.is_empty() and store.is_clean()
 
 
 ## Says what went wrong with a check, until the next one reports.
@@ -328,32 +344,8 @@ func set_status(text: String) -> void:
 func set_current_script(path: String) -> void:
 	_current_script = path
 	if is_instance_valid(_tree):
+		_graph.set_scope(not _current_only.button_pressed, _current_script)
 		_rebuild()
-
-
-## The problems of one script, every source, sorted by line.
-func problems_for(path: String) -> Array:
-	var found := []
-	for source: String in _problems:
-		found.append_array(_problems[source].get(path, []))
-	found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.line < b.line)
-	return found
-
-
-## {errors, warnings} over the whole project, of one source or of all.
-func counts(source := "") -> Dictionary:
-	var errors := 0
-	var warnings := 0
-	for each: String in _problems:
-		if source != "" and each != source:
-			continue
-		for path: String in _problems[each]:
-			for problem: Dictionary in _problems[each][path]:
-				if problem.severity == "error":
-					errors += 1
-				else:
-					warnings += 1
-	return { "errors": errors, "warnings": warnings }
 
 
 ## The problem after (`direction` 1) or before (-1) line `line` of `path`,
@@ -410,33 +402,6 @@ func _problem_rows() -> Array:
 		for item in file_item.get_children():
 			rows.append(item)
 	return rows
-
-
-func _has_problems(path: String) -> bool:
-	return _problems.values().any(func(by_file: Dictionary) -> bool: return by_file.has(path))
-
-
-func _replace(source: String, files: PackedStringArray, problems: Array) -> void:
-	_checked_msec = Time.get_ticks_msec()
-	_note = ""
-	var by_file: Dictionary = _problems[source]
-	if files.is_empty():
-		_reported[source] = true
-		by_file.clear()
-		_stale.clear()
-		_unchecked.clear()
-	else:
-		for path in files:
-			by_file.erase(path)
-			_stale.erase(path)
-			_unchecked.erase(path)
-	for problem: Dictionary in problems:
-		problem.source = source
-		if not by_file.has(problem.file):
-			by_file[problem.file] = []
-		by_file[problem.file].append(problem)
-	_rebuild()
-	problems_changed.emit()
 
 
 # --- Columns -----------------------------------------------------------------
@@ -516,7 +481,7 @@ func _rebuild() -> void:
 			reselect = item
 
 	for path: String in _listed_paths():
-		var problems := problems_for(path).filter(
+		var problems := store.problems_for(path).filter(
 			func(p: Dictionary) -> bool: return p.source != Problem.SOURCE_FORMAT and _is_shown(p)
 		)
 		if problems.is_empty():
@@ -530,6 +495,7 @@ func _rebuild() -> void:
 				reselect = item
 	if reselect != null:
 		reselect.select(0)
+	_graph.set_counts(store.counts_by_script(_is_shown))
 	_layout()
 	_update_counts()
 	_update_status()
@@ -537,26 +503,27 @@ func _rebuild() -> void:
 	_update_fold_button()
 
 
+## Shows the list, or the graph in its place.
+func _show_view() -> void:
+	var graph := _graph_button.button_pressed
+	_tree.visible = not graph
+	_graph.visible = graph
+	_fold_button.visible = not graph
+	_show_details()
+
+
 ## The scripts listed, in order: those with errors, then the others, each by
 ## name. The script being edited is not moved up: stepping through the problems
 ## opens other scripts, and the order has to stay put while it does.
 func _listed_paths() -> Array:
-	var files := {}
-	for source: String in _problems:
-		for path: String in _problems[source]:
-			if not _current_only.button_pressed or path == _current_script:
-				files[path] = true
-	var paths := files.keys()
-	var rank := func(path: String) -> int:
-		var has_error := problems_for(path).any(
-			func(p: Dictionary) -> bool: return p.severity == "error"
-		)
-		return 0 if has_error else 1
+	var only_current := _current_only.button_pressed
+	var paths := store.files().filter(
+		func(path: String) -> bool: return not only_current or path == _current_script
+	)
 	paths.sort_custom(
 		func(a: String, b: String) -> bool:
-			var rank_a: int = rank.call(a)
-			var rank_b: int = rank.call(b)
-			return rank_a < rank_b if rank_a != rank_b else a < b
+			var error_a := store.has_error(a)
+			return a < b if error_a == store.has_error(b) else error_a
 	)
 	return paths
 
@@ -567,7 +534,7 @@ func _unformatted() -> Array:
 	if not shown or not _warnings_button.button_pressed:
 		return []
 	var paths := []
-	for path: String in _problems[Problem.SOURCE_FORMAT]:
+	for path: String in store.problems[Problem.SOURCE_FORMAT]:
 		if not _current_only.button_pressed or path == _current_script:
 			paths.append(path)
 	paths.sort()
@@ -606,13 +573,13 @@ func _file_row(root: TreeItem, path: String, problems: Array, unformatted: bool)
 		parts.append("%d %s" % [warnings, Problem.WARNING_MARK])
 	if unformatted:
 		parts.append("not formatted")
-	if _stale.has(path):
+	if store.stale.has(path):
 		parts.append("edited since checked")
 	item.set_text(0, "%s    %s" % [path.trim_prefix("res://"), "  ·  ".join(parts)])
 	item.set_expand_right(0, true)
 	item.set_tooltip_text(0, path)
 	var color := Ui.text_color()
-	item.set_custom_color(0, Ui.faded(color) if _stale.has(path) else color)
+	item.set_custom_color(0, Ui.faded(color) if store.stale.has(path) else color)
 	item.collapsed = _folded.has(path)
 	return item
 
@@ -637,7 +604,7 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	if _index.has(COLUMN_SOURCE):
 		item.set_text_alignment(_index[COLUMN_SOURCE], HORIZONTAL_ALIGNMENT_RIGHT)
 	var color := Problem.severity_color(problem.severity)
-	if _stale.has(problem.file):
+	if store.stale.has(problem.file):
 		color = Ui.faded(color)
 	for column: String in _shown:
 		item.set_custom_color(_index[column], color)
@@ -825,6 +792,9 @@ func _actions_for(item: TreeItem) -> Array:
 		actions.append(["Ignore on this line", MENU_IGNORE])
 		actions.append(['Turn off "%s"' % problem.rule, MENU_DISABLE])
 		actions.append(["What does it mean?", MENU_DOCS])
+	if problem.source == Problem.SOURCE_HEALTH:
+		actions.append(["Show in the graph", MENU_GRAPH])
+		actions.append(["What does it mean?", MENU_DOCS])
 	actions.append(["Copy", MENU_COPY])
 	return actions
 
@@ -836,6 +806,10 @@ func _show_details() -> void:
 		return
 	for child in _actions.get_children():
 		child.queue_free()
+	if _graph.visible:
+		_details.text = _graph.details()
+		_pane.refresh_summary()
+		return
 	var item := _tree.get_selected()
 	if item == null:
 		var dim := Ui.faded(Ui.text_color()).to_html()
@@ -848,7 +822,7 @@ func _show_details() -> void:
 		ROW_FORMAT:
 			var lines := PackedStringArray()
 			for path: String in problem.files:
-				var first: Dictionary = _problems[Problem.SOURCE_FORMAT][path][0]
+				var first: Dictionary = store.problems[Problem.SOURCE_FORMAT][path][0]
 				lines.append("%s  [color=#%s]%s[/color]" % [
 					Problem.escape(path.trim_prefix("res://")), dim, Problem.escape(first.message),
 				])
@@ -891,12 +865,24 @@ func _on_action(id: int) -> void:
 		MENU_DISABLE:
 			action_requested.emit("disable_rule", _context_problem)
 		MENU_DOCS:
-			if _context_problem.get("source") == Problem.SOURCE_LINT:
-				action_requested.emit("docs", _context_problem)
+			action_requested.emit("docs", _context_problem)
+		MENU_GRAPH:
+			_graph.select(_context_problem.file)
+			_graph_button.button_pressed = true
+			_show_view()
 		MENU_COPY:
 			_copy(_context_problem)
 		MENU_FORMAT_ALL:
 			action_requested.emit("format_all", _context_problem)
+
+
+## A link of the details: "docs", or "open:" and a script.
+func _on_link(meta: Variant) -> void:
+	var link := str(meta)
+	if link.begins_with("open:"):
+		action_requested.emit("open", { "file": link.trim_prefix("open:"), "line": 1 })
+	else:
+		_on_action(MENU_DOCS)
 
 
 # --- The bar -----------------------------------------------------------------
@@ -905,12 +891,12 @@ func _on_action(id: int) -> void:
 ## The counts: errors in red and warnings in yellow, on the Errors and
 ## Warnings filters, and both on each tool's.
 func _update_counts() -> void:
-	var total := counts()
+	var total := store.counts()
 	Ui.show_count(_errors_button.get_meta("count"), total.errors, Problem.severity_color("error"))
 	var yellow := Problem.severity_color("warning")
 	Ui.show_count(_warnings_button.get_meta("count"), total.warnings, yellow)
 	for source: String in _source_counts:
-		var count := counts(source)
+		var count := store.counts(source)
 		var labels: Array = _source_counts[source]
 		Ui.show_count(labels[0], count.errors, Problem.severity_color("error"))
 		Ui.show_count(labels[1], count.warnings, Problem.severity_color("warning"))
@@ -935,18 +921,8 @@ func _on_spinner() -> void:
 		Ui.spin(_source_counts[source][2], _running.has(source), _spinner_frame)
 
 
-func _fill_settings_menu() -> void:
-	var popup := _settings_menu.get_popup()
-	popup.clear()
-	for index in SETTING_IDS.size():
-		var key: String = SETTING_IDS[index]
-		var label: String = Settings.LABELS[key]
-		if Settings.is_set_by_project(key):
-			label += " (set by this project)"
-		popup.add_check_item(label, index)
-		popup.set_item_checked(index, bool(Settings.value(key)))
-		popup.set_item_disabled(index, Settings.is_set_by_project(key))
-	popup.add_separator()
+## The dock's own items of the ⚙ menu.
+func _add_to_settings(popup: PopupMenu) -> void:
 	_columns_menu.clear()
 	for index in COLUMNS.size():
 		var column: String = COLUMNS[index]
@@ -956,20 +932,13 @@ func _fill_settings_menu() -> void:
 	_columns_menu.add_separator()
 	_columns_menu.add_item("Reset column widths", MENU_RESET_WIDTHS)
 	popup.add_submenu_node_item("Columns", _columns_menu)
-	popup.add_separator()
-	popup.add_item("Open gdsuite.toml", MENU_OPEN_CONFIG)
+	if Problem.is_checked(Problem.SOURCE_HEALTH):
+		popup.add_item("Open the full health report", MENU_REPORT)
 
 
 func _on_settings_menu(id: int) -> void:
-	if id == MENU_OPEN_CONFIG:
-		open_config_requested.emit()
-		return
-	if id < 0 or id >= SETTING_IDS.size():
-		return
-	var key: String = SETTING_IDS[id]
-	var enabled := not bool(Settings.value(key))
-	Settings.set_personal(key, enabled)
-	setting_toggled.emit(key, enabled)
+	if id == MENU_REPORT:
+		report_requested.emit()
 
 
 func _on_columns_menu(id: int) -> void:
@@ -985,8 +954,10 @@ func _on_columns_menu(id: int) -> void:
 
 ## A tool's filter: a spinner while it checks, its name, then its errors
 ## and its warnings.
-func _source_toggle(bar: Container, source: String, text: String, tooltip: String) -> void:
-	var button := Ui.counted_toggle(bar, null, text, tooltip, _rebuild)
+func _source_toggle(bar: Container, source: String) -> void:
+	var setting: String = Problem.SETTINGS[source]
+	var tooltip: String = Settings.TOOLTIPS[setting]
+	var button := Ui.counted_toggle(bar, null, Settings.LABELS[setting], tooltip, _rebuild)
 	button.set_meta("description", tooltip)
 	_source_buttons[source] = button
 	var errors: Label = button.get_meta("count")

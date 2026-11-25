@@ -24,11 +24,11 @@ too: when it passes on your machine, it passes there.
 
 | Step | What it does | It fails when | Fix it with |
 | --- | --- | --- | --- |
-| `fmt` | Checks [formatting](/formatting), changes nothing | A script isn't formatted | `gdsuite fmt` |
-| `lint` | Runs the [linter](/linting) | A rule reports a problem | `gdsuite lint -- --fix`, then by hand |
+| `fmt` | Checks [formatting](/formatting), changes nothing | A script isn't formatted | `gdsuite check --fix` |
+| `lint` | Runs the [linter](/linting) | A rule reports a problem | `gdsuite check --fix`, then by hand |
 | `typecheck` | Runs the [type check](/type-checking) | Godot reports an error | By hand |
 | `test` | Runs your [tests](/testing) (not by default) | A test fails | By hand |
-| `health` | Measures [code health](/code-health) | Code health could not run | |
+| `health` | Measures [code health](/code-health), and lists its findings | Code health could not run, or a finding is at the level of `health_fail_on` | By hand |
 
 Tests are left out by default because they take longer than the rest. Run
 `gdsuite test` separately, or add them:
@@ -41,6 +41,40 @@ steps = ["fmt", "lint", "typecheck", "test", "health"]
 
 Remove a step from the list to skip it, for example `health` while you set it
 up.
+
+## Fix what can be fixed
+
+`gdsuite check --fix` first fixes what can be fixed safely, then checks:
+
+```text
+pass: Fixes: fixed 3 lint problems, formatted 2 files (fix, 41ms)
+pass: Formatting check passed (fmt, 10ms)
+...
+```
+
+It applies the lint fixes that can't change what the code does, then formats
+the scripts, for the steps the check has: no formatting without `fmt`. What
+is left is for the steps to report. See [what can be
+fixed](/linting#what-can-be-fixed) for the list of fixes.
+
+## Code health
+
+The `health` step lists what [code health](/code-health) found, with the
+script and the line:
+
+```text
+pass: Health checks passed, with 2 findings to look at (health, 812ms)
+enemies/spawner.gd:40:1: warning[function-lines]: spawn_wave() spans 52 lines (warn 40, critical 80)
+player/player.gd:1:1: warning[cycle-detected]: dependency cycle detected: player/player.gd -> ui/hud.gd
+```
+
+Findings don't fail the check by default: code health is something to look
+at, not a rule. To fail on the critical ones, or on all:
+
+```toml
+[check]
+health_fail_on = "critical"   # or "warning"; "never" is the default
+```
 
 ## When it fails
 
@@ -59,9 +93,9 @@ Fix, run `gdsuite check` again, and the next step runs.
 
 ## In the Godot editor
 
-The [editor addon](/editor) has a **Check** icon in the top bar: it runs the
-same steps, shows by its colour whether the project has errors or warnings,
-and lists each step's result in its tooltip.
+The [editor addon](/editor) has a **Check** icon in the top bar, and a
+**Check** button in its Problems dock: both fix what can be fixed (with
+**Autofix** on, the default), then check, and list what is left.
 
 ## For scripts and CI
 

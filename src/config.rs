@@ -60,6 +60,19 @@ pub struct ReportsConfig {
 pub struct CheckConfig {
     #[serde(default = "default_check_steps")]
     pub steps: Vec<CheckStep>,
+    /// Whether code health findings fail the check, and which. Left out of
+    /// the file, they never do.
+    #[serde(default)]
+    pub health_fail_on: HealthFailOn,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthFailOn {
+    #[default]
+    Never,
+    Critical,
+    Warning,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -282,6 +295,7 @@ impl Default for CheckConfig {
     fn default() -> Self {
         Self {
             steps: default_check_steps(),
+            health_fail_on: HealthFailOn::default(),
         }
     }
 }
@@ -602,13 +616,18 @@ artifacts_dir = "{}"
 
 [check]
 steps = {}
-"#,
+{}"#,
         escape_string(&config.project.root),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
         escape_string(&config.reports.default),
         escape_path(&config.reports.artifacts_dir),
         render_check_steps(&config.check.steps),
+        match config.check.health_fail_on {
+            HealthFailOn::Never => "",
+            HealthFailOn::Critical => "health_fail_on = \"critical\"\n",
+            HealthFailOn::Warning => "health_fail_on = \"warning\"\n",
+        },
     )
 }
 

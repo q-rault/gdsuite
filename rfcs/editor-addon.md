@@ -68,12 +68,12 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
 
 | | Where | Runs | Dedicated window? |
 |---|---|---|---|
-| **Formatting** | Script editor: "Format script" in a GDSuite menu, the command palette and a shortcut. No panel. | On request; on save if you turn it on | No |
-| **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (on by default); the project on Check | No |
+| **Formatting** | Script editor: "Format script" in a GDSuite menu, the command palette and a shortcut. No panel. | On Check, and on save, with Autofix on (the default) | No |
+| **Lint** | Gutter icon and line tint on the script, message on hover; the Problems dock for the project | The saved script on save (**Check → On save**, on by default); the project on Check | No |
 | **Type check** | Same Problems dock, its own filter | In the background a moment after you save; on Check | No |
-| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; on save with **Watch** on | **Yes**: the dock floats well on a second monitor |
-| **Code health** | A Health dock you open when you need it (content decided later) | On request, and after a Check | **Yes**: it floats, to have room for the overview |
-| **Check** | A button with a status dot in the editor's top bar | On request | No |
+| **Tests** | A Tests dock: tree, run, failures. A ▶ in the gutter of each `test_` function; "Run tests" on folders in the FileSystem dock | On request; on save with **Tests → On save** on | **Yes**: the dock floats well on a second monitor |
+| **Code health** | Its findings in the Problems dock; its dependency graph as the dock's **Graph** view; the full report in the browser | On Check, and a moment after a save | No |
+| **Check** | An icon in the editor's top bar, and the same **Check** in the Problems dock | On request | No |
 
 ### Formatting
 
@@ -81,8 +81,9 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
   `gdsuite fmt -- -` (stdin), then replaces the text as one undo step,
   keeping the caret and scroll position. It never rewrites a file behind an
   open, unsaved script.
-- **Format on save** is off by default; turning it on is one checkbox in the
-  GDSuite settings (below).
+- **Check** formats the project's scripts first, with **Autofix** on (the
+  default), and so does the check on save, on the saved script: one setting
+  for both, so what a save leaves is what Check would.
 - A file that would change meaning is left alone, as on the command line; the
   editor says why in a toast, not a dialog.
 
@@ -93,7 +94,8 @@ Sources: [Godot 4.6 release](https://godotengine.org/releases/4.6/),
   dock's tab.
 - Click a line to open the script at the line and column.
 - Each finding has its rule as a link to its documentation page, and, when it
-  can be fixed, a **Fix** button (`lint -- --fix` on that script).
+  can be fixed, a **Fix** button (`lint -- --fix` on that script). Check, with
+  Autofix on, applies those fixes to the whole project first.
 - Right-click a finding: **Turn off this rule for the project** (writes
   `gdsuite.toml`) or **Ignore here** (adds the suppression comment on the
   line).
@@ -113,57 +115,61 @@ Today's gdtest panel, moved into an `EditorDock` that can sit at the bottom,
 on a side, or float:
 
 - A tree of test scripts and tests with their status and time; run all, a
-  folder, a script, one test; **Rerun failed**; stop.
+  folder, a script, one test; **Test failed**; **Test all**, which is the
+  top bar's flask too and becomes Stop while tests run.
 - A failure shows the message, expected and actual side by side, and the line;
   click to open it.
 - In the script editor, a ▶ in the gutter of every `func test_` runs that test,
   and its last result shows as an icon there.
 - **Run tests** in the FileSystem dock's context menu, on a folder or a
   script.
-- **Watch** (off by default): the dock runs the affected tests once
+- **On save** (off by default, in the dock's ⚙): the dock runs the affected tests once
   per save of a script, scene or resource, as `gdtest --affected-by` lists
   them from the project's dependency graph. Saves during a run wait
   for it to end. (A first version kept gdtest's watch mode running; it
   started a full run when turned on and its runs could not show progress, so
   the dock now starts each run itself.)
 
-### Code health: a dock you open when you need it
+### Code health: in the Problems dock
 
-Code health is a review, not something to watch while you work, so it does
-not get a main screen tab next to 2D, 3D, Script and Game: that place is for
-what you use all the time. It is a dock, closed by default, opened from the
-GDSuite menu or the command palette, which can float to have room. What it
-shows is decided later, with the tool; the starting point:
+Code health is a source of problems like the others, so it has no dock of
+its own: its findings are listed by script with the rest, under a **Health**
+filter, critical ones as errors and the others as warnings. A finding a lint
+rule also makes, on the same line, is listed once, as the lint problem.
 
-- the project's grade, and one line per area (a folder or a
-  `[health.groups]` group);
-- the scripts most worth attention, each number explained in plain words,
-  click to open the script;
-- the dependency rules between groups, and what breaks them;
-- "Open the dependency graph", gdhealth's HTML graph in the browser.
-
-It runs on request, and refreshes after a Check that includes `health`.
+The dock's **List | Graph** switch shows the dependency graph instead: one
+box per script with its problem counts, users on the left and what they use
+on the right, cycles in red. **Current** narrows it to the script being
+edited, its users and what it uses. It comes from `gdsuite health --quick`,
+which skips Git history and takes about a second. "Open the full health
+report" runs `gdsuite health` and opens its HTML report.
 
 ### Check: the top bar
 
-A **Check** button in the editor's top bar with a status dot (not run, running,
-passed, failed). It runs `[check] steps`, as `gdsuite check` does, and fills
-the Problems dock, the Tests dock and the Health screen. Click the dot to open
-the first failing step's view.
+A **Check** icon in the editor's top bar, coloured by what the Problems dock
+lists, does what the dock's **Check** button does: with **Autofix** on (the
+default), format and apply the safe lint fixes to the scripts without unsaved
+changes, then check format, lint, compile and health, as far as **A check
+covers** says. Next to it, the flask does what the Tests dock's **Test all**
+does.
 
 ## Settings
 
-Two places, each for what it's good at, both reachable from the panel's ⚙
-button:
+Two places, each for what it's good at. Each dock's ⚙ menu holds its
+settings, with titles in the same shape: the Problems dock's Check (Autofix,
+On save), A check covers (Format, Lint, Compile, Health), Show (Problems in
+the script editor, Check in the top bar); the Tests dock's Tests (On save),
+Show (Test all in the top bar). The toolbars have no toggles of their own.
 
 **Your preferences: Editor Settings → GDSuite** (per computer, all projects):
 
 | Setting | Default |
 |---|---|
-| Format on save | Off |
-| Lint on save | On |
-| Type check after saving | On (in the background) |
-| Watch: run the affected tests on save | Off |
+| Autofix, on Check and on save | On |
+| Check on save | On (the saved script, then the project in the background) |
+| Run the affected tests on save | Off |
+| The top bar's Check and Test all | On |
+| A check covers: Format, Lint, Compile, Health | On |
 | Show problems in the gutter | On |
 | `gdsuite` program | Found automatically |
 
@@ -175,11 +181,11 @@ rebound in the editor's Shortcuts tab.
 The panel edits it for the common changes (turn a rule off, the steps of
 Check, the test folder), through a `gdsuite` command that keeps the file's
 comments, and has **Open gdsuite.toml** for the rest. A team that wants
-everyone to format on save says so in `gdsuite.toml`:
+everyone to run the affected tests on save says so in `gdsuite.toml`:
 
 ```toml
 [editor]
-format_on_save = true
+test_on_save = true
 ```
 
 which takes precedence over the personal setting, and the settings page shows
@@ -225,7 +231,7 @@ it ("set by this project").
 2. **Tests.** The gdtest panel moved into the Tests dock, gutter ▶ and
    results, FileSystem "Run tests", rerun on save. `gdtest_editor` stops being
    installed.
-3. **Health.** The dock, once its content is decided.
+3. **Health.** Its findings in the Problems dock, and the dependency graph.
 4. **GDExtension.** The same addon calls gdsuite in-process instead of
    running it, which needs each tool to offer a library API that returns its
    results rather than printing them. Then the Asset Store.
@@ -237,7 +243,10 @@ Each phase ships on its own and is usable without the next.
 - **Godot's own warnings and errors:** the Problems dock shows everything the
   type check reports, including what Godot also shows for open scripts, so
   nothing disappears from the list when a script is opened.
-- **Watch:** one run per save, started by the dock, of the tests
+- **Tests on save:** one run per save, started by the dock, of the tests
   `gdtest --affected-by` lists.
-- **Code health:** a dock opened when needed, not a main screen tab. Its
-  content is decided later, with the tool.
+- **Code health:** a source of problems in the Problems dock, with its
+  dependency graph as a view of that dock, not a dock or a main screen tab.
+- **One Check, one Test all:** the top bar and the docks run the same
+  thing, with the same icon. One Autofix for Check and for save. Settings
+  live in each dock's ⚙ menu, not as toggles in its toolbar.

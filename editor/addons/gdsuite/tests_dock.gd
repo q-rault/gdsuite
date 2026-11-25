@@ -14,7 +14,13 @@ signal results_changed
 signal open_requested(file: String, name: String)
 ## Asks the plugin to open `file` at `line`: where an assertion failed.
 signal open_line_requested(file: String, line: int)
-signal watch_toggled(enabled: bool)
+## Asks the plugin to run every test, or stop them, as the Tests icon of the
+## top bar.
+signal test_all_requested
+## Tests started or ended.
+signal running_changed
+signal setting_toggled(key: String)
+signal open_config_requested
 
 const Runner = preload("runner.gd")
 const TestsWatch = preload("tests_watch.gd")
@@ -24,7 +30,8 @@ const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
 const DetailsPane = preload("details_pane.gd")
 const Folding = preload("folding.gd")
-
+const Settings = preload("settings.gd")
+const SettingsMenu = preload("settings_menu.gd")
 
 ## What the toolbar shows for the tests, from `state()`.
 const STATE_NOT_RUN := "not_run"
@@ -52,9 +59,11 @@ const LOCALS_HINT := (
 	+ "Always Track Local Variables."
 )
 const WAITING_TIP := (
-	"Watch runs the tests these files affect once they compile: until then, those tests could "
-	+ "only fail to load."
+	"The tests these files affect run once they compile: until then, they could only fail to "
+	+ "load."
 )
+## The ⚙ menu: titles and settings.
+const SETTINGS := [["Tests", [Settings.TEST_ON_SAVE]], ["Show", [Settings.TOP_BAR_TESTS]]]
 ## Godot reads a test's local variables, for its failures, only with it on.
 const LOCALS_SETTING := "debug/settings/gdscript/always_track_local_variables"
 const COLUMN_TIME := 1
@@ -80,7 +89,7 @@ var _run_done := 0
 var _run_failed := 0
 ## Targets saved while a run was going: run once it ends.
 var _pending: PackedStringArray = []
-## Why `_pending` runs, when Watch restarted a run for it.
+## Why `_pending` runs, when a save restarted a run for it.
 var _pending_reason := ""
 ## Why the last run started, when it was not asked for: "affected by hud.gd".
 var _reason := ""
@@ -106,7 +115,6 @@ var _filter: LineEdit
 ## Runs every test, or stops the tests while they run.
 var _run_button: Button
 var _rerun_failed: Button
-var _watch: Button
 var _collapse: Button
 var _progress: ProgressBar
 ## SHOW_* -> its toggle: it shows the count, and hides those tests when off.
@@ -158,17 +166,14 @@ func _ready() -> void:
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_status.modulate.a = Ui.FADED_ALPHA
 	bar.add_child(_status)
-	_watch = Ui.toggle(
-		bar, "Watch",
-		"Watch: when you save a script, a scene or a resource, run the tests it can "
-		+ "affect again",
-		false,
-		func() -> void: watch_toggled.emit(_watch.button_pressed),
-	)
-	_watch.icon = Ui.icon("GuiVisibilityVisible")
 	var failed_tip := "Run the tests that failed again"
-	_rerun_failed = Ui.button(bar, "Reload", "Run failed", failed_tip, rerun_failed)
-	_run_button = Ui.button(bar, "Play", "Run all", "", _on_run_button)
+	_rerun_failed = Ui.button(bar, "Reload", "Test failed", failed_tip, rerun_failed)
+	var test_all := func() -> void: test_all_requested.emit()
+	_run_button = Ui.button(bar, "", "Test all", "", test_all)
+	var settings := SettingsMenu.new(SETTINGS)
+	settings.setting_toggled.connect(func(key: String) -> void: setting_toggled.emit(key))
+	settings.open_config_requested.connect(func() -> void: open_config_requested.emit())
+	bar.add_child(settings)
 
 	_progress = ProgressBar.new()
 	_progress.show_percentage = false
@@ -231,6 +236,7 @@ func _ready() -> void:
 	add_child(_spinner)
 
 	_set_running(false)
+	show_settings()
 
 
 # --- What the plugin calls ----------------------------------------------------
@@ -287,11 +293,9 @@ func is_running() -> bool:
 	return _pid > 0
 
 
-## Whether saving a file runs the tests it affects again.
-func set_watch(enabled: bool) -> void:
-	watch.enabled = enabled
-	_watch.set_pressed_no_signal(enabled)
-	_watch.modulate.a = 1.0 if enabled else Ui.OFF_ALPHA
+## A setting changed: whether saving a file runs the tests it affects again.
+func show_settings() -> void:
+	watch.enabled = bool(Settings.value(Settings.TEST_ON_SAVE))
 
 
 ## Stops the run going, which now runs code that changed, and starts another
@@ -546,7 +550,7 @@ func _start_run(targets: PackedStringArray) -> void:
 	var first: TreeItem = null
 	for file: String in _tests:
 		for test_name: String in _tests[file]:
-			if not in_targets(file, test_name, targets):
+			if not Result.in_targets(file, test_name, targets):
 				continue
 			var key := Result.key(file, test_name)
 			var previous: Dictionary = _results.get(key, {})
@@ -563,16 +567,6 @@ func _start_run(targets: PackedStringArray) -> void:
 	_refresh_items()
 	_reveal(targets)
 	results_changed.emit()
-
-
-func in_targets(file: String, test_name: String, targets: PackedStringArray) -> bool:
-	for target in targets:
-		var target_file := target.get_slice("::", 0)
-		var only := target.get_slice("::", 1) if "::" in target else ""
-		var folder := target_file.trim_suffix("/") + "/"
-		if (file == target_file or file.begins_with(folder)) and (only == "" or only == test_name):
-			return true
-	return false
 
 
 ## Scrolls to what a run targets, so it is easy to find: one test is shown
@@ -601,13 +595,6 @@ func _selected_targets() -> PackedStringArray:
 		targets.append(meta.file if meta.name == "" else Result.key(meta.file, meta.name))
 		item = _tree.get_next_selected(item)
 	return targets
-
-
-func _on_run_button() -> void:
-	if is_running():
-		stop()
-	else:
-		run(PackedStringArray())
 
 
 func _on_row_button(item: TreeItem, _column: int, id: int, _mouse_button: int) -> void:
@@ -778,7 +765,7 @@ func _update_counts() -> void:
 	}
 	for kind: String in counts:
 		Ui.show_count(_show_count[kind], counts[kind], colors[kind])
-	_rerun_failed.text = "Run failed"
+	_rerun_failed.text = "Test failed"
 	if not _last_failed.is_empty():
 		_rerun_failed.text += " (%d)" % _last_failed.size()
 
@@ -918,17 +905,19 @@ func update_status() -> void:
 
 
 func _set_running(running: bool) -> void:
-	_run_button.text = "Stop" if running else "Run all"
-	_run_button.icon = Ui.icon("Stop" if running else "Play")
+	_run_button.text = "Stop" if running else "Test all"
+	_run_button.icon = Ui.icon("Stop") if running else Ui.svg_icon(Ui.TESTS_ICON)
 	_run_button.tooltip_text = "Stop the tests" if running else "Run every test"
 	_rerun_failed.disabled = running or _last_failed.is_empty()
 	_progress.visible = running
 	_update_counts()
-	if running:
+	# Not while the dock leaves the editor.
+	if running and _spinner.is_inside_tree():
 		_spinner.start()
 	else:
 		_spinner.stop()
 	update_status()
+	running_changed.emit()
 
 
 func _on_spinner() -> void:

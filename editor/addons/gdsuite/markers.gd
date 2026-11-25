@@ -36,6 +36,10 @@ func show(code_edit: CodeEdit, problems: Array) -> void:
 		code_edit.set_line_gutter_item_color(line, gutter, color)
 		code_edit.set_line_gutter_clickable(line, gutter, true)
 		code_edit.set_line_gutter_metadata(line, gutter, on_line)
+		# Code health is about a function, or a script: its first line is no
+		# more wrong than the others.
+		if on_line.all(func(p: Dictionary) -> bool: return p.source == Problem.SOURCE_HEALTH):
+			continue
 		color.a = Problem.TINT_ALPHA
 		code_edit.set_line_background_color(line, color)
 		tinted.append(line)

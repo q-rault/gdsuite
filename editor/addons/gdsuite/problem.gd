@@ -4,11 +4,25 @@
 ## holds state.
 
 const Ui = preload("ui.gd")
+const Settings = preload("settings.gd")
+
+const DOCS := "https://q-rault.github.io/gdsuite"
+const INSTALL_DOCS := DOCS + "/install"
+const RULE_DOCS := DOCS + "/reference/lint-rules#"
+const HEALTH_DOCS := DOCS + "/reference/health-metrics"
 
 const SOURCE_LINT := "lint"
 const SOURCE_TYPES := "types"
 const SOURCE_FORMAT := "format"
-const SOURCES := [SOURCE_FORMAT, SOURCE_LINT, SOURCE_TYPES]
+const SOURCE_HEALTH := "health"
+const SOURCES := [SOURCE_FORMAT, SOURCE_LINT, SOURCE_TYPES, SOURCE_HEALTH]
+## Source -> the setting that makes a check cover it.
+const SETTINGS := {
+	SOURCE_FORMAT: Settings.CHECK_FORMAT,
+	SOURCE_LINT: Settings.CHECK_LINT,
+	SOURCE_TYPES: Settings.CHECK_COMPILE,
+	SOURCE_HEALTH: Settings.CHECK_HEALTH,
+}
 
 ## The marks for errors and warnings, the same in the filters, the list and
 ## the script editor. Not "✖": Godot draws it from a font that ignores the
@@ -23,11 +37,37 @@ const WARNING_YELLOW := Color(1.0, 0.8, 0.25)
 ## How strongly the script editor tints a problem's line.
 const TINT_ALPHA := 0.12
 ## The tool each source is, as the dock names it.
-const TOOL_NAMES := { SOURCE_FORMAT: "format", SOURCE_LINT: "lint", SOURCE_TYPES: "compile" }
+const TOOL_NAMES := {
+	SOURCE_FORMAT: "format",
+	SOURCE_LINT: "lint",
+	SOURCE_TYPES: "compile",
+	SOURCE_HEALTH: "health",
+}
 const TOOL_DESCRIPTIONS := {
 	SOURCE_FORMAT: "Found by the formatter (gdsuite fmt)",
 	SOURCE_LINT: "Found by the linter (gdsuite lint)",
 	SOURCE_TYPES: "Found by Godot's compiler (gdsuite typecheck)",
+	SOURCE_HEALTH: "Found by the code health check (gdsuite health)",
+}
+## What each code health finding means.
+const HEALTH_MEANINGS := {
+	"cyclomatic": "How many ways run through the function: the more, the harder it is to change.",
+	"function-lines": "A long function is hard to read and to reuse.",
+	"file-lines": "A long script often does several things that could be apart.",
+	"nesting": "Blocks within blocks are hard to follow.",
+	"parameters": "Many parameters are hard to call right.",
+	"cycle-detected": "Scripts that depend on each other can't be changed or tested alone.",
+	"forbidden-dependency": "The project's rules keep these groups of scripts apart.",
+	"split-file-candidate": "The script's functions fall into groups that don't use each other.",
+}
+const HEALTH_LIMITS := " Its limits are in [health] in gdsuite.toml."
+## Code health findings on a whole script rather than a line.
+const WHOLE_SCRIPT := ["file-lines", "cycle-detected", "split-file-candidate"]
+## Code health findings a lint rule also makes, when it is on.
+const SAME_AS_LINT := {
+	"file-lines": "max-file-lines",
+	"function-lines": "max-function-lines",
+	"parameters": "function-arguments-number",
 }
 ## What Godot's errors are, as Godot gives them no name.
 const UNNAMED_ERROR := (
@@ -46,6 +86,11 @@ const FORMAT_CHANGES := {
 }
 ## Codes that only say "an error": the tool says as much.
 const GENERIC_CODES := ["gdscript-error", "shader-error", "load-error", "gdscript-warning"]
+
+
+## Whether a check covers `source`.
+static func is_checked(source: String) -> bool:
+	return bool(Settings.value(SETTINGS[source]))
 
 
 ## The colour of an error or a warning, in the dock and the script editor.
@@ -90,6 +135,8 @@ static func code_meaning(problem: Dictionary) -> String:
 		return "A lint rule of gdsuite. Ignore it on this line, or turn it off for the project."
 	if problem.source == SOURCE_FORMAT:
 		return "Formatting would change this script."
+	if problem.source == SOURCE_HEALTH:
+		return HEALTH_MEANINGS.get(problem.rule, "A code health measure.") + HEALTH_LIMITS
 	if problem.source != SOURCE_TYPES:
 		return ""
 	var meanings := {
@@ -124,9 +171,23 @@ static func details(problem: Dictionary) -> String:
 		escape(where(problem)),
 	]
 	var meaning := code_meaning(problem)
-	if problem.source == SOURCE_LINT:
+	if problem.source in [SOURCE_LINT, SOURCE_HEALTH]:
 		meaning += " [url=docs]Read about it.[/url]"
-	return "%s\n%s\n[color=#%s]%s[/color]" % [head, escape(problem.message), dim, meaning]
+	if problem.get("fixable", false):
+		meaning += " Check fixes it, with Autofix on."
+	var lines := PackedStringArray([head, escape(problem.message)])
+	var related: Array = problem.get("related", [])
+	if not related.is_empty():
+		lines.append("With " + ", ".join(related.map(script_link)))
+	if problem.get("suggestion", "") != "":
+		lines.append(escape(problem.suggestion))
+	lines.append("[color=#%s]%s[/color]" % [dim, meaning])
+	return "\n".join(lines)
+
+
+## A script's path, as BBCode that opens it.
+static func script_link(path: String) -> String:
+	return "[url=open:%s]%s[/url]" % [path, escape(path.trim_prefix("res://"))]
 
 
 ## `text` shown as it is in a RichTextLabel, not read as BBCode.
@@ -146,6 +207,44 @@ static func from_report(report: Dictionary) -> Array:
 			"message": str(finding.get("message", "")),
 			"rule": str(finding.get("rule", "")),
 			"fixable": bool(finding.get("fixable", false)),
+		})
+	return problems
+
+
+## The findings of `gdsuite health --quick`, as the dock's problems.
+static func from_health_report(report: Dictionary) -> Array:
+	var problems := from_report(report)
+	var findings: Array = report.get("findings", [])
+	for index in problems.size():
+		var problem: Dictionary = problems[index]
+		var finding: Dictionary = findings[index]
+		problem.column = 0
+		if problem.rule in WHOLE_SCRIPT:
+			problem.line = 0
+		problem.related = finding.get("related", []).map(
+			func(path: String) -> String: return "res://" + path
+		)
+		problem.suggestion = str(finding.get("suggestion", ""))
+	return problems
+
+
+## What `gdsuite fmt --check --format json` would change, as the dock's
+## problems.
+static func from_format_report(report: Dictionary) -> Array:
+	var problems := []
+	# gdtidy 0.3.5 and newer say where each script would change, and how.
+	var all_changes: Dictionary = report.get("changes", {})
+	for path: Variant in report.get("changed", []):
+		var changes: Array = all_changes.get(path, [])
+		var first: Dictionary = changes[0] if not changes.is_empty() else {}
+		problems.append({
+			"file": "res://" + str(path).replace("\\", "/").trim_prefix("./"),
+			"line": int(first.get("first", 0)),
+			"column": 0,
+			"severity": "warning",
+			"message": format_message(changes),
+			"rule": str(first.get("kind", "not-formatted")),
+			"fixable": true,
 		})
 	return problems
 

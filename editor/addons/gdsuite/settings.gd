@@ -4,36 +4,91 @@ extends RefCounted
 ## GDSuite. A project can set the same choices for everyone in the [editor]
 ## section of gdsuite.toml, which wins over the personal setting.
 
-const FORMAT_ON_SAVE := "gdsuite/on_save/format"
-const LINT_ON_SAVE := "gdsuite/on_save/lint"
-const TYPE_CHECK_ON_SAVE := "gdsuite/on_save/type_check"
-const RUN_TESTS_ON_SAVE := "gdsuite/on_save/run_tests"
+## Whether a check, on request or on save, fixes what can be fixed first.
+const AUTOFIX := "gdsuite/check/autofix"
+## What a check covers.
+const CHECK_FORMAT := "gdsuite/check/format"
+const CHECK_LINT := "gdsuite/check/lint"
+const CHECK_COMPILE := "gdsuite/check/compile"
+const CHECK_HEALTH := "gdsuite/check/health"
+## What saving a file does.
+const CHECK_ON_SAVE := "gdsuite/on_save/check"
+const TEST_ON_SAVE := "gdsuite/on_save/test"
 const SHOW_IN_GUTTER := "gdsuite/problems/show_in_gutter"
+## The quick buttons of the editor's top bar.
+const TOP_BAR_CHECK := "gdsuite/top_bar/check"
+const TOP_BAR_TESTS := "gdsuite/top_bar/tests"
 const PROGRAM := "gdsuite/program"
 
 const DEFAULTS := {
-	FORMAT_ON_SAVE: false,
-	LINT_ON_SAVE: true,
-	TYPE_CHECK_ON_SAVE: true,
-	RUN_TESTS_ON_SAVE: false,
+	AUTOFIX: true,
+	CHECK_FORMAT: true,
+	CHECK_LINT: true,
+	CHECK_COMPILE: true,
+	CHECK_HEALTH: true,
+	CHECK_ON_SAVE: true,
+	TEST_ON_SAVE: false,
 	SHOW_IN_GUTTER: true,
+	TOP_BAR_CHECK: true,
+	TOP_BAR_TESTS: true,
 	PROGRAM: "",
 }
 
 ## Editor setting -> key of gdsuite.toml's [editor] section.
 const PROJECT_KEYS := {
-	FORMAT_ON_SAVE: "format_on_save",
-	LINT_ON_SAVE: "lint_on_save",
-	TYPE_CHECK_ON_SAVE: "type_check_on_save",
-	RUN_TESTS_ON_SAVE: "run_tests_on_save",
+	AUTOFIX: "autofix",
+	CHECK_FORMAT: "check_format",
+	CHECK_LINT: "check_lint",
+	CHECK_COMPILE: "check_compile",
+	CHECK_HEALTH: "check_health",
+	CHECK_ON_SAVE: "check_on_save",
+	TEST_ON_SAVE: "test_on_save",
 }
 
 const LABELS := {
-	FORMAT_ON_SAVE: "Format on save",
-	LINT_ON_SAVE: "Lint on save",
-	TYPE_CHECK_ON_SAVE: "Compile check after saving",
-	RUN_TESTS_ON_SAVE: "Watch: run the affected tests on save",
-	SHOW_IN_GUTTER: "Show problems in the script editor",
+	AUTOFIX: "Autofix",
+	CHECK_FORMAT: "Format",
+	CHECK_LINT: "Lint",
+	CHECK_COMPILE: "Compile",
+	CHECK_HEALTH: "Health",
+	CHECK_ON_SAVE: "On save",
+	TEST_ON_SAVE: "On save",
+	SHOW_IN_GUTTER: "Problems in the script editor",
+	TOP_BAR_CHECK: "Check in the top bar",
+	TOP_BAR_TESTS: "Test all in the top bar",
+}
+
+const TOOLTIPS := {
+	AUTOFIX: (
+		"A check formats the scripts first, and applies the lint fixes that are safe: Check on"
+		+ " the project, and On save on the saved script"
+	),
+	CHECK_FORMAT: "Scripts that formatting would change",
+	CHECK_LINT: "The linter's rules",
+	CHECK_COMPILE: "Godot's compiler: GDScript and shader errors, Godot's warnings, missing files",
+	CHECK_HEALTH: "Code health: scripts too big or too tangled, and how they depend on each other",
+	CHECK_ON_SAVE: (
+		"Saving a script checks it again, fixing it first with Autofix on, and the project a"
+		+ " moment later"
+	),
+	TEST_ON_SAVE: "Saving a script, a scene or a resource runs the tests it can affect",
+	SHOW_IN_GUTTER: "Marks the lines with a problem in the script editor",
+	TOP_BAR_CHECK: "The Check icon in the editor's top bar, which shows where the project stands",
+	TOP_BAR_TESTS: "The flask in the editor's top bar, which shows where the tests stand",
+}
+
+## What these settings were before gdsuite 0.8: setting -> its old settings,
+## and its old keys of [editor]. On when one of the old ones is.
+const OLD_SETTINGS := {
+	CHECK_ON_SAVE: ["gdsuite/on_save/lint", "gdsuite/on_save/type_check"],
+	TEST_ON_SAVE: ["gdsuite/on_save/run_tests"],
+}
+## Old settings Autofix replaces, which say nothing about Check: removed.
+const DROPPED_SETTINGS := ["gdsuite/on_save/format", "gdsuite/on_save/autofix"]
+const OLD_PROJECT_KEYS := {
+	AUTOFIX: ["format_on_save"],
+	CHECK_ON_SAVE: ["lint_on_save", "type_check_on_save"],
+	TEST_ON_SAVE: ["run_tests_on_save"],
 }
 
 ## The project's [editor] section, read from gdsuite.toml by the plugin.
@@ -42,6 +97,11 @@ static var project_values := {}
 
 static func register() -> void:
 	var settings := EditorInterface.get_editor_settings()
+	for key: String in OLD_SETTINGS:
+		_replace_old(settings, key)
+	for old: String in DROPPED_SETTINGS:
+		if settings.has_setting(old):
+			settings.erase(old)
 	for key: String in DEFAULTS:
 		if not settings.has_setting(key):
 			settings.set_setting(key, DEFAULTS[key])
@@ -52,6 +112,22 @@ static func register() -> void:
 		"hint": PROPERTY_HINT_GLOBAL_FILE,
 		"hint_string": "",
 	})
+
+
+## Gives `key` the value of the settings it replaces, and removes them. One
+## left at its default isn't kept in Editor Settings, so it isn't found.
+static func _replace_old(settings: EditorSettings, key: String) -> void:
+	var on := false
+	var found := false
+	for old: String in OLD_SETTINGS[key]:
+		if settings.has_setting(old):
+			found = true
+			on = on or bool(settings.get_setting(old))
+			settings.erase(old)
+		else:
+			on = on or DEFAULTS[key]
+	if found and not settings.has_setting(key):
+		settings.set_setting(key, on)
 
 
 static func get_personal(key: String) -> Variant:
@@ -67,11 +143,23 @@ static func set_personal(key: String, value: Variant) -> void:
 
 ## Whether gdsuite.toml decides this setting for everyone.
 static func is_set_by_project(key: String) -> bool:
-	return PROJECT_KEYS.has(key) and project_values.has(PROJECT_KEYS[key])
+	return _project_value(key) != null
 
 
 ## The value in effect: the project's, or else yours.
 static func value(key: String) -> Variant:
-	if is_set_by_project(key):
+	var project: Variant = _project_value(key)
+	return get_personal(key) if project == null else project
+
+
+## The value [editor] gives, under its name or an old one, or null.
+static func _project_value(key: String) -> Variant:
+	if not PROJECT_KEYS.has(key):
+		return null
+	if project_values.has(PROJECT_KEYS[key]):
 		return project_values[PROJECT_KEYS[key]]
-	return get_personal(key)
+	var old: Array = OLD_PROJECT_KEYS.get(key, [])
+	old = old.filter(func(name: String) -> bool: return project_values.has(name))
+	if old.is_empty():
+		return null
+	return old.any(func(name: String) -> bool: return bool(project_values[name]))

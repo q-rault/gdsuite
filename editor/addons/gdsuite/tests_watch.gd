@@ -1,7 +1,7 @@
 @tool
 extends Node
-## Watch, for the Tests dock: a saved file makes the tests it can affect out
-## of date, and with Watch on, runs them again. gdtest says which tests: those
+## On save, for the Tests dock: a saved file makes the tests it can affect out
+## of date, and with On save on, runs them again. gdtest says which tests: those
 ## that use the file, directly or through other scripts, scenes and resources.
 ##
 ## It doesn't run tests for nothing: it waits for the saves to stop, holds
@@ -10,8 +10,9 @@ extends Node
 ## than queue another.
 
 const Runner = preload("runner.gd")
+const Result = preload("test_result.gd")
 
-## Seconds without a save before Watch asks gdtest what the saves affect.
+## Seconds without a save before it asks gdtest what the saves affect.
 const SAVE_DELAY := 0.4
 
 ## Whether saving a file runs the tests it affects again.
@@ -23,7 +24,7 @@ var compile_state: Callable
 
 ## The Tests dock.
 var _dock: Node
-## The files saved in the last moments: Watch waits for the saves to stop
+## The files saved in the last moments: it waits for the saves to stop
 ## (`_debounce`), so that several saves in a row make one run.
 var _saves := {}
 var _debounce: Timer
@@ -119,7 +120,7 @@ func run_starting(targets: PackedStringArray) -> void:
 	for path: String in _stale_by.keys():
 		var covered := (_stale_by[path] as Array).all(
 			func(key: String) -> bool:
-				return _dock.in_targets(key.get_slice("::", 0), key.get_slice("::", 1), targets)
+				return Result.in_targets(key.get_slice("::", 0), key.get_slice("::", 1), targets)
 		)
 		if covered:
 			_run_covers[path] = [FileAccess.get_md5(path), _stale_by[path]]

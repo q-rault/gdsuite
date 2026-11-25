@@ -247,6 +247,104 @@ fn health_forwards_args_exactly() {
 }
 
 #[test]
+fn health_quick_prints_findings_and_the_graph() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    let output = fixture
+        .cmd()
+        .args(["health", "--quick", "--report", "json"])
+        .assert()
+        .success();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.get_output().stdout).expect("a JSON report");
+    assert_eq!(
+        report["findings"],
+        serde_json::json!([{
+            "file": "a.gd", "line": 7, "column": 1, "severity": "error",
+            "message": "_run() has cyclomatic estimate 24", "rule": "cyclomatic", "fixable": false,
+        }])
+    );
+    // One arrow for two uses, none for a script that loads itself.
+    assert_eq!(
+        report["graph"],
+        serde_json::json!({
+            "scripts": [{ "path": "a.gd", "group": "g", "lines": 9 }],
+            "edges": [["a.gd", "b.gd", 2]],
+            "cycles": [],
+        })
+    );
+    assert!(!fixture.root.join("reports").exists());
+}
+
+#[test]
+fn check_reports_health_findings_and_fails_on_them_when_asked() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+    fixture.write_flag("health-findings.flag");
+    let config = fixture.root.join("gdsuite.toml");
+    let text = fs::read_to_string(&config).unwrap();
+    let with = |line: &str| {
+        let steps = "steps = [\"health\"]";
+        let mut document: toml_edit::DocumentMut = text.parse().unwrap();
+        document["check"] = format!(
+            "{steps}
+{line}"
+        )
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap()
+        .as_item()
+        .clone();
+        fs::write(&config, document.to_string()).unwrap();
+    };
+
+    with("");
+    fixture
+        .cmd()
+        .args(["check", "--report", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "_run() has cyclomatic estimate 24",
+        ));
+
+    with("health_fail_on = \"critical\"");
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .code(12)
+        .stdout(predicate::str::contains("a.gd:7:1: error[cyclomatic]"));
+}
+
+#[test]
+fn check_fix_fixes_lint_then_formats_before_the_steps() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    fixture.seed_installed_toolchain();
+
+    fixture
+        .cmd()
+        .args(["check", "--fix"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pass: Fixes: nothing to fix"));
+
+    assert_eq!(
+        fixture.read_log("step-order.txt"),
+        "lint
+fmt
+fmt
+lint
+typecheck
+health"
+    );
+}
+
+#[test]
 fn typecheck_defaults_to_dot_and_does_not_generate_checker_script() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -671,6 +769,18 @@ if "%1"=="schema-version" (
 )
 echo %*> "%CD%\logs\gdhealth-args.txt"
 >> "%CD%\logs\step-order.txt" echo health
+if "%1"=="graph" (
+  echo {"files": [{"path": "a.gd", "group": "g", "line_count": 9}], "edges": [{"from": "a.gd", "to": "b.gd", "line": 2}, {"from": "a.gd", "to": "b.gd", "line": 5}, {"from": "a.gd", "to": "a.gd", "line": 3}], "cycles": [["a.gd"]]}
+  exit /b 0
+)
+if "%2"=="--no-git" (
+  > "%6" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7}]}
+  exit /b 0
+)
+if exist "%CD%\mock-state\health-findings.flag" (
+  mkdir "%CD%\reports\code-health" 2>nul
+  > "%CD%\reports\code-health\health.json" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7}]}
+)
 if exist "%CD%\mock-state\health-fail.flag" (
   mkdir "%CD%\reports\code-health" 2>nul
   > "%CD%\reports\code-health\summary.txt" echo health summary

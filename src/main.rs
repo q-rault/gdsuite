@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod config_command;
 mod editor_addon;
+mod health;
 mod migrate;
 mod output;
 mod process;
