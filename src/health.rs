@@ -25,6 +25,9 @@ pub struct HealthFinding {
     /// What gdhealth suggests to do about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// Compared with an older revision: `new`, `worse` or `existing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<String>,
 }
 
 impl HealthFinding {
@@ -80,6 +83,7 @@ struct Finding {
     #[serde(default)]
     related_files: Vec<String>,
     suggested_fix: Option<Suggestion>,
+    change: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +232,7 @@ fn convert(finding: Finding) -> Option<HealthFinding> {
             .filter(|related| *related != file)
             .collect(),
         suggestion: finding.suggested_fix.and_then(suggestion),
+        change: finding.change,
         file,
     })
 }

@@ -1300,9 +1300,10 @@ impl JsonLintReport {
         let named = lint_rules_named(context);
         let before = self.findings.len();
         self.findings.retain(|finding| {
-            finding.rule.as_deref().is_none_or(|rule| {
-                !HEALTH_OWNED_LINT_RULES.contains(&rule) || named.contains(rule)
-            })
+            finding
+                .rule
+                .as_deref()
+                .is_none_or(|rule| !HEALTH_OWNED_LINT_RULES.contains(&rule) || named.contains(rule))
         });
         // Findings mean gdtidy's report was read, where lint passes when it
         // has none.
@@ -1874,15 +1875,23 @@ fn run_health_check_step(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<CheckStepResult> {
-    let report = run_health_step(
-        context,
-        vec![config.commands.default_health_subcommand.clone()],
-    )?;
+    let mut args = vec![config.commands.default_health_subcommand.clone()];
+    // Failing on old debt would fail every check of a project that adopts
+    // gdsuite late: compared, only what a change adds fails it.
+    let compared = match config.check.health_fail_on {
+        HealthFailOn::Never => None,
+        _ => health_compare_rev(context, config),
+    };
+    if let Some(rev) = &compared {
+        args.extend(["--compare".to_string(), rev.clone()]);
+    }
+    let report = run_health_step(context, args)?;
     let duration_ms = report.duration_ms;
     if report.status == "ok" {
         let failing = report
             .findings
             .iter()
+            .filter(|finding| finding["change"] != "existing")
             .filter(|finding| match config.check.health_fail_on {
                 HealthFailOn::Never => false,
                 HealthFailOn::Critical => finding["severity"] == "error",
@@ -1909,9 +1918,13 @@ fn run_health_check_step(
         let mut report = report;
         report.status = "failed".to_string();
         report.summary = format!(
-            "{} code health finding{} at or above the level of [check] health_fail_on",
+            "{} code health finding{}{} at or above the level of [check] health_fail_on",
             failing.len(),
-            if failing.len() == 1 { "" } else { "s" }
+            if failing.len() == 1 { "" } else { "s" },
+            compared
+                .as_deref()
+                .map(|rev| format!(" new or worse since {rev}"))
+                .unwrap_or_default()
         );
         let summary = format!("Found {}.", report.summary);
         return Ok(CheckStepResult::failed(
@@ -1931,6 +1944,40 @@ fn run_health_check_step(
         Vec::new(),
         report.summary,
     ))
+}
+
+/// What health findings are compared with: `[check] health_compare`, or
+/// else the project's main branch, when the project is a Git repository
+/// that has one. `""` compares with nothing.
+fn health_compare_rev(context: &ProjectContext, config: &GdsuiteConfig) -> Option<String> {
+    if let Some(rev) = &config.check.health_compare {
+        return (!rev.trim().is_empty()).then(|| rev.clone());
+    }
+    let exists = |rev: &str| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&context.root)
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{rev}^{{commit}}"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    [
+        "origin/HEAD",
+        "origin/main",
+        "origin/master",
+        "main",
+        "master",
+    ]
+    .into_iter()
+    .find(|rev| exists(rev))
+    .map(ToString::to_string)
 }
 
 fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {

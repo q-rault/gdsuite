@@ -146,10 +146,12 @@ fn lint_leaves_file_length_to_code_health() {
     let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
     fs::write(
         fixture.root.join("gdsuite.toml"),
-        format!("{config}
+        format!(
+            "{config}
 [lint.rules.max-file-lines]
 max = 1000
-"),
+"
+        ),
     )
     .unwrap();
     fixture
@@ -351,6 +353,17 @@ fn check_reports_health_findings_and_fails_on_them_when_asked() {
         .failure()
         .code(12)
         .stdout(predicate::str::contains("a.gd:7:1: error[cyclomatic]"));
+
+    // Compared with the main branch, where it already was, it passes.
+    with(
+        "health_fail_on = \"critical\"
+health_compare = \"main\"",
+    );
+    fixture.cmd().arg("check").assert().success();
+    assert_eq!(
+        fixture.read_log("gdhealth-args.txt"),
+        "health --compare main"
+    );
 }
 
 #[test]
@@ -808,6 +821,11 @@ if "%1"=="graph" (
 )
 if "%2"=="--no-git" (
   > "%6" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7}]}
+  exit /b 0
+)
+if "%2"=="--compare" if exist "%CD%\mock-state\health-findings.flag" (
+  mkdir "%CD%\reports\code-health" 2>nul
+  > "%CD%\reports\code-health\health.json" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7, "change": "existing"}]}
   exit /b 0
 )
 if exist "%CD%\mock-state\health-findings.flag" (
