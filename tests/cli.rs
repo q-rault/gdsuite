@@ -1517,6 +1517,59 @@ fn lint_input_lints_the_text_as_the_script_it_names() {
 }
 
 #[test]
+fn dependents_prints_the_files_a_change_reaches() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    for (path, text) in [
+        (
+            "actor.gd",
+            "class_name Actor
+extends Node
+",
+        ),
+        (
+            "player.gd",
+            "class_name Player
+extends Actor
+",
+        ),
+        (
+            "lonely.gd",
+            "extends Node
+",
+        ),
+        (
+            "addons/tool/tool.gd",
+            "extends Actor
+",
+        ),
+    ] {
+        let full = fixture.root.join(path);
+        fs::create_dir_all(full.parent().unwrap()).unwrap();
+        fs::write(full, text).unwrap();
+    }
+
+    let output = fixture
+        .cmd()
+        .args(["dependents", "actor.gd"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(
+        json["files"],
+        serde_json::json!([
+            "res://actor.gd",
+            "res://addons/tool/tool.gd",
+            "res://player.gd"
+        ])
+    );
+    assert!(json["project_files"].as_u64().unwrap() >= 3, "{json}");
+}
+
+#[test]
 fn config_changes_gdsuite_toml_and_reads_it_back() {
     let fixture = Fixture::new();
     fixture.seed_project();

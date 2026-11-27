@@ -26,6 +26,13 @@ const COMPILE_DELAY := 1.5
 const FULL_COMPILE_DELAY := 30.0
 ## The scripts given to one command: Windows limits a command's length.
 const FILES_PER_COMMAND := 100
+## After a save, the whole project is compiled instead of what the save
+## affects when that is more than this share of the project: compiling half
+## the project costs about as much as compiling it all, as most of the time
+## goes to Godot starting and loading the project, which both do.
+const WHOLE_PROJECT_SHARE := 0.5
+## The most files compiled by name after a save, for the command's length.
+const MOST_COMPILED_BY_NAME := 400
 ## Seconds without typing before the script being edited is linted.
 const LINT_DELAY := 0.3
 ## What the compile check reads.
@@ -320,9 +327,9 @@ func compile() -> void:
 
 
 ## Compiles the files saved since the compile check last started, and the
-## scripts that use them, as gdtest tells: those a save can break. The whole
-## project when gdtest can't tell (one older than `gdtest dependents`), when
-## the project's settings changed, or when that is most of the project.
+## files that use them, as `gdsuite dependents` tells: those a save can
+## break. The whole project when the project's settings changed, when that is
+## most of the project, or when gdsuite can't tell.
 func _compile_saved() -> void:
 	if runner.program == "":
 		return
@@ -330,20 +337,19 @@ func _compile_saved() -> void:
 		_compile_again = true
 		return
 	var saved := PackedStringArray(_to_compile.keys())
-	var gdtest := Runner.gdtest_program()
 	_begin_compile()
-	if saved.is_empty() or "res://project.godot" in saved or gdtest == "":
+	if saved.is_empty() or "res://project.godot" in saved:
 		_run_compile(PackedStringArray())
 		return
 	var lines := PackedStringArray()
-	var args := PackedStringArray(["dependents", "--project-path", Runner.project_root()])
+	var args := PackedStringArray(["--project-root", Runner.project_root(), "dependents"])
 	args.append_array(saved)
 	var on_line := func(line: String) -> void: lines.append(line)
-	if runner.stream(gdtest, args, on_line, _on_dependents.bind(lines)) < 0:
+	if runner.stream(runner.program, args, on_line, _on_dependents.bind(lines)) < 0:
 		_run_compile(PackedStringArray())
 
 
-## gdtest printed the files the saves affect: compiles them.
+## gdsuite printed the files the saves affect: compiles them.
 func _on_dependents(code: int, lines: PackedStringArray) -> void:
 	var json: Variant = JSON.parse_string("".join(lines)) if code == 0 else null
 	if not json is Dictionary or not json.get("files") is Array:
@@ -357,7 +363,11 @@ func _on_dependents(code: int, lines: PackedStringArray) -> void:
 			continue
 		if path.get_extension() in COMPILED_EXTENSIONS:
 			targets.append(path)
-	if targets.size() > FILES_PER_COMMAND:
+	var project_files: float = json.get("project_files", 0)
+	if (
+		targets.size() > MOST_COMPILED_BY_NAME
+		or targets.size() > project_files * WHOLE_PROJECT_SHARE
+	):
 		targets = PackedStringArray()
 	elif targets.is_empty():
 		# Nothing it could break: an addon's file, or one deleted.

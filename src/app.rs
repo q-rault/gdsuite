@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{
-        CheckArgs, Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, HealthArgs, LintArgs,
-        OutputArgs, OutputModeArg, ReportArgs, SetupArgs,
+        CheckArgs, Cli, Commands, DependentsArgs, DoctorArgs, FmtArgs, ForwardReportArgs,
+        HealthArgs, LintArgs, OutputArgs, OutputModeArg, ReportArgs, SetupArgs,
     },
     config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, HealthFailOn, Manifest},
     config_command, editor_addon, health, migrate,
@@ -63,6 +63,7 @@ pub fn run() -> Result<()> {
         Commands::Test(args) => test(&context, args),
         Commands::Health(args) => run_health(&context, args),
         Commands::Check(args) => check(&context, args),
+        Commands::Dependents(args) => dependents(&context, args),
         Commands::Report(args) => report(&context, args),
         Commands::Config(args) => config_command::run(&context, args.action),
     }
@@ -573,6 +574,38 @@ fn fmt_input(
             "the text was not formatted".to_string(),
         ));
     }
+    Ok(())
+}
+
+/// Prints `{"files": [...], "project_files": N}`: the given files and those
+/// that use them, and how many scripts, scenes and resources the project has
+/// outside `addons/`.
+fn dependents(context: &ProjectContext, args: DependentsArgs) -> Result<()> {
+    let changed: Vec<String> = args
+        .files
+        .iter()
+        .map(|file| {
+            if file.starts_with("res://") {
+                file.clone()
+            } else {
+                let relative = file.replace('\\', "/");
+                format!("res://{}", relative.trim_start_matches("./"))
+            }
+        })
+        .collect();
+    let graph = gdsyntax::project::Graph::build(&context.root);
+    let files: Vec<String> = graph.dependents_of(&changed).into_iter().collect();
+    // What the project has, but its addons: for editors to tell whether
+    // checking `files` is much less than checking the whole project.
+    let project_files = graph
+        .forward
+        .keys()
+        .filter(|file| !file.starts_with("res://addons/"))
+        .count();
+    println!(
+        "{}",
+        serde_json::json!({ "files": files, "project_files": project_files })
+    );
     Ok(())
 }
 
