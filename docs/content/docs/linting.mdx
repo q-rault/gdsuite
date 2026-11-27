@@ -49,18 +49,7 @@ Godot's style guide:
 | **Order** | Signals declared below functions, `class_name` after `extends` |
 | **Likely mistakes** | `x = x`, `x == x`, the same scene loaded twice in one script |
 | **Simpler code** | An `else` after a `return`, a `pass` that isn't needed |
-| **Size** | A line over 100 characters, a class with more than 20 public methods |
-
-How long a script is and how many parameters a function takes are left to
-[code health](/code-health), which warns before it calls them critical.
-gdsuite leaves out gdtidy's `max-file-lines` and `function-arguments-number`,
-which would report the same files a second time and fail the check where
-health only warns. To keep either one, name it in `[lint]`:
-
-```toml
-[lint.rules.max-file-lines]
-max = 1000
-```
+| **Size** | A line over 100 characters, a script over 1000 lines, a function with more than 10 parameters |
 
 The [Lint rules](/reference/lint-rules) page lists every rule, whether it is
 on by default, and its options.

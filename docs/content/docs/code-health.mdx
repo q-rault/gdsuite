@@ -22,6 +22,11 @@ ranks.
 | **Going in circles?** | Scripts that depend on each other in a loop | `player.gd` needs `hud.gd`, which needs `player.gd` |
 | **Where first?** | A *hotspot* score combining all the above, and how often Git says a script changes | A big, tangled script you edit every week |
 
+A script's length and a function's parameter count need only that one file,
+so [lint](/linting) reports them, as you type: `max-file-lines` (1000 lines)
+and `function-arguments-number` (10). Code health still counts a script's
+size in its hotspot score, without listing it a second time.
+
 ## Run it
 
 ```bash

@@ -128,41 +128,6 @@ fn lint_prints_findings_and_fails() {
 }
 
 #[test]
-fn lint_leaves_file_length_to_code_health() {
-    let fixture = Fixture::new();
-    fixture.seed_project();
-    fixture.seed_installed_toolchain();
-    fixture.write_flag("lint-size.flag");
-
-    fixture
-        .cmd()
-        .arg("lint")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("max-file-lines").not())
-        .stderr(predicate::str::contains("0 lint problems in 1 files"));
-
-    // Named in [lint], the rule is the project's choice.
-    let config = fs::read_to_string(fixture.root.join("gdsuite.toml")).unwrap();
-    fs::write(
-        fixture.root.join("gdsuite.toml"),
-        format!(
-            "{config}
-[lint.rules.max-file-lines]
-max = 1000
-"
-        ),
-    )
-    .unwrap();
-    fixture
-        .cmd()
-        .arg("lint")
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("warning[max-file-lines]"));
-}
-
-#[test]
 fn a_file_with_a_syntax_error_does_not_fail_lint() {
     let fixture = Fixture::new();
     fixture.seed_project();
@@ -1250,10 +1215,6 @@ echo %*> "%CD%\logs\gdtidy-args.txt"
 >> "%CD%\logs\step-order.txt" echo lint
 if exist "%CD%\mock-state\lint-fail.flag" (
   echo {"version":1,"files":1,"fixed":0,"diagnostics":[{"path":"test/sample.gd","line":3,"column":6,"end_line":3,"end_column":13,"severity":"warning","rule":"function-name","concern":"naming:function","fixable":false,"message":"Function name \"BadName\" is not valid"}],"skipped":[]}
-  exit /b 1
-)
-if exist "%CD%\mock-state\lint-size.flag" (
-  echo {"version":1,"files":1,"fixed":0,"diagnostics":[{"path":"test/big.gd","line":1001,"column":1,"end_line":1001,"end_column":1,"severity":"warning","rule":"max-file-lines","concern":"limit:file-lines","fixable":false,"message":"Max allowed file lines num ^(1000^) exceeded"}],"skipped":[]}
   exit /b 1
 )
 if exist "%CD%\mock-state\lint-skip.flag" (
