@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -629,7 +629,7 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
         _ => process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root),
     }
     .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    let report = JsonLintReport::from_output(&output);
+    let report = JsonLintReport::from_output(&output).without_health_rules(context);
     print_lint_report(&report, &report_mode)?;
     if !report.success {
         // The summary is already printed with the report.
@@ -1030,6 +1030,48 @@ fn lint_args(args: Vec<String>) -> Vec<String> {
     cmd_args
 }
 
+/// gdtidy's rules for what gdhealth measures: file length
+/// (`file_lines_warn`, `file_lines_critical`) and parameter count
+/// (`parameters_warn`).
+const HEALTH_OWNED_LINT_RULES: &[&str] = &["max-file-lines", "function-arguments-number"];
+
+/// The rules the project's `[lint]` names, in `enable` or `rules`: in
+/// gdsuite.toml, or else in gdtidy.toml, as gdtidy reads them at the root.
+fn lint_rules_named(context: &ProjectContext) -> BTreeSet<String> {
+    let lint_of = |name: &str| {
+        let text = fs::read_to_string(context.root.join(name)).ok()?;
+        let value: toml::Value = toml::from_str(&text).ok()?;
+        value.get("lint").cloned()
+    };
+    let Some(lint) = lint_of("gdsuite.toml").or_else(|| lint_of("gdtidy.toml")) else {
+        return BTreeSet::new();
+    };
+    let enabled = lint
+        .get("enable")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .map(ToString::to_string);
+    let configured = lint
+        .get("rules")
+        .and_then(toml::Value::as_table)
+        .into_iter()
+        .flat_map(|rules| rules.keys().cloned());
+    enabled.chain(configured).collect()
+}
+
+/// `summary`, gdsuite's line for gdtidy's report, with `count` problems.
+fn recount(summary: &str, count: usize) -> String {
+    let Some(at) = summary.find(" lint problem") else {
+        return summary.to_string();
+    };
+    let rest = &summary[at + " lint problem".len()..];
+    let rest = rest.strip_prefix('s').unwrap_or(rest);
+    let problems = if count == 1 { "problem" } else { "problems" };
+    format!("{count} lint {problems}{rest}")
+}
+
 fn strip_passthrough_marker(mut args: Vec<String>) -> Vec<String> {
     if args.first().is_some_and(|value| value == "--") {
         args.remove(0);
@@ -1247,6 +1289,30 @@ impl JsonLintReport {
             skipped: Vec::new(),
             stderr,
         }
+    }
+
+    /// Leaves out what code health reports: gdtidy keeps gdlint's limits on
+    /// file length and parameter count, and gdhealth measures both with a
+    /// warning and a critical level, so the suite would show each twice and
+    /// fail lint on what health only warns about. A project that names one
+    /// of these rules in `[lint]` (`enable` or `rules`) keeps it.
+    fn without_health_rules(mut self, context: &ProjectContext) -> Self {
+        let named = lint_rules_named(context);
+        let before = self.findings.len();
+        self.findings.retain(|finding| {
+            finding.rule.as_deref().is_none_or(|rule| {
+                !HEALTH_OWNED_LINT_RULES.contains(&rule) || named.contains(rule)
+            })
+        });
+        // Findings mean gdtidy's report was read, where lint passes when it
+        // has none.
+        if self.findings.len() < before {
+            self.success = self.findings.is_empty();
+            self.status = if self.success { "ok" } else { "failed" };
+            let count = self.findings.len();
+            self.summary = self.summary.map(|summary| recount(&summary, count));
+        }
+        self
     }
 
     fn from_output(output: &process::ProcessOutput) -> Self {
@@ -1709,7 +1775,7 @@ fn run_lint_step(context: &ProjectContext) -> Result<CheckStepResult> {
     warn_unconverted_configs(context);
     let output = process::run(&toolchain.gdtidy, &lint_args(Vec::new()), &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
-    let lint_report = JsonLintReport::from_output(&output);
+    let lint_report = JsonLintReport::from_output(&output).without_health_rules(context);
     let findings = lint_report
         .findings
         .iter()
