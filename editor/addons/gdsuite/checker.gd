@@ -27,9 +27,10 @@ const FULL_COMPILE_DELAY := 30.0
 ## The scripts given to one command: Windows limits a command's length.
 const FILES_PER_COMMAND := 100
 ## After a save, the whole project is compiled instead of what the save
-## affects when that is more than this share of the project: compiling half
-## the project costs about as much as compiling it all, as most of the time
-## goes to Godot starting and loading the project, which both do.
+## affects when that is more than this share of the project. Compiling part
+## of it is only for quicker answers: the whole project is compiled anyway
+## once saves stop. Past half, the answer comes less than twice as fast,
+## and that work is done twice.
 const WHOLE_PROJECT_SHARE := 0.5
 ## The most files compiled by name after a save, for the command's length.
 const MOST_COMPILED_BY_NAME := 400

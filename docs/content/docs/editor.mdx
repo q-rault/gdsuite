@@ -305,10 +305,10 @@ dock's main button does, on what you saved.
   or a resource does the same. With **Autofix** on, the same setting as for
   **Check**, the script is fixed and formatted first. The compile check runs
   on the whole project when `project.godot` changed, or when the save
-  reaches more than half the project (most of a compile is Godot starting and
-  loading the project, so compiling half of it costs about as much as all of
-  it), and again after 30 seconds without a save, for what the links between
-  files don't show (a `class_name` removed that other scripts still use).
+  reaches more than half the project (compiling part of it only answers
+  sooner, and past half not by much), and again after 30 seconds without a
+  save, for what the links between files don't show (a `class_name` removed
+  that other scripts still use).
 - **Check → Lint as you type** (Problems dock): the script you're editing is
   linted as you type, a moment after you stop, before you save. Its lint
   problems are up to date in the list and in the script editor; the other
