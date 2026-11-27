@@ -82,7 +82,7 @@ const MENU_RESET_WIDTHS := 200
 
 ## The ⚙ menu: titles and settings.
 const SETTINGS := [
-	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE]],
+	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE, Settings.LINT_AS_YOU_TYPE]],
 	["A check covers", [
 		Settings.CHECK_FORMAT, Settings.CHECK_LINT, Settings.CHECK_COMPILE, Settings.CHECK_HEALTH,
 	]],
@@ -333,6 +333,16 @@ func mark_stale(path: String) -> void:
 		_rebuild()
 
 
+## What lint found in the text of `path` being edited, saved or not: it
+## replaces what lint found in the script, and shows as up to date.
+func set_live_problems(path: String, problems: Array) -> void:
+	if not Problem.is_checked(Problem.SOURCE_LINT):
+		return
+	store.replace_live(path, problems)
+	_rebuild()
+	problems_changed.emit()
+
+
 ## A file of the project changed on disk: what the checks of the whole
 ## project found is out of date.
 func changed_on_disk(path: String) -> void:
@@ -340,28 +350,15 @@ func changed_on_disk(path: String) -> void:
 		state_changed.emit()
 
 
-## What the checks found, for the top bar and the dock's tab: nothing known
-## until every tool reported once, then errors, warnings, or none.
+## What the checks found, for the top bar and the dock's tab.
 func result() -> String:
-	if not store.is_known():
-		return Status.RESULT_NONE
-	var count := store.counts()
-	if count.errors > 0:
-		return Status.RESULT_ERROR
-	if count.warnings > 0:
-		return Status.RESULT_WARNING
-	return Status.RESULT_OK
+	return store.result()
 
 
 ## Whether that result holds for the code as it is now: Status.RUNNING while
-## a tool checks, STALE when a file changed since the checks that cover it
-## reported, else FRESH.
+## a tool checks, else as ProblemStore.freshness says.
 func freshness() -> String:
-	if not _running.is_empty():
-		return Status.RUNNING
-	if not store.changed_files().is_empty():
-		return Status.STALE
-	return Status.FRESH
+	return Status.RUNNING if not _running.is_empty() else store.freshness()
 
 
 ## The Check button, which the plugin paints as the top bar's Check icon.
@@ -638,7 +635,7 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	if _index.has(COLUMN_SOURCE):
 		item.set_text_alignment(_index[COLUMN_SOURCE], HORIZONTAL_ALIGNMENT_RIGHT)
 	var color := Problem.severity_color(problem.severity)
-	if store.stale.has(problem.file):
+	if store.is_faded(problem):
 		color = Ui.faded(color)
 	for column: String in _shown:
 		item.set_custom_color(_index[column], color)

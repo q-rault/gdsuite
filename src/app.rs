@@ -581,8 +581,21 @@ fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let toolchain = load_toolchain_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     warn_unconverted_configs(context);
-    let output = process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root)
-        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let output = match (&args.input, &args.as_path) {
+        (Some(input), Some(as_path)) => {
+            // gdtidy reads standard input from the project's root, where the
+            // path of the script the text is resolves.
+            let text = fs::read(input)
+                .with_context(|| format!("failed to read {}", input.display()))
+                .map_err(|error| command_error(EXIT_USAGE_ERROR, format!("{error:#}")))?;
+            let mut cmd_args = lint_args(args.args);
+            cmd_args.extend(["-".to_string(), "--stdin-filename".to_string()]);
+            cmd_args.push(as_path.trim_start_matches("res://").to_string());
+            process::run_with_stdin(&toolchain.gdtidy, &cmd_args, &context.root, text)
+        }
+        _ => process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root),
+    }
+    .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let report = JsonLintReport::from_output(&output);
     print_lint_report(&report, &report_mode)?;
     if !report.success {

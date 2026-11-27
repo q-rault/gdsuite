@@ -4,6 +4,7 @@ extends RefCounted
 ## can be trusted: which tools reported, and which scripts were edited since.
 
 const Problem = preload("problem.gd")
+const Status = preload("status.gd")
 
 ## source -> { "res://path.gd": [problem, ...] }. A problem is a Dictionary:
 ## {file, line, column, severity, message, rule, fixable, source}.
@@ -15,6 +16,9 @@ var problems := {
 }
 ## Scripts with problems edited since they were checked: they may be gone.
 var stale := {}
+## Scripts whose lint problems are those of the text being edited, linted as
+## it is typed: up to date, while the others of the script may be gone.
+var live := {}
 
 ## The sources that reported at least once: until all have, the project's
 ## state is not known.
@@ -42,6 +46,8 @@ func replace(source: String, files: PackedStringArray, found: Array, started := 
 		_reported[source] = true
 		by_file.clear()
 		stale.clear()
+		if source == Problem.SOURCE_LINT:
+			live.clear()
 		# An edit made while the check ran is still to check.
 		for path: String in _unchecked.keys():
 			if started < 0 or _unchecked[path] < started:
@@ -52,6 +58,8 @@ func replace(source: String, files: PackedStringArray, found: Array, started := 
 		for path in files:
 			by_file.erase(path)
 			stale.erase(path)
+			if source == Problem.SOURCE_LINT:
+				live.erase(path)
 			_unchecked.erase(path)
 		if _changed_since.has(source):
 			_forget_changes(source, files, started)
@@ -62,6 +70,28 @@ func replace(source: String, files: PackedStringArray, found: Array, started := 
 		by_file[problem.file].append(problem)
 	if source in [Problem.SOURCE_LINT, Problem.SOURCE_HEALTH]:
 		_drop_duplicates()
+
+
+## Replaces what lint found in `path` with what it found in the text being
+## edited. The script stays edited since checked: the other tools haven't
+## seen that text.
+func replace_live(path: String, found: Array) -> void:
+	var by_file: Dictionary = problems[Problem.SOURCE_LINT]
+	by_file.erase(path)
+	for problem: Dictionary in found:
+		problem.source = Problem.SOURCE_LINT
+		if not by_file.has(problem.file):
+			by_file[problem.file] = []
+		by_file[problem.file].append(problem)
+	live[path] = true
+	_drop_duplicates()
+
+
+## Whether `problem` may be gone: its script was edited since it was found.
+func is_faded(problem: Dictionary) -> bool:
+	if not stale.has(problem.file):
+		return false
+	return not (problem.source == Problem.SOURCE_LINT and live.has(problem.file))
 
 
 ## Drops the code health findings lint made too, with a rule of its own.
@@ -132,6 +162,25 @@ func changed_files() -> Array:
 		if Problem.is_checked(source):
 			found.merge(_changed_since[source])
 	return found.keys()
+
+
+## What the checks found: nothing known until every tool reported once, then
+## errors, warnings, or none.
+func result() -> String:
+	if not is_known():
+		return Status.RESULT_NONE
+	var count := counts()
+	if count.errors > 0:
+		return Status.RESULT_ERROR
+	if count.warnings > 0:
+		return Status.RESULT_WARNING
+	return Status.RESULT_OK
+
+
+## Status.STALE when a file changed since the checks that cover it reported,
+## else FRESH.
+func freshness() -> String:
+	return Status.STALE if not changed_files().is_empty() else Status.FRESH
 
 
 ## Whether every tool a check covers has reported once.

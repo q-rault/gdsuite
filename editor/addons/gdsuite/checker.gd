@@ -26,6 +26,8 @@ const COMPILE_DELAY := 1.5
 const FULL_COMPILE_DELAY := 30.0
 ## The scripts given to one command: Windows limits a command's length.
 const FILES_PER_COMMAND := 100
+## Seconds without typing before the script being edited is linted.
+const LINT_DELAY := 0.3
 ## What the compile check reads.
 const COMPILED_EXTENSIONS := ["gd", "tscn", "tres", "scn", "res"]
 
@@ -52,6 +54,13 @@ var _health_again := false
 ## report: a file changed after is still out of date.
 var _compile_started := -1
 var _health_started := -1
+## Lint as you type: the script being edited, waiting for the typing to
+## stop, and whether a lint of it is going, or is to start again once it ends.
+var _live_timer: Timer
+var _live_edit: CodeEdit
+var _live_path := ""
+var _live_running := false
+var _live_again := false
 ## The sources a check waits for before it fixes, and whether it fixes.
 var _waiting_for := {}
 var _fixes := false
@@ -68,6 +77,11 @@ func _init() -> void:
 	_full_compile_timer.wait_time = FULL_COMPILE_DELAY
 	_full_compile_timer.timeout.connect(_on_idle)
 	add_child(_full_compile_timer)
+	_live_timer = Timer.new()
+	_live_timer.one_shot = true
+	_live_timer.wait_time = LINT_DELAY
+	_live_timer.timeout.connect(_lint_live)
+	add_child(_live_timer)
 
 
 # --- Checking ----------------------------------------------------------------
@@ -128,6 +142,49 @@ func _saved(path: String) -> void:
 	_to_compile[path] = true
 	_compile_timer.start()
 	_full_compile_timer.stop()
+
+
+## The script at `path` was edited in `code_edit`: once the typing stops,
+## lints the text as it is, saved or not.
+func text_edited(path: String, code_edit: CodeEdit) -> void:
+	if not Settings.value(Settings.LINT_AS_YOU_TYPE) or path.get_extension() != "gd":
+		return
+	if not Problem.is_checked(Problem.SOURCE_LINT):
+		return
+	_live_path = path
+	_live_edit = code_edit
+	_live_timer.start()
+
+
+func _lint_live() -> void:
+	if runner.program == "" or not is_instance_valid(_live_edit):
+		return
+	if _live_running:
+		_live_again = true
+		return
+	var path := _live_path
+	var input := OS.get_temp_dir().path_join("gdsuite-lint-%d.gd" % OS.get_process_id())
+	var file := FileAccess.open(input, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(_live_edit.text)
+	file.close()
+	_live_running = true
+	var args := PackedStringArray(["lint", "--report", "json", "--input", input, "--as", path])
+	runner.run(args, _on_live_linted.bind(path))
+
+
+func _on_live_linted(result: Dictionary, path: String) -> void:
+	_live_running = false
+	var report: Variant = result.json
+	# Text that doesn't parse, as often while typing, keeps what was found:
+	# its syntax error is Godot's to show. A gdsuite older than
+	# `lint --input` answers no report.
+	if report is Dictionary and report.has("findings") and report.get("skipped", []).is_empty():
+		dock.set_live_problems(path, Problem.from_report(report))
+	if _live_again:
+		_live_again = false
+		_lint_live()
 
 
 ## Whether the script at `path` compiles, for the tests to run on save:

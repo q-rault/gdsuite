@@ -126,6 +126,15 @@ pub enum OutputModeArg {
 pub struct LintArgs {
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
+    /// Lint this file's text instead of the project's files. Editors use it
+    /// to lint unsaved text with the project's settings; `--as` says which
+    /// script the text is.
+    #[arg(long, value_name = "FILE", requires = "as_path")]
+    pub input: Option<PathBuf>,
+    /// With `--input`: the script the text is, as a path in the project. Its
+    /// settings apply, and its problems are reported under it.
+    #[arg(long = "as", value_name = "PATH", requires = "input")]
+    pub as_path: Option<String>,
     #[arg(last = true, action = ArgAction::Append)]
     pub args: Vec<String>,
 }

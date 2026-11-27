@@ -532,6 +532,7 @@ func _on_script_changed(_script: Script) -> void:
 func _on_text_changed(code_edit: CodeEdit, path: String) -> void:
 	if not _checker.saving and code_edit.get_version() != code_edit.get_saved_version():
 		_dock.mark_stale(path)
+		_checker.text_edited(path, code_edit)
 
 
 func _on_gutter_clicked(line: int, gutter: int, code_edit: CodeEdit) -> void:

@@ -1495,6 +1495,28 @@ fn fmt_input_prints_the_formatted_text_and_changes_no_file() {
 }
 
 #[test]
+fn lint_input_lints_the_text_as_the_script_it_names() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    let buffer = fixture.root.join("buffer.txt");
+    fs::write(&buffer, "func Bad():\n\tpass\n").unwrap();
+
+    fixture
+        .cmd()
+        .args(["lint", "--report", "json", "--input"])
+        .arg(&buffer)
+        .args(["--as", "res://ui/hud.gd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"file\": \"ui/hud.gd\""))
+        .stdout(predicate::str::contains("\"rule\": \"function-name\""));
+    assert_eq!(
+        fs::read_to_string(&buffer).unwrap(),
+        "func Bad():\n\tpass\n"
+    );
+}
+
+#[test]
 fn config_changes_gdsuite_toml_and_reads_it_back() {
     let fixture = Fixture::new();
     fixture.seed_project();

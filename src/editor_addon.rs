@@ -64,6 +64,10 @@ const FILES: &[(&str, &str)] = &[
     addon_file!("settings_menu.gd.uid"),
     addon_file!("ui.gd"),
     addon_file!("ui.gd.uid"),
+    addon_file!("status.gd"),
+    addon_file!("status.gd.uid"),
+    addon_file!("disk_changes.gd"),
+    addon_file!("disk_changes.gd.uid"),
 ];
 
 const DIR: &str = "addons/gdsuite/";
@@ -244,6 +248,25 @@ pub fn is_installed(project_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file added to the addon and left out of FILES would be missing from
+    /// every project gdsuite installs the addon in.
+    #[test]
+    fn every_file_of_the_addon_is_installed() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("editor/addons/gdsuite");
+        for entry in fs::read_dir(&source).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            // The record a project's gdsuite writes, not a file of the addon.
+            if name == "files.sha256" {
+                continue;
+            }
+            let path = format!("{DIR}{name}");
+            assert!(
+                FILES.iter().any(|(relative, _)| *relative == path),
+                "{name} is in editor/addons/gdsuite/ but not in FILES"
+            );
+        }
+    }
 
     #[test]
     fn installs_once_then_changes_nothing() {

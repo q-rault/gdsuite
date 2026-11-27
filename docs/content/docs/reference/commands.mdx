@@ -37,6 +37,7 @@ Some also take:
 | `--output pretty\|plain\|json` | `init`, `setup`, `update`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
 | `--report text\|json` | `lint`, `typecheck`, `test`, `health`, `check` | Print the result as text or JSON. `lint` and `typecheck` give the same JSON shape; `test`, `health` and `check` also save it in `reports/gdsuite/` |
 | `--input <FILE>` | `fmt` | Print the file's text formatted with the project's settings, and change no file. For editors, to format unsaved text |
+| `--input <FILE> --as <PATH>` | `lint` | Lint the file's text as the script at PATH, with its settings, and report its problems under PATH. For editors, to lint unsaved text |
 
 ## Passing options to a tool
 
