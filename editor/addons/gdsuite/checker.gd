@@ -8,6 +8,9 @@ extends Node
 signal checking_changed
 ## The compile check reported.
 signal compiled
+## The addon wrote these files ("res://" paths) itself, fixing them: not a
+## change from outside the editor.
+signal files_written(paths: PackedStringArray)
 
 const Runner = preload("runner.gd")
 const Settings = preload("settings.gd")
@@ -32,6 +35,10 @@ var _compile_running := false
 var _compile_again := false
 var _health_running := false
 var _health_again := false
+## When the compile check and code health running started, for what they
+## report: a file changed after is still out of date.
+var _compile_started := -1
+var _health_started := -1
 ## The sources a check waits for before it fixes, and whether it fixes.
 var _waiting_for := {}
 var _fixes := false
@@ -90,6 +97,13 @@ func script_saved(script: GDScript) -> void:
 		_fix_saved(script)
 	_check_files(PackedStringArray([path]))
 	_compile_timer.start()
+
+
+## A scene or resource was saved: the compile check and code health read
+## them too, and run again after it, as after a script's save.
+func resource_saved(_path: String) -> void:
+	if Settings.value(Settings.CHECK_ON_SAVE):
+		_compile_timer.start()
 
 
 ## Whether the script at `path` compiles, for the tests to run on save:
@@ -203,6 +217,7 @@ func compile() -> void:
 		_compile_again = true
 		return
 	_compile_running = true
+	_compile_started = Time.get_ticks_usec()
 	dock.set_running(Problem.SOURCE_TYPES, true)
 	runner.run(PackedStringArray(["typecheck", "--report", "json"]), _on_compile_done)
 
@@ -215,7 +230,7 @@ func _on_compile_done(result: Dictionary) -> void:
 		# Godot reports lines only: a column would be made up.
 		for problem: Dictionary in problems:
 			problem.column = 0
-		dock.set_problems(Problem.SOURCE_TYPES, PackedStringArray(), problems)
+		dock.set_problems(Problem.SOURCE_TYPES, PackedStringArray(), problems, _compile_started)
 	else:
 		dock.set_status("The compile check could not run: " + str(result.output).strip_edges())
 	if _compile_again:
@@ -232,6 +247,7 @@ func health() -> void:
 		_health_again = true
 		return
 	_health_running = true
+	_health_started = Time.get_ticks_usec()
 	dock.set_running(Problem.SOURCE_HEALTH, true)
 	runner.run(PackedStringArray(["health", "--quick", "--report", "json"]), _on_health_done)
 
@@ -242,7 +258,7 @@ func _on_health_done(result: Dictionary) -> void:
 	if result.json is Dictionary:
 		dock.set_graph(result.json.get("graph", {}))
 		var problems := Problem.from_health_report(result.json)
-		dock.set_problems(Problem.SOURCE_HEALTH, PackedStringArray(), problems)
+		dock.set_problems(Problem.SOURCE_HEALTH, PackedStringArray(), problems, _health_started)
 	else:
 		dock.set_status("Code health could not run: " + str(result.output).strip_edges())
 	if _health_again:
@@ -296,6 +312,7 @@ func _on_fixed(files: Dictionary, done: Callable) -> void:
 		if FileAccess.get_md5(path) != files[path]:
 			changed.append(path)
 			ScriptEdits.reload_file(path)
+	files_written.emit(changed)
 	if not changed.is_empty():
 		for group in _groups(changed):
 			_check_files(group)
@@ -330,6 +347,7 @@ func _fix_saved(script: GDScript) -> void:
 	script.source_code = text
 	saving = true
 	ResourceSaver.save(script)
+	files_written.emit(PackedStringArray([path]))
 	var code_edit := ScriptEdits.code_edit_for(path)
 	if code_edit != null:
 		ScriptEdits.replace_text(code_edit, text, true)

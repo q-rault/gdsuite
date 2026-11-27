@@ -19,12 +19,14 @@ var stale := {}
 ## The sources that reported at least once: until all have, the project's
 ## state is not known.
 var _reported := {}
-## Scripts edited since they were checked, with problems or not.
+## Scripts edited since they were checked, with problems or not: path ->
+## when last edited, in Time.get_ticks_usec().
 var _unchecked := {}
 ## The sources that check the whole project at once (the compile check, code
 ## health), with the files changed on disk since they last did: source ->
-## {"res://path": true}. A change to one script can change what they find in
-## another, so all they found is out of date, not only that script's.
+## {"res://path": when, in Time.get_ticks_usec()}. A change to one script
+## can change what they find in another, so all they found is out of date,
+## not only that script's.
 var _changed_since := {
 	Problem.SOURCE_TYPES: {},
 	Problem.SOURCE_HEALTH: {},
@@ -32,23 +34,27 @@ var _changed_since := {
 
 
 ## Replaces what `source` found in `files` ("res://" paths), or in the whole
-## project when `files` is empty.
-func replace(source: String, files: PackedStringArray, found: Array) -> void:
+## project when `files` is empty. `started`, in Time.get_ticks_usec(): when
+## that check started; a file changed after it is still out of date.
+func replace(source: String, files: PackedStringArray, found: Array, started := -1) -> void:
 	var by_file: Dictionary = problems[source]
 	if files.is_empty():
 		_reported[source] = true
 		by_file.clear()
 		stale.clear()
-		_unchecked.clear()
+		# An edit made while the check ran is still to check.
+		for path: String in _unchecked.keys():
+			if started < 0 or _unchecked[path] < started:
+				_unchecked.erase(path)
 		if _changed_since.has(source):
-			_changed_since[source].clear()
+			_forget_changes(source, _changed_since[source].keys(), started)
 	else:
 		for path in files:
 			by_file.erase(path)
 			stale.erase(path)
 			_unchecked.erase(path)
-			if _changed_since.has(source):
-				_changed_since[source].erase(path)
+		if _changed_since.has(source):
+			_forget_changes(source, files, started)
 	for problem: Dictionary in found:
 		problem.source = source
 		if not by_file.has(problem.file):
@@ -91,10 +97,19 @@ func mark_stale(path: String) -> bool:
 		func(by_file: Dictionary) -> bool: return by_file.has(path)
 	)
 	var changed := not _unchecked.has(path) or (has_problems and not stale.has(path))
-	_unchecked[path] = true
+	_unchecked[path] = Time.get_ticks_usec()
 	if has_problems:
 		stale[path] = true
 	return changed
+
+
+## Forgets the changes to `paths` that `source` saw: those before `started`,
+## or all of them when it is -1.
+func _forget_changes(source: String, paths: Array, started: int) -> void:
+	var changed: Dictionary = _changed_since[source]
+	for path: String in paths:
+		if changed.has(path) and (started < 0 or changed[path] < started):
+			changed.erase(path)
 
 
 ## A file of the project changed on disk, saved or changed outside the
@@ -103,9 +118,9 @@ func mark_stale(path: String) -> bool:
 func changed_on_disk(path: String) -> bool:
 	var changed := false
 	for source: String in _changed_since:
-		if Problem.is_checked(source) and not _changed_since[source].has(path):
-			_changed_since[source][path] = true
-			changed = true
+		if Problem.is_checked(source):
+			changed = changed or not _changed_since[source].has(path)
+			_changed_since[source][path] = Time.get_ticks_usec()
 	return changed
 
 

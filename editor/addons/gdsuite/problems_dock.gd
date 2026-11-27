@@ -267,14 +267,17 @@ func _ready() -> void:
 
 
 ## Replaces what `source` found in `files` ("res://" paths), or in the whole
-## project when `files` is empty.
-func set_problems(source: String, files: PackedStringArray, problems: Array) -> void:
+## project when `files` is empty. `started`: when that check started, see
+## ProblemStore.replace.
+func set_problems(
+	source: String, files: PackedStringArray, problems: Array, started := -1
+) -> void:
 	# Turned off while it was running.
 	if not Problem.is_checked(source):
 		return
 	_checked_msec = Time.get_ticks_msec()
 	_note = ""
-	store.replace(source, files, problems)
+	store.replace(source, files, problems, started)
 	_rebuild()
 	problems_changed.emit()
 

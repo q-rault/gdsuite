@@ -17,6 +17,7 @@ const TestsMenu = preload("tests_menu.gd")
 const Checker = preload("checker.gd")
 const ScriptEdits = preload("script_edits.gd")
 const Status = preload("status.gd")
+const DiskChanges = preload("disk_changes.gd")
 
 const NOT_FOUND := "gdsuite not found: install it, or set its path in Editor Settings > GDSuite"
 ## The page of the full code health report.
@@ -67,6 +68,7 @@ const LAYOUT_FLOATING := 4
 var _runner := Runner.new()
 var _checker := Checker.new()
 var _markers := Markers.new()
+var _disk := DiskChanges.new()
 var _dock: ProblemsDock
 ## The EditorDock holding `_dock` on Godot 4.6 and newer; null on 4.5.
 var _dock_host: Control
@@ -114,6 +116,7 @@ func _enter_tree() -> void:
 
 	_checker.runner = _runner
 	_checker.dock = _dock
+	_checker.files_written.connect(_on_files_written)
 	add_child(_checker)
 
 	_tests = TestsDock.new()
@@ -209,6 +212,9 @@ func _enter_tree() -> void:
 	_read_project_settings()
 	_show_check_state()
 	_show_tests_state()
+	# What the files hold now, to tell later changes from outside the editor.
+	if not EditorInterface.get_resource_filesystem().is_scanning():
+		_disk.scan()
 	# Opening the project only looks: Check is what fixes.
 	_checker.check(false)
 
@@ -590,6 +596,24 @@ func _open_test(file: String, test_name: String) -> void:
 func _on_filesystem_changed() -> void:
 	_read_project_settings()
 	_discover_timer.start()
+	if _runner.program == "":
+		return
+	for path in _disk.scan():
+		_changed_outside(path)
+
+
+## `path` changed outside the editor: what was checked and tested is out of
+## date. Nothing runs: a checkout can change hundreds of files.
+func _changed_outside(path: String) -> void:
+	_dock.changed_on_disk(path)
+	if path.get_extension() == "gd":
+		_dock.mark_stale(path)
+	_tests.watch.file_changed_outside(path)
+
+
+func _on_files_written(paths: PackedStringArray) -> void:
+	for path in paths:
+		_disk.note(path)
 
 
 # --- Saving ------------------------------------------------------------------
@@ -602,16 +626,22 @@ func _on_resource_saved(resource: Resource) -> void:
 	# Built-in scripts and resources are saved with their scene.
 	if path == "" or path.contains("::"):
 		return
-	if not resource is GDScript:
-		_tests.watch.file_saved(path)
-		return
-	_checker.script_saved(resource as GDScript)
+	_disk.note(path)
+	_dock.changed_on_disk(path)
+	if resource is GDScript:
+		_checker.script_saved(resource as GDScript)
+	else:
+		_checker.resource_saved(path)
 	_tests.watch.file_saved(path)
 
 
 func _on_scene_saved(path: String) -> void:
-	if not _checker.saving:
-		_tests.watch.file_saved(path)
+	if _checker.saving:
+		return
+	_disk.note(path)
+	_dock.changed_on_disk(path)
+	_checker.resource_saved(path)
+	_tests.watch.file_saved(path)
 
 
 # --- Settings ---------------------------------------------------------------
