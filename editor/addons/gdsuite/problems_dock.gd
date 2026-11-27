@@ -11,8 +11,8 @@ extends VBoxContainer
 ## be done about it.
 
 signal problems_changed
-## A check started or ended, or a script was edited: whether the project is
-## known to be clean (`is_clean`) may have changed.
+## A check started or ended, or a file changed: what `result` and
+## `freshness` say may have changed.
 signal state_changed
 ## Asks the plugin to run something on a problem: "open", "fix",
 ## "disable_rule", "ignore_here", "docs", or "format_all" with {files}.
@@ -27,6 +27,7 @@ const Settings = preload("settings.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
+const Status = preload("status.gd")
 const DetailsPane = preload("details_pane.gd")
 const Folding = preload("folding.gd")
 const SettingsMenu = preload("settings_menu.gd")
@@ -329,10 +330,40 @@ func mark_stale(path: String) -> void:
 		_rebuild()
 
 
-## Whether the project has no problem, and no check is going which could find
-## some.
-func is_clean() -> bool:
-	return _running.is_empty() and store.is_clean()
+## A file of the project changed on disk: what the checks of the whole
+## project found is out of date.
+func changed_on_disk(path: String) -> void:
+	if store.changed_on_disk(path):
+		state_changed.emit()
+
+
+## What the checks found, for the top bar and the dock's tab: nothing known
+## until every tool reported once, then errors, warnings, or none.
+func result() -> String:
+	if not store.is_known():
+		return Status.RESULT_NONE
+	var count := store.counts()
+	if count.errors > 0:
+		return Status.RESULT_ERROR
+	if count.warnings > 0:
+		return Status.RESULT_WARNING
+	return Status.RESULT_OK
+
+
+## Whether that result holds for the code as it is now: Status.RUNNING while
+## a tool checks, STALE when a file changed since the checks that cover it
+## reported, else FRESH.
+func freshness() -> String:
+	if not _running.is_empty():
+		return Status.RUNNING
+	if not store.changed_files().is_empty():
+		return Status.STALE
+	return Status.FRESH
+
+
+## The Check button, which the plugin paints as the top bar's Check icon.
+func action_button() -> Button:
+	return _check_button
 
 
 ## Says what went wrong with a check, until the next one reports.

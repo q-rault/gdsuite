@@ -21,6 +21,14 @@ var stale := {}
 var _reported := {}
 ## Scripts edited since they were checked, with problems or not.
 var _unchecked := {}
+## The sources that check the whole project at once (the compile check, code
+## health), with the files changed on disk since they last did: source ->
+## {"res://path": true}. A change to one script can change what they find in
+## another, so all they found is out of date, not only that script's.
+var _changed_since := {
+	Problem.SOURCE_TYPES: {},
+	Problem.SOURCE_HEALTH: {},
+}
 
 
 ## Replaces what `source` found in `files` ("res://" paths), or in the whole
@@ -32,11 +40,15 @@ func replace(source: String, files: PackedStringArray, found: Array) -> void:
 		by_file.clear()
 		stale.clear()
 		_unchecked.clear()
+		if _changed_since.has(source):
+			_changed_since[source].clear()
 	else:
 		for path in files:
 			by_file.erase(path)
 			stale.erase(path)
 			_unchecked.erase(path)
+			if _changed_since.has(source):
+				_changed_since[source].erase(path)
 	for problem: Dictionary in found:
 		problem.source = source
 		if not by_file.has(problem.file):
@@ -85,19 +97,34 @@ func mark_stale(path: String) -> bool:
 	return changed
 
 
+## A file of the project changed on disk, saved or changed outside the
+## editor: what the compile check and code health found is out of date.
+## Returns whether that changed anything.
+func changed_on_disk(path: String) -> bool:
+	var changed := false
+	for source: String in _changed_since:
+		if Problem.is_checked(source) and not _changed_since[source].has(path):
+			_changed_since[source][path] = true
+			changed = true
+	return changed
+
+
+## The files changed since the checks that cover them last reported: edited
+## scripts, and files changed since the compile check or code health ran.
+func changed_files() -> Array:
+	var found := _unchecked.duplicate()
+	for source: String in _changed_since:
+		if Problem.is_checked(source):
+			found.merge(_changed_since[source])
+	return found.keys()
+
+
 ## Whether every tool a check covers has reported once.
 func is_known() -> bool:
 	return Problem.SOURCES.all(
 		func(source: String) -> bool:
 			return _reported.has(source) or not Problem.is_checked(source)
 	)
-
-
-## Whether the project has no problem, as far as the checks of what every
-## script holds now can tell: all reported, and no script was edited since.
-func is_clean() -> bool:
-	var count := counts()
-	return is_known() and _unchecked.is_empty() and count.errors + count.warnings == 0
 
 
 ## The problems of one script, every source, sorted by line.
