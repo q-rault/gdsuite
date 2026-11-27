@@ -378,7 +378,8 @@ func _dot(color: Color) -> Texture2D:
 	var key := color.to_html()
 	if not _dots.has(key):
 		var theme := EditorInterface.get_editor_theme()
-		var image := theme.get_icon("Warning", "EditorIcons").get_image()
+		# A copy: get_image() can give the editor icon's own image.
+		var image := theme.get_icon("Warning", "EditorIcons").get_image().duplicate() as Image
 		image.convert(Image.FORMAT_RGBA8)
 		for y in image.get_height():
 			for x in image.get_width():

@@ -266,9 +266,11 @@ func run(targets: PackedStringArray, reason := "") -> void:
 	_started_msec = Time.get_ticks_msec()
 	_finished_msec = 0
 	_start_run(targets)
-	_set_running(true)
 	var args := gdtest_args(PackedStringArray(), targets)
+	# Its events reach the dock after this function returns: the run is said
+	# to have started once it has a process, so that `is_running` agrees.
 	_pid = runner.stream(gdtest, args, _on_event, _on_run_done)
+	_set_running(true)
 	if _pid < 0:
 		_set_running(false)
 		Ui.set_status(_status, "gdtest could not start")
@@ -369,7 +371,11 @@ func result() -> String:
 	for file: String in _tests:
 		for test_name: String in _tests[file]:
 			var result: Dictionary = _results.get(Result.key(file, test_name), {})
-			match result.get("status", Result.STATUS_IDLE):
+			var status: String = result.get("status", Result.STATUS_IDLE)
+			# While it runs, a test shows what it found the last time.
+			if status in [Result.STATUS_QUEUED, Result.STATUS_RUNNING]:
+				status = result.get("before", Result.STATUS_IDLE)
+			match status:
 				Result.STATUS_FAIL, Result.STATUS_ERROR:
 					return Status.RESULT_ERROR
 				Result.STATUS_PASS, Result.STATUS_SKIP:

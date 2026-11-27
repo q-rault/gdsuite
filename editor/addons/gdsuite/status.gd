@@ -65,7 +65,7 @@ static func icon(base: Texture2D, result: String, freshness: String, frame := 0)
 	]
 	if _icons.has(key):
 		return _icons[key]
-	var image := base.get_image()
+	var image := _copy(base)
 	if image.is_compressed():
 		image.decompress()
 	image.convert(Image.FORMAT_RGBA8)
@@ -93,7 +93,7 @@ static func badge_image(result: String, freshness: String, frame: int, size: int
 	var texture := Ui.icon(name)
 	if texture == null:
 		return null
-	var badge := texture.get_image()
+	var badge := _copy(texture)
 	if badge.is_compressed():
 		badge.decompress()
 	badge.convert(Image.FORMAT_RGBA8)
@@ -126,6 +126,12 @@ static func tab_icon(result: String, freshness: String, frame := 0) -> Texture2D
 	var texture := ImageTexture.create_from_image(badge)
 	_icons[key] = texture
 	return texture
+
+
+## A copy of the image of `texture`, to change: get_image() can give the
+## texture's own image, which other icons, and the editor, draw from.
+static func _copy(texture: Texture2D) -> Image:
+	return texture.get_image().duplicate() as Image
 
 
 ## Draws `badge` over the bottom right of `image`, with a clear ring around

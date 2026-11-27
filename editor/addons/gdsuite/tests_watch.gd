@@ -192,6 +192,8 @@ func _on_affected(code: int, saved: Dictionary, found: Dictionary) -> void:
 			if any_other or saved.has(file):
 				found[file] = tests[file]
 	if found.is_empty():
+		# No test to run again: the tests are up to date, as before the save.
+		_dock.results_changed.emit()
 		return
 	var stale: Array = _dock.mark_stale(found)
 	for path: String in saved:
