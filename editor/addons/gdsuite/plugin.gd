@@ -435,6 +435,8 @@ func _paint(
 			"icon_pressed_color",
 			"icon_hover_pressed_color",
 			"icon_focus_color",
+			# Check is disabled while it runs: the icon is faded already.
+			"icon_disabled_color",
 		]:
 			button.add_theme_color_override(color_name, Color.WHITE)
 		button.tooltip_text = tooltip
