@@ -34,17 +34,18 @@ jobs:
         run: cargo clippy --all-targets --locked --target x86_64-pc-windows-msvc -- -D warnings
       - name: clippy (macOS)
         run: cargo clippy --all-targets --locked --target aarch64-apple-darwin -- -D warnings
+      # In its own folder: packaging points the build tracking in target/ at the
+      # packaged sources, and the cache would then keep later builds stale.
+      # The packaged contents do not depend on the OS. Before the addon step,
+      # which writes the addon's files.sha256 record into editor/.
+      - name: Packaged crate builds
+        run: cargo package --locked --target-dir "${{ runner.temp }}/package"
       # The editor addon is GDScript: gdsuite checks it like any project's.
       # Type checking needs Godot, so it runs locally (see editor/).
       - name: Format and lint the editor addon
         run: |
           cargo run --locked --quiet -- --project-root editor fmt -- --check addons/gdsuite
           cargo run --locked --quiet -- --project-root editor lint -- addons/gdsuite
-      # In its own folder: packaging points the build tracking in target/ at the
-      # packaged sources, and the cache would then keep later builds stale.
-      # The packaged contents do not depend on the OS.
-      - name: Packaged crate builds
-        run: cargo package --locked --target-dir "${{ runner.temp }}/package"
 
   test:
     name: ${{ matrix.os }}
