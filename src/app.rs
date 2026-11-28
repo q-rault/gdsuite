@@ -494,7 +494,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     match output.mode() {
         OutputMode::Pretty => render_doctor_pretty(&output, &report),
         OutputMode::Plain => render_doctor_plain(&output, &report),
-        OutputMode::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        OutputMode::Json => println!("{}", ascii_json(serde_json::to_string_pretty(&report)?)),
     }
 
     match status {
@@ -711,7 +711,7 @@ fn health_quick(context: &ProjectContext, report_mode: &str) -> Result<()> {
     let report = health::quick(&toolchain.gdhealth, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, format!("{error:#}")))?;
     if report_mode == "json" {
-        println!("{}", serde_json::to_string(&report)?);
+        println!("{}", ascii_json(serde_json::to_string(&report)?));
         return Ok(());
     }
     for finding in &report.findings {
@@ -730,7 +730,7 @@ fn typecheck(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
         let output = process::run(&toolchain.gdtypecheck, &cmd_args, &context.root)
             .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
         let report = JsonLintReport::from_typecheck_output(&output);
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!("{}", ascii_json(serde_json::to_string_pretty(&report)?));
         if !report.success {
             return Err(command_error(
                 EXIT_VALIDATION_ERROR,
@@ -1076,7 +1076,7 @@ fn default_health_args(config: &GdsuiteConfig, args: Vec<String>) -> Vec<String>
 
 fn print_lint_report(report: &JsonLintReport, mode: &str) -> Result<()> {
     if mode == "json" {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        println!("{}", ascii_json(serde_json::to_string_pretty(report)?));
         return Ok(());
     }
     for finding in &report.findings {
@@ -1828,7 +1828,7 @@ fn run_health_check_step(
             .filter(|finding| match config.check.health_fail_on {
                 HealthFailOn::Never => false,
                 HealthFailOn::Critical => finding["severity"] == "error",
-                HealthFailOn::Warning => true,
+                HealthFailOn::Warning => finding["severity"] != "info",
             })
             .filter_map(|finding| {
                 serde_json::from_value::<health::HealthFinding>(finding.clone()).ok()
@@ -2177,13 +2177,35 @@ fn typecheck_failure_summary(diagnostics: &[String]) -> String {
     }
 }
 
+/// `json` with every character past ASCII written as a `\u` escape: the
+/// same JSON, which no reader can decode with the wrong code page. Godot's
+/// `OS.execute` on Windows can read a program's output as the system code
+/// page, which turns `→` into `â†’`.
+pub(crate) fn ascii_json(json: String) -> String {
+    if json.is_ascii() {
+        return json;
+    }
+    let mut out = String::with_capacity(json.len() + 16);
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    out
+}
+
 fn print_and_store_report(
     context: &ProjectContext,
     config: &GdsuiteConfig,
     command: &str,
     report: &SuiteReport,
 ) -> Result<()> {
-    let json = serde_json::to_string_pretty(report)?;
+    let json = ascii_json(serde_json::to_string_pretty(report)?);
     println!("{json}");
     write_report_artifacts(context, config, command, &json)?;
     Ok(())
@@ -2279,4 +2301,28 @@ impl StepReport {
 struct ArtifactRef {
     name: String,
     path: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ascii_json;
+
+    #[test]
+    fn ascii_json_is_the_same_json_in_ascii() {
+        let value = serde_json::json!({"hint": "a.gd → b.gd (for › if) 130–162 🎮"});
+        let json = ascii_json(serde_json::to_string(&value).unwrap());
+        assert!(json.is_ascii());
+        let escape = |units: &str| {
+            units
+                .split(' ')
+                .map(|unit| format!("{}u{unit}", '\\'))
+                .collect::<String>()
+        };
+        assert!(json.contains(&escape("2192")));
+        assert!(json.contains(&escape("d83c dfae")));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            value
+        );
+    }
 }
