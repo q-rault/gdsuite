@@ -22,7 +22,7 @@ gdtest = "=0.2.14"
 gdtidy = "=0.3.7"
 gdtypecheck = "=0.2.6"
 # Which file of a project uses which: `gdsuite dependents`.
-gdsyntax = "0.1.5"
+gdsyntax = "0.1.6"
 anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"
