@@ -329,6 +329,22 @@ health_compare = \"main\"",
         fixture.read_log("gdhealth-args.txt"),
         "health --compare main"
     );
+
+    // A revision gdhealth cannot find says so, not an earlier run's summary.
+    let bundle = fixture.root.join("reports/code-health");
+    fs::create_dir_all(&bundle).unwrap();
+    fs::write(bundle.join("summary.txt"), "an earlier summary").unwrap();
+    with(
+        "health_fail_on = \"critical\"
+health_compare = \"nope\"",
+    );
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("cannot compare with nope"))
+        .stdout(predicate::str::contains("an earlier summary").not());
 }
 
 #[test]
@@ -787,6 +803,10 @@ if "%1"=="graph" (
 if "%2"=="--no-git" (
   > "%6" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7}]}
   exit /b 0
+)
+if "%3"=="nope" (
+  echo git error: cannot compare with nope 1>&2
+  exit /b 1
 )
 if "%2"=="--compare" if exist "%CD%\mock-state\health-findings.flag" (
   mkdir "%CD%\reports\code-health" 2>nul

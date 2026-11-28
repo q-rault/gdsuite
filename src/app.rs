@@ -1935,6 +1935,13 @@ fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> 
     }
 }
 
+fn bundle_summary_path(context: &ProjectContext) -> PathBuf {
+    context
+        .root
+        .join(tooling::GDHEALTH_ARTIFACT_DIR)
+        .join("summary.txt")
+}
+
 fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
@@ -1945,11 +1952,12 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         .join("health.json");
     let written = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
     let written_before = written(&health_json);
+    let summary_before = written(&bundle_summary_path(context));
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let bundle_dir = context.root.join(tooling::GDHEALTH_ARTIFACT_DIR);
-    let summary_path = bundle_dir.join("summary.txt");
+    let summary_path = bundle_summary_path(context);
     let mut artifacts = Vec::new();
 
     for (name, path) in [
@@ -1964,7 +1972,11 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         }
     }
 
-    let bundle_summary = read_trimmed_file_if_exists(&summary_path);
+    // A summary left by an earlier run would hide why this one failed, such
+    // as a revision `--compare` cannot find.
+    let bundle_summary = (written(&summary_path) > summary_before)
+        .then(|| read_trimmed_file_if_exists(&summary_path))
+        .flatten();
     let summary = if output.status.success() {
         if artifacts.is_empty() {
             "health passed".to_string()
