@@ -1,8 +1,10 @@
 name: e2e
 
-# Runs gdsuite, with the tools built in, against a real Godot. Run it manually
-# before a gdsuite release.
+# Runs gdsuite, with the tools built in, against a real Godot. Cut release
+# runs it first and releases nothing when it fails; it can also be run from
+# the Actions tab.
 on:
+  workflow_call:
   workflow_dispatch:
 
 jobs:

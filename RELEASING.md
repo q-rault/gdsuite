@@ -77,9 +77,13 @@ can't build together) and `.gdsuite-release.toml`, with gdtest's harness
 contract.
 
 It opens a PR from the `auto/pin-tools` branch, or updates the one already
-open, so tools released one after another end up in the same PR. Review it,
-wait for CI, merge, then run Cut release: the PR says which bump it suggests
-(minor when a tool's major or minor version changed, patch otherwise).
+open, so tools released one after another end up in the same PR. Once CI
+passes on its latest commit, `merge-pin-tools.yml` merges it (with
+`PIN_TOOLS_TOKEN`); when CI fails, it stays open for a fix pushed to its
+branch. Then run Cut release: the PR says which bump it suggests (minor when
+a tool's major or minor version changed, patch otherwise). Cut release runs
+`e2e.yml` first, gdsuite against a real Godot on every OS, and releases
+nothing when it fails.
 
 To pin by hand: `python scripts/pin_tools.py`, or `--dry-run` to see what it
 would change.
