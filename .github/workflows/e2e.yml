@@ -7,6 +7,10 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# The same as ci.yml: its cache key includes this.
+env:
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 jobs:
   e2e:
     name: ${{ matrix.os }}
@@ -17,7 +21,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      # The runner's own Rust, like ci.yml's test jobs, whose cache this
+      # restores: the cache is only for the same Rust version. It is not saved
+      # from here, ci.yml keeps it fresh.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: false
       - run: cargo build --locked
       - name: Install Godot
         shell: bash
