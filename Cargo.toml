@@ -17,10 +17,10 @@ include = ["/src/**", "/editor/addons/**", "/.gdsuite-release.toml", "/Cargo.tom
 # The tools built into gdsuite, at exact versions: .gdsuite-release.toml
 # records the same versions. To try a tool's unreleased changes, add to
 # .cargo/config.toml: [patch.crates-io] gdtest = { path = "../gdtest/crates/gdtest" }
-gdhealth = "=0.3.7"
-gdtest = "=0.2.14"
-gdtidy = "=0.3.7"
-gdtypecheck = "=0.2.6"
+gdhealth = "=0.3.8"
+gdtest = "=0.2.15"
+gdtidy = "=0.3.8"
+gdtypecheck = "=0.2.7"
 # Which file of a project uses which: `gdsuite dependents`.
 gdsyntax = "0.1.6"
 anstream = "1.0"
