@@ -907,11 +907,15 @@ func _on_action(id: int) -> void:
 			action_requested.emit("format_all", _context_problem)
 
 
-## A link of the details: "docs", or "open:" and a script.
+## A link of the details: "docs", "open:" and a script, or "line:" and a
+## line of the problem's script.
 func _on_link(meta: Variant) -> void:
 	var link := str(meta)
 	if link.begins_with("open:"):
 		action_requested.emit("open", { "file": link.trim_prefix("open:"), "line": 1 })
+	elif link.begins_with("line:") and not _context_problem.is_empty():
+		var line := int(link.trim_prefix("line:"))
+		action_requested.emit("open", { "file": _context_problem.file, "line": line })
 	else:
 		_on_action(MENU_DOCS)
 

@@ -271,7 +271,7 @@ fn health_quick_prints_findings_and_the_graph() {
         report["graph"],
         serde_json::json!({
             "scripts": [{ "path": "a.gd", "group": "g", "lines": 9 }],
-            "edges": [["a.gd", "b.gd", 2]],
+            "edges": [["a.gd", "b.gd", 2, "class"]],
             "cycles": [],
         })
     );
@@ -781,7 +781,7 @@ if "%1"=="schema-version" (
 echo %*> "%CD%\logs\gdhealth-args.txt"
 >> "%CD%\logs\step-order.txt" echo health
 if "%1"=="graph" (
-  echo {"files": [{"path": "a.gd", "group": "g", "line_count": 9}], "edges": [{"from": "a.gd", "to": "b.gd", "line": 2}, {"from": "a.gd", "to": "b.gd", "line": 5}, {"from": "a.gd", "to": "a.gd", "line": 3}], "cycles": [["a.gd"]]}
+  echo {"files": [{"path": "a.gd", "group": "g", "line_count": 9}], "edges": [{"from": "a.gd", "to": "b.gd", "line": 2, "kind": "ClassName"}, {"from": "a.gd", "to": "b.gd", "line": 5, "kind": "Load"}, {"from": "a.gd", "to": "a.gd", "line": 3}], "cycles": [["a.gd"]]}
   exit /b 0
 )
 if "%2"=="--no-git" (

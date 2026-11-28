@@ -181,7 +181,9 @@ Critical findings are errors, the others warnings. They don't fail
 `gdsuite check` unless the project says so (see [the check](/check#code-health)).
 A finding that a lint rule also reports, on the same line, is listed once,
 as the lint problem. Select a finding for what it means, the scripts it
-involves, and what to do: "Breaking one dependency ends the cycle: a → b".
+involves, and **What to do**, with the place to start: "line 122: a match
+with 16 branches", or "lines 130–162: this for block is 33 lines. It could
+be a function of its own". Click a line to go to it.
 
 **List | Graph** switches the list for a graph of which script uses which:
 the scripts that use others on the left, what they use on the right, arrows
@@ -190,13 +192,15 @@ in their colour. With **Current**, the graph shows the script you're editing,
 the scripts that use it and those it uses.
 
 - Scroll to zoom, drag to move. Double-click empty space to see it all.
-- Click a script to see, in the details, what it uses and what uses it.
-  Double-click it to open it.
+- Click a script to see, in the details, what it uses and what uses it, and
+  how: it extends it, preloads it, uses its class name, uses it as an
+  autoload, or through a scene. Double-click it to open it.
 - A health problem's **Show in the graph** selects its script there.
 
 Health in the editor is a quick look: it skips what needs Git history.
 **⚙ → Open the full health report** runs [`gdsuite health`](/code-health) and
-opens its report in your browser.
+opens its report in your browser: what to fix first, ordered by how often
+each script changes, with a guide to each kind of finding.
 
 ## Problems in the script editor
 

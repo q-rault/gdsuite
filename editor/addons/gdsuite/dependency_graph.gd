@@ -35,6 +35,21 @@ const NO_DATA := "The graph shows once Health has run: press Check."
 const NO_SCRIPT := "No script of the project is open in the script editor."
 const ALONE := "%s uses no other script, and none uses it."
 const NONE_LINKED := "No script of the project uses another."
+## How a script uses another, as the details say it, as the health report does.
+const HOW := {
+	"extends": "extends it",
+	"preload": "preloads it",
+	"load": "loads it",
+	"class": "class name",
+	"autoload": "autoload",
+	"scene": "through a scene",
+	"folder": "loads its folder",
+	"path": "names its path",
+}
+const IN_CYCLE := (
+	"Part of a dependency cycle: these scripts can't be changed or tested alone. Let one side "
+	+ "emit a signal the other connects to, or move what they share to a script both use."
+)
 
 ## "res://a.gd" -> [the scripts it uses], and -> [those that use it].
 var _uses := {}
@@ -43,6 +58,8 @@ var _used_by := {}
 var _scripts := {}
 ## [from, to] of the arrows within a cycle, as keys.
 var _cycle_edges := {}
+## [from, to] -> how `from` uses `to`: "extends", "class"... (see HOW).
+var _how := {}
 ## path -> {errors, warnings}
 var _counts := {}
 ## The script to show with its neighbours, or "" for the whole project.
@@ -77,9 +94,12 @@ func set_graph(graph: Dictionary) -> void:
 	_cycle_edges.clear()
 	for script: Dictionary in graph.get("scripts", []):
 		_scripts["res://" + str(script.path)] = int(script.get("lines", 0))
+	_how.clear()
 	for edge: Array in graph.get("edges", []):
 		var from := "res://" + str(edge[0])
 		var to := "res://" + str(edge[1])
+		if edge.size() > 3:
+			_how[[from, to]] = str(edge[3])
 		if not _uses.has(from):
 			_uses[from] = []
 		if not _used_by.has(to):
@@ -141,10 +161,23 @@ func details() -> String:
 			Problem.script_link(_selected), dim, lines_of(_selected),
 		],
 	])
-	for part: Array in [["Uses", uses(_selected)], ["Used by", used_by(_selected)]]:
-		var links: Array = part[1].map(Problem.script_link)
-		if not links.is_empty():
-			lines.append("%s %s" % [part[0], ", ".join(links)])
+	var linked := func(path: String, from: String, to: String) -> String:
+		var how: String = HOW.get(_how.get([from, to], ""), "")
+		var link := Problem.script_link(path)
+		return link if how == "" else "%s [color=#%s](%s)[/color]" % [link, dim, how]
+	var uses_links: Array = uses(_selected).map(
+		func(to: String) -> String: return linked.call(to, _selected, to)
+	)
+	var used_links: Array = used_by(_selected).map(
+		func(from: String) -> String: return linked.call(from, from, _selected)
+	)
+	for part: Array in [["Uses", uses_links], ["Used by", used_links]]:
+		if not part[1].is_empty():
+			lines.append("%s %s" % [part[0], ", ".join(part[1])])
+	for edge: Array in _cycle_edges:
+		if _selected in edge:
+			lines.append("[color=#%s]%s[/color]" % [dim, IN_CYCLE])
+			break
 	return "\n".join(lines)
 
 
