@@ -1,5 +1,5 @@
 [suite]
-version = "0.7.7"
+version = "0.7.8"
 manifest_version = 1
 
 # The tools are built into gdsuite: `tested` is the version each one has.
