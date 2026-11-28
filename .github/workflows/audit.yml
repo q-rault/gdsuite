@@ -1,0 +1,29 @@
+# Checks the dependencies against the RustSec advisory database. gdsuite's
+# Cargo.lock holds every tool it builds in, so this covers all of them. Runs
+# when the dependencies change, and weekly: a new advisory can be published
+# for a lock file nobody touched.
+name: audit
+
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml, Cargo.lock, .github/workflows/audit.yml]
+  pull_request:
+    paths: [Cargo.toml, Cargo.lock, .github/workflows/audit.yml]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
