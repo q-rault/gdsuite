@@ -29,6 +29,8 @@ const SETTINGS := {
 ## text's colour.
 const ERROR_MARK := "×"
 const WARNING_MARK := "⚠"
+## Something to know, which no check fails on: a code health info.
+const INFO_MARK := "•"
 ## The × is a small glyph: drawn this much larger, it matches the ⚠.
 const ERROR_MARK_SCALE := 1.45
 ## Warnings in yellow on a dark theme, as the Check icon of the top bar; a
@@ -116,16 +118,39 @@ static func is_checked(source: String) -> bool:
 	return bool(Settings.value(SETTINGS[source]))
 
 
-## The colour of an error or a warning, in the dock and the script editor.
+## The colour of an error, a warning or an info, in the dock and the script
+## editor.
 static func severity_color(severity: String) -> Color:
 	var theme := EditorInterface.get_editor_theme()
 	if severity == "error":
 		return theme.get_color("error_color", "Editor")
+	if severity == "info":
+		return Ui.faded(Ui.text_color())
 	var settings := EditorInterface.get_editor_settings()
 	var base: Color = settings.get_setting("interface/theme/base_color")
 	if base.get_luminance() > 0.5:
 		return theme.get_color("warning_color", "Editor")
 	return WARNING_YELLOW
+
+
+## "Error", "Warning" or "Info".
+static func severity_name(severity: String) -> String:
+	match severity:
+		"error":
+			return "Error"
+		"info":
+			return "Info"
+	return "Warning"
+
+
+## The mark of a severity, in the dock and the script editor's gutter.
+static func mark(severity: String) -> String:
+	match severity:
+		"error":
+			return ERROR_MARK
+		"info":
+			return INFO_MARK
+	return WARNING_MARK
 
 
 ## "12" or "12:5": the line, and the column when the tool gives one.
@@ -148,7 +173,7 @@ static func source_text(problem: Dictionary) -> String:
 
 ## What a problem's code means: its kind, code and tool.
 static func code_tooltip(problem: Dictionary) -> String:
-	var kind := "Error" if problem.severity == "error" else "Warning"
+	var kind := severity_name(problem.severity)
 	return "%s %s\n%s" % [kind, problem.rule, code_meaning(problem)]
 
 

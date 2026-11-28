@@ -76,6 +76,9 @@ at, not a rule. To fail on the critical ones, or on all:
 health_fail_on = "critical"   # or "warning"; "never" is the default
 ```
 
+`"warning"` counts warnings and critical findings, not infos: a cycle Godot 4
+loads fine, for example, is only something to look at.
+
 Only what a change adds fails it: a finding counts when it is new since the
 project's main branch, or worse than there, so a project with old findings
 can turn this on without fixing them all first. gdsuite compares with

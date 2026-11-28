@@ -620,8 +620,8 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	item.set_meta("kind", ROW_PROBLEM)
 	var is_error: bool = problem.severity == "error"
 	item.set_metadata(0, problem)
-	_cell(item, COLUMN_MARK, Problem.ERROR_MARK if is_error else Problem.WARNING_MARK,
-			"Error" if is_error else "Warning")
+	var severity: String = problem.severity
+	_cell(item, COLUMN_MARK, Problem.mark(severity), Problem.severity_name(severity))
 	if _index.has(COLUMN_MARK):
 		item.set_text_alignment(_index[COLUMN_MARK], HORIZONTAL_ALIGNMENT_CENTER)
 		if is_error:

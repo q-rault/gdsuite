@@ -257,11 +257,13 @@ fn convert(finding: Finding) -> Option<HealthFinding> {
     Some(HealthFinding {
         line: finding.line.unwrap_or(1),
         column: 1,
-        severity: if finding.severity == "critical" {
-            "error".to_string()
-        } else {
-            "warning".to_string()
-        },
+        // gdhealth's info, such as a cycle Godot 4 loads fine, is no warning.
+        severity: match finding.severity.as_str() {
+            "critical" => "error",
+            "info" => "info",
+            _ => "warning",
+        }
+        .to_string(),
         message: message(&finding.message, &file),
         rule: finding
             .rule_id
@@ -362,7 +364,7 @@ mod tests {
         );
         assert_eq!(
             found[1].line_text(),
-            "a/b.gd:1:1: warning[split-file-candidate]: This script (568 lines) could split into 2 cohesive groups (modularity 0.40)"
+            "a/b.gd:1:1: info[split-file-candidate]: This script (568 lines) could split into 2 cohesive groups (modularity 0.40)"
         );
         assert_eq!(
             found[1].suggestion.as_deref(),
@@ -384,7 +386,7 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].rule, "cycle-detected");
-        assert_eq!(found[0].severity, "warning");
+        assert_eq!(found[0].severity, "info");
         assert_eq!(found[0].related, ["b.gd"]);
         assert_eq!(
             found[0].suggestion.as_deref(),

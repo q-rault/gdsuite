@@ -212,7 +212,8 @@ func has_error(path: String) -> bool:
 	return problems_for(path).any(func(p: Dictionary) -> bool: return p.severity == "error")
 
 
-## {errors, warnings} over the whole project, of one source or of all.
+## {errors, warnings} over the whole project, of one source or of all. An
+## info counts as neither.
 func counts(source := "") -> Dictionary:
 	var count := { "errors": 0, "warnings": 0 }
 	for each: String in problems:
@@ -220,7 +221,8 @@ func counts(source := "") -> Dictionary:
 			continue
 		for path: String in problems[each]:
 			for problem: Dictionary in problems[each][path]:
-				count["errors" if problem.severity == "error" else "warnings"] += 1
+				if problem.severity != "info":
+					count["errors" if problem.severity == "error" else "warnings"] += 1
 	return count
 
 
@@ -230,7 +232,8 @@ func counts_by_script(is_shown: Callable) -> Dictionary:
 	for path: String in files():
 		var count := { "errors": 0, "warnings": 0 }
 		for problem: Dictionary in problems_for(path).filter(is_shown):
-			count["errors" if problem.severity == "error" else "warnings"] += 1
+			if problem.severity != "info":
+				count["errors" if problem.severity == "error" else "warnings"] += 1
 		by_script[path] = count
 	return by_script
 
