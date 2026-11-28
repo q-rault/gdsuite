@@ -23,7 +23,7 @@ creates the GitHub release with the archives. Tags with a prerelease suffix
 | dry run | pick the version and run the tests, push nothing |
 
 It updates the version in `Cargo.toml`, `.gdsuite-release.toml` (`[suite]`,
-which `doctor` shows) and `Cargo.lock`, runs `cargo test --locked`, commits
+which `doctor` shows) and `Cargo.lock`, runs the tests (only `cargo check` when main's CI already passed on that commit), commits
 `release: v<version>` to `main`, pushes the tag and starts Publish release and
 the docs deploy (`docs.yml`). The run summary shows the version it picked.
 
