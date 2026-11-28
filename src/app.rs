@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::{
-        CheckArgs, Cli, Commands, DoctorArgs, FmtArgs, ForwardReportArgs, HealthArgs, LintArgs,
-        OutputArgs, OutputModeArg, ReportArgs, SetupArgs,
+        CheckArgs, Cli, Commands, DependentsArgs, DoctorArgs, FmtArgs, ForwardReportArgs,
+        HealthArgs, LintArgs, OutputArgs, OutputModeArg, ReportArgs, SetupArgs,
     },
     config::{CheckStep, CompatibilityVerdict, GdsuiteConfig, HealthFailOn, Manifest},
     config_command, editor_addon, health, migrate,
@@ -63,6 +63,7 @@ pub fn run() -> Result<()> {
         Commands::Test(args) => test(&context, args),
         Commands::Health(args) => run_health(&context, args),
         Commands::Check(args) => check(&context, args),
+        Commands::Dependents(args) => dependents(&context, args),
         Commands::Report(args) => report(&context, args),
         Commands::Config(args) => config_command::run(&context, args.action),
     }
@@ -493,7 +494,7 @@ fn doctor(context: &ProjectContext, cli_godot: Option<&Path>, args: DoctorArgs) 
     match output.mode() {
         OutputMode::Pretty => render_doctor_pretty(&output, &report),
         OutputMode::Plain => render_doctor_plain(&output, &report),
-        OutputMode::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        OutputMode::Json => println!("{}", ascii_json(serde_json::to_string_pretty(&report)?)),
     }
 
     match status {
@@ -576,13 +577,58 @@ fn fmt_input(
     Ok(())
 }
 
+/// Prints `{"files": [...], "project_files": N}`: the given files and those
+/// that use them, and how many scripts, scenes and resources the project has
+/// outside `addons/`.
+fn dependents(context: &ProjectContext, args: DependentsArgs) -> Result<()> {
+    let changed: Vec<String> = args
+        .files
+        .iter()
+        .map(|file| {
+            if file.starts_with("res://") {
+                file.clone()
+            } else {
+                let relative = file.replace('\\', "/");
+                format!("res://{}", relative.trim_start_matches("./"))
+            }
+        })
+        .collect();
+    let graph = gdsyntax::project::Graph::build(&context.root);
+    let files: Vec<String> = graph.dependents_of(&changed).into_iter().collect();
+    // What the project has, but its addons: for editors to tell whether
+    // checking `files` is much less than checking the whole project.
+    let project_files = graph
+        .forward
+        .keys()
+        .filter(|file| !file.starts_with("res://addons/"))
+        .count();
+    println!(
+        "{}",
+        serde_json::json!({ "files": files, "project_files": project_files })
+    );
+    Ok(())
+}
+
 fn lint(context: &ProjectContext, args: LintArgs) -> Result<()> {
     let config = load_runtime_config(context)?;
     let toolchain = load_toolchain_or_error(context)?;
     let report_mode = resolve_report_mode(&config, args.report.as_deref())?;
     warn_unconverted_configs(context);
-    let output = process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root)
-        .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
+    let output = match (&args.input, &args.as_path) {
+        (Some(input), Some(as_path)) => {
+            // gdtidy reads standard input from the project's root, where the
+            // path of the script the text is resolves.
+            let text = fs::read(input)
+                .with_context(|| format!("failed to read {}", input.display()))
+                .map_err(|error| command_error(EXIT_USAGE_ERROR, format!("{error:#}")))?;
+            let mut cmd_args = lint_args(args.args);
+            cmd_args.extend(["-".to_string(), "--stdin-filename".to_string()]);
+            cmd_args.push(as_path.trim_start_matches("res://").to_string());
+            process::run_with_stdin(&toolchain.gdtidy, &cmd_args, &context.root, text)
+        }
+        _ => process::run(&toolchain.gdtidy, &lint_args(args.args), &context.root),
+    }
+    .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let report = JsonLintReport::from_output(&output);
     print_lint_report(&report, &report_mode)?;
     if !report.success {
@@ -665,7 +711,7 @@ fn health_quick(context: &ProjectContext, report_mode: &str) -> Result<()> {
     let report = health::quick(&toolchain.gdhealth, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, format!("{error:#}")))?;
     if report_mode == "json" {
-        println!("{}", serde_json::to_string(&report)?);
+        println!("{}", ascii_json(serde_json::to_string(&report)?));
         return Ok(());
     }
     for finding in &report.findings {
@@ -684,7 +730,7 @@ fn typecheck(context: &ProjectContext, args: ForwardReportArgs) -> Result<()> {
         let output = process::run(&toolchain.gdtypecheck, &cmd_args, &context.root)
             .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
         let report = JsonLintReport::from_typecheck_output(&output);
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!("{}", ascii_json(serde_json::to_string_pretty(&report)?));
         if !report.success {
             return Err(command_error(
                 EXIT_VALIDATION_ERROR,
@@ -1030,7 +1076,7 @@ fn default_health_args(config: &GdsuiteConfig, args: Vec<String>) -> Vec<String>
 
 fn print_lint_report(report: &JsonLintReport, mode: &str) -> Result<()> {
     if mode == "json" {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        println!("{}", ascii_json(serde_json::to_string_pretty(report)?));
         return Ok(());
     }
     for finding in &report.findings {
@@ -1762,19 +1808,27 @@ fn run_health_check_step(
     context: &ProjectContext,
     config: &GdsuiteConfig,
 ) -> Result<CheckStepResult> {
-    let report = run_health_step(
-        context,
-        vec![config.commands.default_health_subcommand.clone()],
-    )?;
+    let mut args = vec![config.commands.default_health_subcommand.clone()];
+    // Failing on old debt would fail every check of a project that adopts
+    // gdsuite late: compared, only what a change adds fails it.
+    let compared = match config.check.health_fail_on {
+        HealthFailOn::Never => None,
+        _ => health_compare_rev(context, config),
+    };
+    if let Some(rev) = &compared {
+        args.extend(["--compare".to_string(), rev.clone()]);
+    }
+    let report = run_health_step(context, args)?;
     let duration_ms = report.duration_ms;
     if report.status == "ok" {
         let failing = report
             .findings
             .iter()
+            .filter(|finding| finding["change"] != "existing")
             .filter(|finding| match config.check.health_fail_on {
                 HealthFailOn::Never => false,
                 HealthFailOn::Critical => finding["severity"] == "error",
-                HealthFailOn::Warning => true,
+                HealthFailOn::Warning => finding["severity"] != "info",
             })
             .filter_map(|finding| {
                 serde_json::from_value::<health::HealthFinding>(finding.clone()).ok()
@@ -1797,9 +1851,13 @@ fn run_health_check_step(
         let mut report = report;
         report.status = "failed".to_string();
         report.summary = format!(
-            "{} code health finding{} at or above the level of [check] health_fail_on",
+            "{} code health finding{}{} at or above the level of [check] health_fail_on",
             failing.len(),
-            if failing.len() == 1 { "" } else { "s" }
+            if failing.len() == 1 { "" } else { "s" },
+            compared
+                .as_deref()
+                .map(|rev| format!(" new or worse since {rev}"))
+                .unwrap_or_default()
         );
         let summary = format!("Found {}.", report.summary);
         return Ok(CheckStepResult::failed(
@@ -1819,6 +1877,40 @@ fn run_health_check_step(
         Vec::new(),
         report.summary,
     ))
+}
+
+/// What health findings are compared with: `[check] health_compare`, or
+/// else the project's main branch, when the project is a Git repository
+/// that has one. `""` compares with nothing.
+fn health_compare_rev(context: &ProjectContext, config: &GdsuiteConfig) -> Option<String> {
+    if let Some(rev) = &config.check.health_compare {
+        return (!rev.trim().is_empty()).then(|| rev.clone());
+    }
+    let exists = |rev: &str| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&context.root)
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{rev}^{{commit}}"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    [
+        "origin/HEAD",
+        "origin/main",
+        "origin/master",
+        "main",
+        "master",
+    ]
+    .into_iter()
+    .find(|rev| exists(rev))
+    .map(ToString::to_string)
 }
 
 fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
@@ -1843,6 +1935,13 @@ fn run_test_step_with_args(context: &ProjectContext, forwarded: Vec<String>) -> 
     }
 }
 
+fn bundle_summary_path(context: &ProjectContext) -> PathBuf {
+    context
+        .root
+        .join(tooling::GDHEALTH_ARTIFACT_DIR)
+        .join("summary.txt")
+}
+
 fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<StepReport> {
     let started = Instant::now();
     let toolchain = load_toolchain_or_error(context)?;
@@ -1853,11 +1952,12 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         .join("health.json");
     let written = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
     let written_before = written(&health_json);
+    let summary_before = written(&bundle_summary_path(context));
 
     let output = process::run(&toolchain.gdhealth, &args, &context.root)
         .map_err(|error| command_error(EXIT_TOOLCHAIN_ERROR, error.to_string()))?;
     let bundle_dir = context.root.join(tooling::GDHEALTH_ARTIFACT_DIR);
-    let summary_path = bundle_dir.join("summary.txt");
+    let summary_path = bundle_summary_path(context);
     let mut artifacts = Vec::new();
 
     for (name, path) in [
@@ -1872,7 +1972,11 @@ fn run_health_step(context: &ProjectContext, forwarded: Vec<String>) -> Result<S
         }
     }
 
-    let bundle_summary = read_trimmed_file_if_exists(&summary_path);
+    // A summary left by an earlier run would hide why this one failed, such
+    // as a revision `--compare` cannot find.
+    let bundle_summary = (written(&summary_path) > summary_before)
+        .then(|| read_trimmed_file_if_exists(&summary_path))
+        .flatten();
     let summary = if output.status.success() {
         if artifacts.is_empty() {
             "health passed".to_string()
@@ -2073,13 +2177,35 @@ fn typecheck_failure_summary(diagnostics: &[String]) -> String {
     }
 }
 
+/// `json` with every character past ASCII written as a `\u` escape: the
+/// same JSON, which no reader can decode with the wrong code page. Godot's
+/// `OS.execute` on Windows can read a program's output as the system code
+/// page, which turns `→` into `â†’`.
+pub(crate) fn ascii_json(json: String) -> String {
+    if json.is_ascii() {
+        return json;
+    }
+    let mut out = String::with_capacity(json.len() + 16);
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    out
+}
+
 fn print_and_store_report(
     context: &ProjectContext,
     config: &GdsuiteConfig,
     command: &str,
     report: &SuiteReport,
 ) -> Result<()> {
-    let json = serde_json::to_string_pretty(report)?;
+    let json = ascii_json(serde_json::to_string_pretty(report)?);
     println!("{json}");
     write_report_artifacts(context, config, command, &json)?;
     Ok(())
@@ -2175,4 +2301,28 @@ impl StepReport {
 struct ArtifactRef {
     name: String,
     path: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ascii_json;
+
+    #[test]
+    fn ascii_json_is_the_same_json_in_ascii() {
+        let value = serde_json::json!({"hint": "a.gd → b.gd (for › if) 130–162 🎮"});
+        let json = ascii_json(serde_json::to_string(&value).unwrap());
+        assert!(json.is_ascii());
+        let escape = |units: &str| {
+            units
+                .split(' ')
+                .map(|unit| format!("{}u{unit}", '\\'))
+                .collect::<String>()
+        };
+        assert!(json.contains(&escape("2192")));
+        assert!(json.contains(&escape("d83c dfae")));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            value
+        );
+    }
 }

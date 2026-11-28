@@ -64,6 +64,11 @@ pub struct CheckConfig {
     /// the file, they never do.
     #[serde(default)]
     pub health_fail_on: HealthFailOn,
+    /// What health findings are compared with when `health_fail_on` fails
+    /// the check: only findings new or worse since then fail it. Left out,
+    /// the project's main branch; `""`, nothing, so every finding counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_compare: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -296,6 +301,7 @@ impl Default for CheckConfig {
         Self {
             steps: default_check_steps(),
             health_fail_on: HealthFailOn::default(),
+            health_compare: None,
         }
     }
 }
@@ -616,7 +622,7 @@ artifacts_dir = "{}"
 
 [check]
 steps = {}
-{}"#,
+{}{}"#,
         escape_string(&config.project.root),
         escape_string(&config.commands.default_test_target),
         escape_string(&config.commands.default_health_subcommand),
@@ -628,6 +634,12 @@ steps = {}
             HealthFailOn::Critical => "health_fail_on = \"critical\"\n",
             HealthFailOn::Warning => "health_fail_on = \"warning\"\n",
         },
+        config
+            .check
+            .health_compare
+            .as_ref()
+            .map(|rev| format!("health_compare = \"{}\"\n", escape_string(rev)))
+            .unwrap_or_default(),
     )
 }
 

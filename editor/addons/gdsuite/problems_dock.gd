@@ -11,8 +11,8 @@ extends VBoxContainer
 ## be done about it.
 
 signal problems_changed
-## A check started or ended, or a script was edited: whether the project is
-## known to be clean (`is_clean`) may have changed.
+## A check started or ended, or a file changed: what `result` and
+## `freshness` say may have changed.
 signal state_changed
 ## Asks the plugin to run something on a problem: "open", "fix",
 ## "disable_rule", "ignore_here", "docs", or "format_all" with {files}.
@@ -27,6 +27,7 @@ const Settings = preload("settings.gd")
 const ColumnResizer = preload("column_resizer.gd")
 const Ui = preload("ui.gd")
 const Problem = preload("problem.gd")
+const Status = preload("status.gd")
 const DetailsPane = preload("details_pane.gd")
 const Folding = preload("folding.gd")
 const SettingsMenu = preload("settings_menu.gd")
@@ -81,7 +82,7 @@ const MENU_RESET_WIDTHS := 200
 
 ## The ⚙ menu: titles and settings.
 const SETTINGS := [
-	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE]],
+	["Check", [Settings.AUTOFIX, Settings.CHECK_ON_SAVE, Settings.LINT_AS_YOU_TYPE]],
 	["A check covers", [
 		Settings.CHECK_FORMAT, Settings.CHECK_LINT, Settings.CHECK_COMPILE, Settings.CHECK_HEALTH,
 	]],
@@ -266,14 +267,17 @@ func _ready() -> void:
 
 
 ## Replaces what `source` found in `files` ("res://" paths), or in the whole
-## project when `files` is empty.
-func set_problems(source: String, files: PackedStringArray, problems: Array) -> void:
+## project when `files` is empty. `started`: when that check started, see
+## ProblemStore.replace.
+func set_problems(
+	source: String, files: PackedStringArray, problems: Array, started := -1
+) -> void:
 	# Turned off while it was running.
 	if not Problem.is_checked(source):
 		return
 	_checked_msec = Time.get_ticks_msec()
 	_note = ""
-	store.replace(source, files, problems)
+	store.replace(source, files, problems, started)
 	_rebuild()
 	problems_changed.emit()
 
@@ -329,10 +333,37 @@ func mark_stale(path: String) -> void:
 		_rebuild()
 
 
-## Whether the project has no problem, and no check is going which could find
-## some.
-func is_clean() -> bool:
-	return _running.is_empty() and store.is_clean()
+## What lint found in the text of `path` being edited, saved or not: it
+## replaces what lint found in the script, and shows as up to date.
+func set_live_problems(path: String, problems: Array) -> void:
+	if not Problem.is_checked(Problem.SOURCE_LINT):
+		return
+	store.replace_live(path, problems)
+	_rebuild()
+	problems_changed.emit()
+
+
+## A file of the project changed on disk: what the checks of the whole
+## project found is out of date.
+func changed_on_disk(path: String) -> void:
+	if store.changed_on_disk(path):
+		state_changed.emit()
+
+
+## What the checks found, for the top bar and the dock's tab.
+func result() -> String:
+	return store.result()
+
+
+## Whether that result holds for the code as it is now: Status.RUNNING while
+## a tool checks, else as ProblemStore.freshness says.
+func freshness() -> String:
+	return Status.RUNNING if not _running.is_empty() else store.freshness()
+
+
+## The Check button, which the plugin paints as the top bar's Check icon.
+func action_button() -> Button:
+	return _check_button
 
 
 ## Says what went wrong with a check, until the next one reports.
@@ -589,8 +620,8 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	item.set_meta("kind", ROW_PROBLEM)
 	var is_error: bool = problem.severity == "error"
 	item.set_metadata(0, problem)
-	_cell(item, COLUMN_MARK, Problem.ERROR_MARK if is_error else Problem.WARNING_MARK,
-			"Error" if is_error else "Warning")
+	var severity: String = problem.severity
+	_cell(item, COLUMN_MARK, Problem.mark(severity), Problem.severity_name(severity))
 	if _index.has(COLUMN_MARK):
 		item.set_text_alignment(_index[COLUMN_MARK], HORIZONTAL_ALIGNMENT_CENTER)
 		if is_error:
@@ -604,7 +635,7 @@ func _problem_row(parent: TreeItem, problem: Dictionary) -> TreeItem:
 	if _index.has(COLUMN_SOURCE):
 		item.set_text_alignment(_index[COLUMN_SOURCE], HORIZONTAL_ALIGNMENT_RIGHT)
 	var color := Problem.severity_color(problem.severity)
-	if store.stale.has(problem.file):
+	if store.is_faded(problem):
 		color = Ui.faded(color)
 	for column: String in _shown:
 		item.set_custom_color(_index[column], color)
@@ -876,11 +907,15 @@ func _on_action(id: int) -> void:
 			action_requested.emit("format_all", _context_problem)
 
 
-## A link of the details: "docs", or "open:" and a script.
+## A link of the details: "docs", "open:" and a script, or "line:" and a
+## line of the problem's script.
 func _on_link(meta: Variant) -> void:
 	var link := str(meta)
 	if link.begins_with("open:"):
 		action_requested.emit("open", { "file": link.trim_prefix("open:"), "line": 1 })
+	elif link.begins_with("line:") and not _context_problem.is_empty():
+		var line := int(link.trim_prefix("line:"))
+		action_requested.emit("open", { "file": _context_problem.file, "line": line })
 	else:
 		_on_action(MENU_DOCS)
 

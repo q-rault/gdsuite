@@ -25,6 +25,21 @@ pub struct HealthFinding {
     /// What gdhealth suggests to do about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// Compared with an older revision: `new`, `worse` or `existing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<String>,
+    /// What to do about it, each with the line it is about when there is
+    /// one: the biggest `match` of a complex function, the block of a long
+    /// one that could be its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<Hint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    pub text: String,
 }
 
 impl HealthFinding {
@@ -50,8 +65,10 @@ pub struct QuickReport {
 #[derive(Debug, Serialize)]
 struct Graph {
     scripts: Vec<Script>,
-    /// `[from, to, line]`: `from` uses `to`.
-    edges: Vec<(String, String, usize)>,
+    /// `[from, to, line, how]`: `from` uses `to`, by `extends`, `preload`,
+    /// `load`, `class` (its class name), `autoload`, `scene`, `folder` or
+    /// `path`.
+    edges: Vec<(String, String, usize, &'static str)>,
     cycles: Vec<Vec<String>>,
 }
 
@@ -80,6 +97,9 @@ struct Finding {
     #[serde(default)]
     related_files: Vec<String>,
     suggested_fix: Option<Suggestion>,
+    change: Option<String>,
+    #[serde(default)]
+    hints: Vec<Hint>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +135,22 @@ struct GraphEdge {
     from: String,
     to: String,
     line: usize,
+    #[serde(default)]
+    kind: String,
+}
+
+/// How a script uses another, in a word: gdhealth's edge kinds.
+fn how(kind: &str) -> &'static str {
+    match kind {
+        "Extends" => "extends",
+        "Preload" | "ConstPreload" => "preload",
+        "Load" => "load",
+        "ClassName" => "class",
+        "Autoload" => "autoload",
+        "Scene" => "scene",
+        "Folder" => "folder",
+        _ => "path",
+    }
 }
 
 /// Runs gdhealth without Git history, which takes most of its time and no
@@ -158,7 +194,7 @@ pub fn quick(gdhealth: &Path, root: &Path) -> Result<QuickReport> {
         .edges
         .into_iter()
         .filter(|edge| edge.from != edge.to)
-        .map(|edge| (edge.from, edge.to, edge.line))
+        .map(|edge| (edge.from, edge.to, edge.line, how(&edge.kind)))
         .collect();
     let mut edges: Vec<_> = edges.into_iter().collect();
     edges.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
@@ -201,7 +237,17 @@ fn findings(report: Report) -> Vec<HealthFinding> {
         .collect()
 }
 
+/// gdhealth's rules for what lint checks already: one script's length
+/// (gdtidy's `max-file-lines`) and a function's parameters
+/// (`function-arguments-number`). A limit that needs only the file is
+/// lint's, which reports it as you type and can be silenced on its line;
+/// code health keeps what needs the whole project or its history.
+const LINT_OWNED_RULES: &[&str] = &["file_lines_threshold", "parameters_threshold"];
+
 fn convert(finding: Finding) -> Option<HealthFinding> {
+    if LINT_OWNED_RULES.contains(&finding.rule_id.as_str()) {
+        return None;
+    }
     let file = finding.file?;
     if finding.rule_id == "cycle_detected"
         && finding.related_files.iter().all(|related| *related == file)
@@ -211,11 +257,13 @@ fn convert(finding: Finding) -> Option<HealthFinding> {
     Some(HealthFinding {
         line: finding.line.unwrap_or(1),
         column: 1,
-        severity: if finding.severity == "critical" {
-            "error".to_string()
-        } else {
-            "warning".to_string()
-        },
+        // gdhealth's info, such as a cycle Godot 4 loads fine, is no warning.
+        severity: match finding.severity.as_str() {
+            "critical" => "error",
+            "info" => "info",
+            _ => "warning",
+        }
+        .to_string(),
         message: message(&finding.message, &file),
         rule: finding
             .rule_id
@@ -228,6 +276,8 @@ fn convert(finding: Finding) -> Option<HealthFinding> {
             .filter(|related| *related != file)
             .collect(),
         suggestion: finding.suggested_fix.and_then(suggestion),
+        change: finding.change,
+        hints: finding.hints,
         file,
     })
 }
@@ -284,21 +334,37 @@ mod tests {
             r#"{"policy_findings": [
                 {"rule_id": "function_lines_threshold", "severity": "critical",
                  "message": "a/b.gd::_ready spans 90 lines (warn 40, critical 80)",
-                 "file": "a/b.gd", "line": 12, "related_files": ["a/b.gd"]},
-                {"rule_id": "file_lines_threshold", "severity": "warning",
-                 "message": "a/b.gd has 568 lines (warn 500, critical 1000)",
+                 "file": "a/b.gd", "line": 12, "related_files": ["a/b.gd"],
+                 "hints": [{"line": 20, "text": "Lines 20–50: this for block is 31 lines."}]},
+                {"rule_id": "split-file-candidate", "severity": "info",
+                 "message": "a/b.gd (568 lines) could split into 2 cohesive groups (modularity 0.40)",
                  "file": "a/b.gd", "line": null, "related_files": ["a/b.gd"],
                  "suggested_fix": {"kind": "SplitFile", "proposed_groups": [["f", "g"], ["h"]],
-                                   "modularity": 0.4}}]}"#,
+                                   "modularity": 0.4}},
+                {"rule_id": "file_lines_threshold", "severity": "warning",
+                 "message": "a/b.gd has 568 lines (warn 500, critical 1000)",
+                 "file": "a/b.gd", "line": null, "related_files": ["a/b.gd"]},
+                {"rule_id": "parameters_threshold", "severity": "warning",
+                 "message": "a/b.gd::_ready has 6 parameters (warn 5)",
+                 "file": "a/b.gd", "line": 12, "related_files": ["a/b.gd"]}]}"#,
         );
+        // Lint reports a script's length and a function's parameters.
+        assert_eq!(found.len(), 2);
         assert_eq!(
             found[0].line_text(),
             "a/b.gd:12:1: error[function-lines]: _ready() spans 90 lines (warn 40, critical 80)"
         );
         assert!(found[0].related.is_empty());
         assert_eq!(
+            found[0].hints,
+            [Hint {
+                line: Some(20),
+                text: "Lines 20–50: this for block is 31 lines.".to_string()
+            }]
+        );
+        assert_eq!(
             found[1].line_text(),
-            "a/b.gd:1:1: warning[file-lines]: This script has 568 lines (warn 500, critical 1000)"
+            "a/b.gd:1:1: info[split-file-candidate]: This script (568 lines) could split into 2 cohesive groups (modularity 0.40)"
         );
         assert_eq!(
             found[1].suggestion.as_deref(),
@@ -320,7 +386,7 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].rule, "cycle-detected");
-        assert_eq!(found[0].severity, "warning");
+        assert_eq!(found[0].severity, "info");
         assert_eq!(found[0].related, ["b.gd"]);
         assert_eq!(
             found[0].suggestion.as_deref(),

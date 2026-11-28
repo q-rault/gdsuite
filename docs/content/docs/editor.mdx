@@ -33,10 +33,25 @@ Two icons in the editor's top bar show where the project stands:
   Click it to check the project; it does what **Check** in the Problems dock
   does.
 
-- **Tests** (a flask): red when a test fails, green when every test ran and
-  passes, grey when some tests have not run yet or must run again because a
-  script changed. Click it to run all tests, or to stop them while they run;
-  it does what **Test all** in the Tests dock does, and has the same icon.
+- **Tests** (a flask): red when a test fails, green when the tests that ran
+  pass, grey before any test ran. Click it to run all tests, or to stop them
+  while they run; it does what **Test all** in the Tests dock does.
+
+Each icon says two things apart: what the last check or run found, and
+whether that still holds for your code as it is now.
+
+| The icon | Means |
+| --- | --- |
+| Grey, no badge | Nothing known yet: not checked, or no test ran |
+| In colour, with a badge: ✓ green, ! yellow, × red | What the last check or run found, and it is up to date |
+| The same, faded | What it found before your last changes: a file changed since (saved, edited, or changed outside the editor), or some tests have not run since their scripts changed. Check, or run the tests, to bring it up to date |
+| A spinner over it | A check or a run is going; the faded colour is what the last one found. While tests run, the flask becomes **Stop** |
+
+The badge's shape says the result as well as its colour, for those who don't
+tell red, yellow and green apart. Hover an icon for the same in words: "2
+errors, 1 warning · Out of date: 3 files changed since". The **Check** and
+**Test all** buttons of the docks, and the icons before the docks' names,
+show the same.
 
 ### What Check does
 
@@ -74,7 +89,8 @@ others. Click a script to fold or unfold its problems. The button next to
 problem says:
 
 - whether it's an **error** or a **warning**: its line is red (×) or
-  yellow (⚠);
+  yellow (⚠). A code health **info**, such as a cycle Godot 4 loads fine, is
+  grey (•) and counts as neither;
 - its **line**, and the column when the tool knows it;
 - the **message**;
 - its **code** and the **tool** that found it. The code is the lint rule
@@ -126,10 +142,15 @@ one that is off is faded.
   "edited since checked", until it's checked again when you save.
 - **Check** looks at the whole project again, and fixes what it can (see
   [what Check does](#what-check-does)).
-- A dot before the dock's name says where the project stands, as the Output
-  dock's does: red when there is an error, yellow when there are only
-  warnings, green when every check reported nothing on what your scripts hold
-  now, and grey before the first check, or while one runs.
+- The icon before the dock's name says where the project stands, as the
+  top bar's Check icon does: a red ×, a yellow ! or a green ✓, faded when
+  files changed since, a spinner while a tool checks, and a grey dot before
+  the first check.
+- The compile check and code health look at the whole project at once: a
+  file saved or changed since they ran makes all they found out of date, not
+  only that file's. Files changed outside the editor, by a checkout, a pull
+  or another editor, count once the editor sees them; nothing runs for them
+  until you check.
 
 When the dock is narrow, its buttons go on two lines rather than widening
 the bottom panel.
@@ -161,7 +182,9 @@ Critical findings are errors, the others warnings. They don't fail
 `gdsuite check` unless the project says so (see [the check](/check#code-health)).
 A finding that a lint rule also reports, on the same line, is listed once,
 as the lint problem. Select a finding for what it means, the scripts it
-involves, and what to do: "Breaking one dependency ends the cycle: a → b".
+involves, and **What to do**, with the place to start: "line 122: a match
+with 16 branches", or "lines 130–162: this for block is 33 lines. It could
+be a function of its own". Click a line to go to it.
 
 **List | Graph** switches the list for a graph of which script uses which:
 the scripts that use others on the left, what they use on the right, arrows
@@ -170,13 +193,15 @@ in their colour. With **Current**, the graph shows the script you're editing,
 the scripts that use it and those it uses.
 
 - Scroll to zoom, drag to move. Double-click empty space to see it all.
-- Click a script to see, in the details, what it uses and what uses it.
-  Double-click it to open it.
+- Click a script to see, in the details, what it uses and what uses it, and
+  how: it extends it, preloads it, uses its class name, uses it as an
+  autoload, or through a scene. Double-click it to open it.
 - A health problem's **Show in the graph** selects its script there.
 
 Health in the editor is a quick look: it skips what needs Git history.
 **⚙ → Open the full health report** runs [`gdsuite health`](/code-health) and
-opens its report in your browser.
+opens its report in your browser: what to fix first, ordered by how often
+each script changes, with a guide to each kind of finding.
 
 ## Problems in the script editor
 
@@ -248,9 +273,11 @@ whose script changed since it ran, is faded. After a run, the scripts with a
 test that failed are unfolded. Otherwise the list keeps its order, and what
 you unfolded stays unfolded; click a script to fold or unfold it, or fold
 them all, and unfold them all, with the button next to the search. When a save
-starts a run, the bar says why: "affected by hud.gd". A dot before the dock's
-name is red when a test failed, green when every test passed with the code as
-it is now, none left to run, and grey otherwise.
+starts a run, the bar says why: "affected by hud.gd". The icon before the
+dock's name is the top bar's flask badge: a red × when a test failed, a green
+✓ when the tests that ran pass, faded while some are to run, a grey dot before
+any test ran. A file changed outside the editor makes the tests it affects
+to run, without running them.
 
 The **Time** column shows how long each test took, and each script the time
 of its tests; under a millisecond, nothing. Click its title to put the
@@ -278,8 +305,20 @@ Each dock's **⚙** menu has an **On save** setting: on, saving does what the
 dock's main button does, on what you saved.
 
 - **Check → On save** (Problems dock): saving a script checks it again, and
-  the project a moment later, in the background. With **Autofix** on, the
-  same setting as for **Check**, the script is fixed and formatted first.
+  a moment later compiles it with the scripts, scenes and resources that use
+  it, and measures the project's health, in the background. Saving a scene
+  or a resource does the same. With **Autofix** on, the same setting as for
+  **Check**, the script is fixed and formatted first. The compile check runs
+  on the whole project when `project.godot` changed, or when the save
+  reaches more than half the project (compiling part of it only answers
+  sooner, and past half not by much), and again after 30 seconds without a
+  save, for what the links between files don't show (a `class_name` removed
+  that other scripts still use).
+- **Check → Lint as you type** (Problems dock): the script you're editing is
+  linted as you type, a moment after you stop, before you save. Its lint
+  problems are up to date in the list and in the script editor; the other
+  tools' problems stay faded until you save. While the text doesn't parse,
+  the last problems found stay.
 - **Tests → On save** (Tests dock): saving a script, a scene or a resource
   runs the tests it can affect.
 
@@ -288,7 +327,8 @@ The settings of the **⚙** menus:
 | Dock | Setting | Default | What it does |
 | --- | --- | --- | --- |
 | Problems | Check → Autofix | On | A check formats the scripts, and applies the safe lint fixes, first: the project's on **Check**, the saved script's on save |
-| Problems | Check → On save | On | Saving a script checks it, and the project a moment later |
+| Problems | Check → On save | On | Saving a script checks it, and what it affects a moment later |
+| Problems | Check → Lint as you type | On | The script you're editing is linted before you save |
 | Problems | A check covers → Format, Lint, Compile, Health | On | The tools a check runs, and whose problems are listed |
 | Problems | Show → Problems in the script editor | On | The icons and tints in the script editor |
 | Problems | Show → Check in the top bar | On | The Check icon in the editor's top bar |

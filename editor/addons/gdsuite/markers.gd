@@ -30,9 +30,12 @@ func show(code_edit: CodeEdit, problems: Array) -> void:
 	for line: int in by_line:
 		var on_line: Array = by_line[line]
 		var is_error := on_line.any(func(p: Dictionary) -> bool: return p.severity == "error")
-		var mark := Problem.ERROR_MARK if is_error else Problem.WARNING_MARK
-		code_edit.set_line_gutter_text(line, gutter, mark)
+		var only_info := on_line.all(func(p: Dictionary) -> bool: return p.severity == "info")
+		var severity := "error" if is_error else "info" if only_info else "warning"
+		code_edit.set_line_gutter_text(line, gutter, Problem.mark(severity))
 		var color := error_color if is_error else warning_color
+		if only_info:
+			color = Problem.severity_color("info")
 		code_edit.set_line_gutter_item_color(line, gutter, color)
 		code_edit.set_line_gutter_clickable(line, gutter, true)
 		code_edit.set_line_gutter_metadata(line, gutter, on_line)

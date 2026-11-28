@@ -340,6 +340,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "gdhealth",
+ "gdsyntax",
  "gdtest",
  "gdtidy",
  "gdtypecheck",

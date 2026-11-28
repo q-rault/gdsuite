@@ -18,6 +18,7 @@ description: Every gdsuite command, its options, and how to pass options to the 
 | `gdsuite test` | Run the [tests](/testing) in `default_test_target` (`test/`) |
 | `gdsuite health` | Measure [code health](/code-health). `--quick` prints the findings and the dependency graph without Git history, as the editor shows them |
 | `gdsuite check` | Run the [check](/check) steps in order, stopping at the first that fails. `--fix` first fixes what can be fixed safely |
+| `gdsuite dependents FILE...` | Print, as JSON, `FILE...` and the scripts, scenes and resources that use them, directly or not (`extends`, `preload`, `load` of a known path, `class_name`, autoloads, scenes' `ext_resource`s), and how many the project has outside `addons/`. The editor compiles only these after a save |
 | `gdsuite report [NAME]` | Print a saved [report](/reference/reports): `latest` (the default), `check`, `test`, `health`, or `ci` to combine them |
 | `gdsuite config get\|set\|unset\|add\|remove KEY [VALUE]` | Read or change `gdsuite.toml`, keeping its comments. Keys are dotted (`lint.disable`, `editor.test_on_save`); a change gdsuite can't read is undone |
 
@@ -37,6 +38,7 @@ Some also take:
 | `--output pretty\|plain\|json` | `init`, `setup`, `update`, `doctor` | `pretty` for people (the default), `plain` for stable lines in scripts and CI logs, `json` for programs |
 | `--report text\|json` | `lint`, `typecheck`, `test`, `health`, `check` | Print the result as text or JSON. `lint` and `typecheck` give the same JSON shape; `test`, `health` and `check` also save it in `reports/gdsuite/` |
 | `--input <FILE>` | `fmt` | Print the file's text formatted with the project's settings, and change no file. For editors, to format unsaved text |
+| `--input <FILE> --as <PATH>` | `lint` | Lint the file's text as the script at PATH, with its settings, and report its problems under PATH. For editors, to lint unsaved text |
 
 ## Passing options to a tool
 

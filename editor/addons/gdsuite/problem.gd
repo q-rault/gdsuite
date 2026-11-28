@@ -29,6 +29,8 @@ const SETTINGS := {
 ## text's colour.
 const ERROR_MARK := "×"
 const WARNING_MARK := "⚠"
+## Something to know, which no check fails on: a code health info.
+const INFO_MARK := "•"
 ## The × is a small glyph: drawn this much larger, it matches the ⚠.
 const ERROR_MARK_SCALE := 1.45
 ## Warnings in yellow on a dark theme, as the Check icon of the top bar; a
@@ -49,16 +51,39 @@ const TOOL_DESCRIPTIONS := {
 	SOURCE_TYPES: "Found by Godot's compiler (gdsuite typecheck)",
 	SOURCE_HEALTH: "Found by the code health check (gdsuite health)",
 }
-## What each code health finding means.
+## What each code health finding means, in the words of the health report.
 const HEALTH_MEANINGS := {
-	"cyclomatic": "How many ways run through the function: the more, the harder it is to change.",
-	"function-lines": "A long function is hard to read and to reuse.",
-	"file-lines": "A long script often does several things that could be apart.",
-	"nesting": "Blocks within blocks are hard to follow.",
+	"cyclomatic": (
+		"Branching: how many paths run through the function. It counts 1, plus each if, elif, "
+		+ "while, for, match branch, and, or. Each path is a case to read and to test."
+	),
+	"function-lines": (
+		"Length: lines of code in the function. A long function does several steps in a row, "
+		+ "which can't be read, reused or tested apart."
+	),
+	"file-lines": "A long script usually holds several jobs that could be apart.",
+	"nesting": (
+		"Depth: blocks within blocks. The reader has to keep every condition above in mind "
+		+ "to know when a line runs."
+	),
 	"parameters": "Many parameters are hard to call right.",
-	"cycle-detected": "Scripts that depend on each other can't be changed or tested alone.",
+	"cycle-detected": "Scripts that use each other in a loop can't be changed or tested alone.",
 	"forbidden-dependency": "The project's rules keep these groups of scripts apart.",
-	"split-file-candidate": "The script's functions fall into groups that don't use each other.",
+	"split-file-candidate": "The script's functions fall into groups that barely use each other.",
+}
+## What usually helps, when code health names no place to start.
+const HEALTH_ACTIONS := {
+	"cyclomatic": (
+		"Return early for the simple cases, replace a long match or if/elif that maps values "
+		+ "with a Dictionary, or give each branch's work a function."
+	),
+	"function-lines": "Move each step to a function named after what it does.",
+	"file-lines": "Move functions that work on the same data to a script of their own.",
+	"nesting": "Return or continue as soon as a condition fails, or move the inner loop out.",
+	"parameters": "Pass the values that go together as one: a class, a Resource or the node.",
+	"cycle-detected": "Let one side emit a signal the other connects to.",
+	"forbidden-dependency": "Move what both need to a group both may use.",
+	"split-file-candidate": "Move one group to a script of its own.",
 }
 const HEALTH_LIMITS := " Its limits are in [health] in gdsuite.toml."
 ## Code health findings on a whole script rather than a line.
@@ -93,16 +118,39 @@ static func is_checked(source: String) -> bool:
 	return bool(Settings.value(SETTINGS[source]))
 
 
-## The colour of an error or a warning, in the dock and the script editor.
+## The colour of an error, a warning or an info, in the dock and the script
+## editor.
 static func severity_color(severity: String) -> Color:
 	var theme := EditorInterface.get_editor_theme()
 	if severity == "error":
 		return theme.get_color("error_color", "Editor")
+	if severity == "info":
+		return Ui.faded(Ui.text_color())
 	var settings := EditorInterface.get_editor_settings()
 	var base: Color = settings.get_setting("interface/theme/base_color")
 	if base.get_luminance() > 0.5:
 		return theme.get_color("warning_color", "Editor")
 	return WARNING_YELLOW
+
+
+## "Error", "Warning" or "Info".
+static func severity_name(severity: String) -> String:
+	match severity:
+		"error":
+			return "Error"
+		"info":
+			return "Info"
+	return "Warning"
+
+
+## The mark of a severity, in the dock and the script editor's gutter.
+static func mark(severity: String) -> String:
+	match severity:
+		"error":
+			return ERROR_MARK
+		"info":
+			return INFO_MARK
+	return WARNING_MARK
 
 
 ## "12" or "12:5": the line, and the column when the tool gives one.
@@ -125,7 +173,7 @@ static func source_text(problem: Dictionary) -> String:
 
 ## What a problem's code means: its kind, code and tool.
 static func code_tooltip(problem: Dictionary) -> String:
-	var kind := "Error" if problem.severity == "error" else "Warning"
+	var kind := severity_name(problem.severity)
 	return "%s %s\n%s" % [kind, problem.rule, code_meaning(problem)]
 
 
@@ -179,10 +227,29 @@ static func details(problem: Dictionary) -> String:
 	var related: Array = problem.get("related", [])
 	if not related.is_empty():
 		lines.append("With " + ", ".join(related.map(script_link)))
-	if problem.get("suggestion", "") != "":
-		lines.append(escape(problem.suggestion))
+	var todo := what_to_do(problem)
+	if not todo.is_empty():
+		lines.append("[b]What to do[/b]")
+		lines.append_array(todo)
 	lines.append("[color=#%s]%s[/color]" % [dim, meaning])
 	return "\n".join(lines)
+
+
+## What code health says to do about `problem`, as BBCode lines: its hints,
+## each with a link to its line, its suggestion, or what usually helps.
+static func what_to_do(problem: Dictionary) -> PackedStringArray:
+	var lines := PackedStringArray()
+	if problem.source != SOURCE_HEALTH:
+		return lines
+	for hint: Dictionary in problem.get("hints", []):
+		var at := int(hint.get("line", 0))
+		var text := escape(str(hint.get("text", "")))
+		lines.append("[url=line:%d]line %d[/url]  %s" % [at, at, text] if at > 0 else "• " + text)
+	if problem.get("suggestion", "") != "":
+		lines.append("• " + escape(problem.suggestion))
+	if lines.is_empty() and HEALTH_ACTIONS.has(problem.rule):
+		lines.append("• " + HEALTH_ACTIONS[problem.rule])
+	return lines
 
 
 ## A script's path, as BBCode that opens it.
@@ -225,6 +292,7 @@ static func from_health_report(report: Dictionary) -> Array:
 			func(path: String) -> String: return "res://" + path
 		)
 		problem.suggestion = str(finding.get("suggestion", ""))
+		problem.hints = finding.get("hints", [])
 	return problems
 
 

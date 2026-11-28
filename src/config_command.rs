@@ -15,7 +15,10 @@ use crate::{cli::ConfigAction, config::GdsuiteConfig, tooling::ProjectContext};
 
 pub fn run(context: &ProjectContext, action: ConfigAction) -> Result<()> {
     if let ConfigAction::Get { key } = &action {
-        println!("{}", serde_json::to_string(&get(context, key)?)?);
+        println!(
+            "{}",
+            crate::app::ascii_json(serde_json::to_string(&get(context, key)?)?)
+        );
         return Ok(());
     }
 

@@ -23,6 +23,7 @@ file is organized.
 | `[reports] artifacts_dir` | `"reports/gdsuite"` | Where JSON reports are saved |
 | `[check] steps` | `["fmt", "lint", "typecheck", "health"]` | The steps of `gdsuite check`, in order: any of `fmt`, `lint`, `typecheck`, `test`, `health` |
 | `[check] health_fail_on` | `"never"` | Fail the check on [code health findings](/check#code-health): `"critical"`, `"warning"` (all), or `"never"` |
+| `[check] health_compare` | The main branch | With `health_fail_on`, only findings new or worse since this revision fail the check; `""` counts every finding |
 | `[editor] autofix` | Each person's choice | A check in the [Godot editor](/editor#the-same-choice-for-the-whole-team), on request or on save, fixes what can be fixed first, for everyone. Before: `format_on_save` |
 | `[editor] check_format`, `check_lint`, `check_compile`, `check_health` | Each person's choice | Whether the editor's **Check** covers that tool, for everyone |
 | `[editor] check_on_save` | Each person's choice | Check scripts when they are saved in the Godot editor, for everyone. Before: `lint_on_save`, `type_check_on_save` |

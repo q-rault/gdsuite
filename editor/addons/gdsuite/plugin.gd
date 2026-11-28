@@ -16,18 +16,14 @@ const TestsGutter = preload("tests_gutter.gd")
 const TestsMenu = preload("tests_menu.gd")
 const Checker = preload("checker.gd")
 const ScriptEdits = preload("script_edits.gd")
+const Status = preload("status.gd")
+const DiskChanges = preload("disk_changes.gd")
 
 const NOT_FOUND := "gdsuite not found: install it, or set its path in Editor Settings > GDSuite"
 ## The page of the full code health report.
 const HEALTH_REPORT := "reports/code-health/browser/emerge.html"
 ## Covers its own line and the next, as gdtidy reads it.
 const IGNORE_COMMENT := "  # gdtidy: ignore=%s"
-
-## What the top bar's icons show, by colour.
-const STATE_NONE := "none"
-const STATE_OK := "ok"
-const STATE_WARNING := "warning"
-const STATE_ERROR := "error"
 
 const SHORTCUT_FORMAT := "gdsuite/format_script"
 const COMMAND_FORMAT := "gdsuite/format_script"
@@ -72,12 +68,13 @@ const LAYOUT_FLOATING := 4
 var _runner := Runner.new()
 var _checker := Checker.new()
 var _markers := Markers.new()
+var _disk := DiskChanges.new()
 var _dock: ProblemsDock
 ## The EditorDock holding `_dock` on Godot 4.6 and newer; null on 4.5.
 var _dock_host: Control
 var _tests: TestsDock
 var _tests_host: Control
-## The dots of the docks' tabs, by colour: see `_set_dot`.
+## The grey dots of the docks' tabs, by colour: see `_dot`.
 var _dots := {}
 var _tests_gutter := TestsGutter.new()
 var _tests_menu: TestsMenu
@@ -85,6 +82,15 @@ var _tests_menu: TestsMenu
 var _discover_timer: Timer
 var _check_button: Button
 var _tests_button: Button
+## The icons the top bar and the docks' buttons are drawn from, made once:
+## Status keeps what it draws from them by their resource.
+var _check_icon: Texture2D
+var _tests_icon: Texture2D
+var _stop_icon: Texture2D
+## Turns the spinners of the top bar and the docks' tabs while a check or the
+## tests run.
+var _spinner: Timer
+var _spinner_frame := 0
 var _menu: PopupMenu
 var _format_shortcut: Shortcut
 var _next_shortcut: Shortcut
@@ -110,6 +116,7 @@ func _enter_tree() -> void:
 
 	_checker.runner = _runner
 	_checker.dock = _dock
+	_checker.files_written.connect(_on_files_written)
 	add_child(_checker)
 
 	_tests = TestsDock.new()
@@ -129,17 +136,22 @@ func _enter_tree() -> void:
 	_tests_menu.run_paths = _run_tests_and_show
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _tests_menu)
 
-	_check_button = _status_button(Ui.CHECK_ICON, _check)
-	_tests_button = _status_button(Ui.TESTS_ICON, _test_all)
+	_check_icon = Ui.svg_icon(Ui.CHECK_ICON)
+	_tests_icon = Ui.svg_icon(Ui.TESTS_ICON)
+	_stop_icon = Ui.icon("Stop")
+	_check_button = _status_button(_check_icon, _check)
+	_tests_button = _status_button(_tests_icon, _test_all)
+	_spinner = Timer.new()
+	_spinner.wait_time = 0.1
+	_spinner.timeout.connect(_on_spinner)
+	add_child(_spinner)
 	add_control_to_container(CONTAINER_TOOLBAR, _check_button)
 	add_control_to_container(CONTAINER_TOOLBAR, _tests_button)
 	_check_button.visible = Settings.value(Settings.TOP_BAR_CHECK)
 	_tests_button.visible = Settings.value(Settings.TOP_BAR_TESTS)
 	_dock.problems_changed.connect(_show_check_state)
-	_dock.problems_changed.connect(_update_titles)
-	_dock.state_changed.connect(_update_titles)
+	_dock.state_changed.connect(_show_check_state)
 	_checker.checking_changed.connect(_show_check_state)
-	_tests.results_changed.connect(_update_titles)
 
 	_menu = PopupMenu.new()
 	_menu.add_item("Format script", MENU_FORMAT)
@@ -193,12 +205,16 @@ func _enter_tree() -> void:
 	if _runner.find_program() == "":
 		_dock.set_status(NOT_FOUND)
 		var install := "gdsuite not found. Install GDSuite: " + Problem.INSTALL_DOCS
-		_paint(_check_button, STATE_NONE, install)
-		_paint(_tests_button, STATE_NONE, install)
+		var none := Status.RESULT_NONE
+		_paint([_check_button, _dock.action_button()], _check_icon, none, Status.FRESH, install)
+		_paint([_tests_button, _tests.action_button()], _tests_icon, none, Status.FRESH, install)
 		return
 	_read_project_settings()
 	_show_check_state()
 	_show_tests_state()
+	# What the files hold now, to tell later changes from outside the editor.
+	if not EditorInterface.get_resource_filesystem().is_scanning():
+		_disk.scan()
 	# Opening the project only looks: Check is what fixes.
 	_checker.check(false)
 
@@ -279,99 +295,110 @@ func _check() -> void:
 	_checker.check(bool(Settings.value(Settings.AUTOFIX)))
 
 
-## The Check icon: grey until every tool has reported, then red for errors,
-## yellow for warnings, green for none.
+## The Check icon of the top bar and the Check button of the Problems dock:
+## grey until every tool has reported, then a red cross for errors, a yellow
+## "!" for warnings, a green check for none; faded when files changed since,
+## with a spinner while a tool checks.
 func _show_check_state() -> void:
 	var lines := PackedStringArray()
-	var state := STATE_NONE
+	var result := _dock.result()
+	var freshness := _dock.freshness()
 	var covered := PackedStringArray()
 	for source: String in Problem.SOURCES:
 		if Problem.is_checked(source):
 			covered.append(Problem.TOOL_NAMES[source])
-	if _checker.checking:
-		lines.append("Checking…")
-	elif not _dock.store.is_known():
-		lines.append("Not checked yet")
+	if result == Status.RESULT_NONE:
+		lines.append("Checking…" if freshness == Status.RUNNING else "Not checked yet")
 	else:
 		var count := _dock.store.counts()
-		if count.errors > 0:
-			state = STATE_ERROR
-		elif count.warnings > 0:
-			state = STATE_WARNING
-		else:
-			state = STATE_OK
-		lines.append("%d errors, %d warnings" % [count.errors, count.warnings])
+		var found := "No problems"
+		if count.errors + count.warnings > 0:
+			found = "%s, %s" % [_plural(count.errors, "error"), _plural(count.warnings, "warning")]
+		lines.append(found)
+		if freshness == Status.RUNNING:
+			lines.append("Checking again…")
+		elif freshness == Status.STALE:
+			var changed := _dock.store.changed_files().size()
+			lines.append("Out of date: %s changed since" % _plural(changed, "file"))
 	var fixes := ", and fix what can be fixed" if Settings.value(Settings.AUTOFIX) else ""
 	lines.append("Click to check the project%s: %s" % [fixes, ", ".join(covered)])
 	var tooltip := "\n".join(lines)
-	_paint(_check_button, state, tooltip)
+	_paint([_check_button, _dock.action_button()], _check_icon, result, freshness, tooltip)
 	_check_button.disabled = _checker.checking
 	_dock.set_check(_checker.checking, tooltip)
+	_update_titles()
 
 
-## The Tests icon: grey while some tests have not run since they changed,
-## red when one fails, green when all ran and pass; while they run, what
-## stops them.
+## The Tests icon of the top bar and the Test all button of the Tests dock:
+## grey until tests ran, then a red cross when one fails, a green check when
+## none does; faded when some have not run since their scripts changed. While
+## they run, a Stop icon with a spinner: clicking stops them.
 func _show_tests_state() -> void:
 	# The Tests dock reports before the top bar has its icon.
 	if _tests_button == null:
 		return
-	var state := STATE_NONE
-	match _tests.state():
-		TestsDock.STATE_FAIL:
-			state = STATE_ERROR
-		TestsDock.STATE_PASS:
-			state = STATE_OK
-	var running := _tests.is_running()
-	_tests_button.icon = Ui.icon("Stop") if running else Ui.svg_icon(Ui.TESTS_ICON)
+	var freshness := _tests.freshness()
+	var running := freshness == Status.RUNNING
 	var action := "Click to stop the tests" if running else "Click to run all tests"
-	_paint(_tests_button, state, _tests.summary() + "\n" + action)
+	var tooltip := _tests.summary() + "\n" + action
+	var base := _stop_icon if running else _tests_icon
+	_paint([_tests_button, _tests.action_button()], base, _tests.result(), freshness, tooltip)
+	_update_titles()
 
 
-## The docks' titles say what they have: "Problems 8" in red with an error,
-## in yellow with warnings only; "Tests ✗ 2" in red; a green ✓ when there is
-## nothing, checked or run with the code as it is now. Godot 4.5's bottom
-## panels keep their titles.
+## The docks' tabs show what the top bar shows, as the badge alone: a red
+## cross, a yellow "!", a green check, faded when out of date, a spinner while
+## running, a grey dot when nothing is known yet. Godot 4.5's bottom panels
+## keep their titles.
 func _update_titles() -> void:
-	var theme := EditorInterface.get_editor_theme()
-	var gray := Color(theme.get_color("font_color", "Editor"), 0.5)
-	var green := theme.get_color("success_color", "Editor")
 	if _dock_host != null:
-		var count := _dock.store.counts()
-		var color := gray
-		if count.errors > 0:
-			color = Problem.severity_color("error")
-		elif count.warnings > 0:
-			color = Problem.severity_color("warning")
-		elif _dock.is_clean():
-			color = green
-		_set_dot(_dock_host, color)
+		_set_tab_icon(_dock_host, _dock.result(), _dock.freshness())
 	if _tests_host != null:
-		var color := gray
-		if _tests.failed_count() > 0:
-			color = theme.get_color("error_color", "Editor")
-		elif _tests.all_pass():
-			color = green
-		_set_dot(_tests_host, color)
+		_set_tab_icon(_tests_host, _tests.result(), _tests.freshness())
+	var running := _dock.freshness() == Status.RUNNING or _tests.freshness() == Status.RUNNING
+	if running and _spinner.is_stopped() and _spinner.is_inside_tree():
+		_spinner.start()
+	elif not running:
+		_spinner.stop()
 
 
-## A dot of `color` before a dock's name, as the Output dock has: red for
-## errors, yellow for warnings, green when all is checked and well, grey when
-## not checked, or checked before the last changes.
-func _set_dot(host: Object, color: Color) -> void:
+func _set_tab_icon(host: Object, result: String, freshness: String) -> void:
+	var icon := Status.tab_icon(result, freshness, _spinner_frame)
+	if icon == null:
+		var theme := EditorInterface.get_editor_theme()
+		icon = _dot(Color(theme.get_color("font_color", "Editor"), 0.5))
+	host.set("dock_icon", icon)
+	host.set("force_show_icon", true)
+	host.set("title_color", Color(0, 0, 0, 0))
+
+
+## A dot of `color` before a dock's name, as the Output dock has: grey, for a
+## dock with nothing known yet.
+func _dot(color: Color) -> Texture2D:
 	var key := color.to_html()
 	if not _dots.has(key):
 		var theme := EditorInterface.get_editor_theme()
-		var image := theme.get_icon("Warning", "EditorIcons").get_image()
+		# A copy: get_image() can give the editor icon's own image.
+		var image := theme.get_icon("Warning", "EditorIcons").get_image().duplicate() as Image
 		image.convert(Image.FORMAT_RGBA8)
 		for y in image.get_height():
 			for x in image.get_width():
 				var alpha := image.get_pixel(x, y).a
 				image.set_pixel(x, y, Color(color, color.a * alpha))
 		_dots[key] = ImageTexture.create_from_image(image)
-	host.set("dock_icon", _dots[key])
-	host.set("force_show_icon", true)
-	host.set("title_color", Color(0, 0, 0, 0))
+	return _dots[key]
+
+
+func _on_spinner() -> void:
+	_spinner_frame = (_spinner_frame + 1) % 8
+	if _dock.freshness() == Status.RUNNING:
+		_show_check_state()
+	if _tests.freshness() == Status.RUNNING:
+		_show_tests_state()
+
+
+static func _plural(count: int, word: String) -> String:
+	return "%d %s%s" % [count, word, "" if count == 1 else "s"]
 
 
 ## Runs every test, or stops the tests: the Tests icon of the top bar and the
@@ -383,33 +410,36 @@ func _test_all() -> void:
 		_run_tests_and_show(PackedStringArray())
 
 
-func _status_button(svg: String, pressed: Callable) -> Button:
+func _status_button(icon: Texture2D, pressed: Callable) -> Button:
 	var button := Button.new()
 	button.flat = true
-	button.icon = Ui.svg_icon(svg)
+	button.icon = icon
 	button.pressed.connect(pressed)
 	return button
 
 
-func _paint(button: Button, state: String, tooltip: String) -> void:
-	var theme := EditorInterface.get_editor_theme()
-	var color := Color(0.6, 0.6, 0.6)
-	match state:
-		STATE_OK:
-			color = theme.get_color("success_color", "Editor")
-		STATE_WARNING:
-			color = Color(1.0, 0.8, 0.25)
-		STATE_ERROR:
-			color = theme.get_color("error_color", "Editor")
-	for color_name: String in [
-		"icon_normal_color",
-		"icon_hover_color",
-		"icon_pressed_color",
-		"icon_hover_pressed_color",
-		"icon_focus_color",
-	]:
-		button.add_theme_color_override(color_name, color)
-	button.tooltip_text = tooltip
+## Paints a top bar icon and the dock's button that does the same: `base` in
+## the colour of `result` with its badge, see Status.icon.
+func _paint(
+	buttons: Array, base: Texture2D, result: String, freshness: String, tooltip: String
+) -> void:
+	var icon := Status.icon(base, result, freshness, _spinner_frame)
+	for button: Button in buttons:
+		if button == null:
+			continue
+		button.icon = icon
+		# The icon has its colours: the theme's tint would change them.
+		for color_name: String in [
+			"icon_normal_color",
+			"icon_hover_color",
+			"icon_pressed_color",
+			"icon_hover_pressed_color",
+			"icon_focus_color",
+			# Check is disabled while it runs: the icon is faded already.
+			"icon_disabled_color",
+		]:
+			button.add_theme_color_override(color_name, Color.WHITE)
+		button.tooltip_text = tooltip
 
 
 # --- Problems ---------------------------------------------------------------
@@ -505,6 +535,7 @@ func _on_script_changed(_script: Script) -> void:
 func _on_text_changed(code_edit: CodeEdit, path: String) -> void:
 	if not _checker.saving and code_edit.get_version() != code_edit.get_saved_version():
 		_dock.mark_stale(path)
+		_checker.text_edited(path, code_edit)
 
 
 func _on_gutter_clicked(line: int, gutter: int, code_edit: CodeEdit) -> void:
@@ -569,6 +600,24 @@ func _open_test(file: String, test_name: String) -> void:
 func _on_filesystem_changed() -> void:
 	_read_project_settings()
 	_discover_timer.start()
+	if _runner.program == "":
+		return
+	for path in _disk.scan():
+		_changed_outside(path)
+
+
+## `path` changed outside the editor: what was checked and tested is out of
+## date. Nothing runs: a checkout can change hundreds of files.
+func _changed_outside(path: String) -> void:
+	_dock.changed_on_disk(path)
+	if path.get_extension() == "gd":
+		_dock.mark_stale(path)
+	_tests.watch.file_changed_outside(path)
+
+
+func _on_files_written(paths: PackedStringArray) -> void:
+	for path in paths:
+		_disk.note(path)
 
 
 # --- Saving ------------------------------------------------------------------
@@ -581,16 +630,22 @@ func _on_resource_saved(resource: Resource) -> void:
 	# Built-in scripts and resources are saved with their scene.
 	if path == "" or path.contains("::"):
 		return
-	if not resource is GDScript:
-		_tests.watch.file_saved(path)
-		return
-	_checker.script_saved(resource as GDScript)
+	_disk.note(path)
+	_dock.changed_on_disk(path)
+	if resource is GDScript:
+		_checker.script_saved(resource as GDScript)
+	else:
+		_checker.resource_saved(path)
 	_tests.watch.file_saved(path)
 
 
 func _on_scene_saved(path: String) -> void:
-	if not _checker.saving:
-		_tests.watch.file_saved(path)
+	if _checker.saving:
+		return
+	_disk.note(path)
+	_dock.changed_on_disk(path)
+	_checker.resource_saved(path)
+	_tests.watch.file_saved(path)
 
 
 # --- Settings ---------------------------------------------------------------

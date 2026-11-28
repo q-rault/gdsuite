@@ -271,7 +271,7 @@ fn health_quick_prints_findings_and_the_graph() {
         report["graph"],
         serde_json::json!({
             "scripts": [{ "path": "a.gd", "group": "g", "lines": 9 }],
-            "edges": [["a.gd", "b.gd", 2]],
+            "edges": [["a.gd", "b.gd", 2, "class"]],
             "cycles": [],
         })
     );
@@ -318,6 +318,33 @@ fn check_reports_health_findings_and_fails_on_them_when_asked() {
         .failure()
         .code(12)
         .stdout(predicate::str::contains("a.gd:7:1: error[cyclomatic]"));
+
+    // Compared with the main branch, where it already was, it passes.
+    with(
+        "health_fail_on = \"critical\"
+health_compare = \"main\"",
+    );
+    fixture.cmd().arg("check").assert().success();
+    assert_eq!(
+        fixture.read_log("gdhealth-args.txt"),
+        "health --compare main"
+    );
+
+    // A revision gdhealth cannot find says so, not an earlier run's summary.
+    let bundle = fixture.root.join("reports/code-health");
+    fs::create_dir_all(&bundle).unwrap();
+    fs::write(bundle.join("summary.txt"), "an earlier summary").unwrap();
+    with(
+        "health_fail_on = \"critical\"
+health_compare = \"nope\"",
+    );
+    fixture
+        .cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("cannot compare with nope"))
+        .stdout(predicate::str::contains("an earlier summary").not());
 }
 
 #[test]
@@ -770,11 +797,20 @@ if "%1"=="schema-version" (
 echo %*> "%CD%\logs\gdhealth-args.txt"
 >> "%CD%\logs\step-order.txt" echo health
 if "%1"=="graph" (
-  echo {"files": [{"path": "a.gd", "group": "g", "line_count": 9}], "edges": [{"from": "a.gd", "to": "b.gd", "line": 2}, {"from": "a.gd", "to": "b.gd", "line": 5}, {"from": "a.gd", "to": "a.gd", "line": 3}], "cycles": [["a.gd"]]}
+  echo {"files": [{"path": "a.gd", "group": "g", "line_count": 9}], "edges": [{"from": "a.gd", "to": "b.gd", "line": 2, "kind": "ClassName"}, {"from": "a.gd", "to": "b.gd", "line": 5, "kind": "Load"}, {"from": "a.gd", "to": "a.gd", "line": 3}], "cycles": [["a.gd"]]}
   exit /b 0
 )
 if "%2"=="--no-git" (
   > "%6" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7}]}
+  exit /b 0
+)
+if "%3"=="nope" (
+  echo git error: cannot compare with nope 1>&2
+  exit /b 1
+)
+if "%2"=="--compare" if exist "%CD%\mock-state\health-findings.flag" (
+  mkdir "%CD%\reports\code-health" 2>nul
+  > "%CD%\reports\code-health\health.json" echo {"policy_findings": [{"rule_id": "cyclomatic_threshold", "severity": "critical", "message": "a.gd::_run has cyclomatic estimate 24", "file": "a.gd", "line": 7, "change": "existing"}]}
   exit /b 0
 )
 if exist "%CD%\mock-state\health-findings.flag" (
@@ -1492,6 +1528,81 @@ fn fmt_input_prints_the_formatted_text_and_changes_no_file() {
         .success()
         .stdout("func f():\n\tpass\n");
     assert_eq!(fs::read_to_string(&buffer).unwrap(), "func f():\n  pass\n");
+}
+
+#[test]
+fn lint_input_lints_the_text_as_the_script_it_names() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    let buffer = fixture.root.join("buffer.txt");
+    fs::write(&buffer, "func Bad():\n\tpass\n").unwrap();
+
+    fixture
+        .cmd()
+        .args(["lint", "--report", "json", "--input"])
+        .arg(&buffer)
+        .args(["--as", "res://ui/hud.gd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"file\": \"ui/hud.gd\""))
+        .stdout(predicate::str::contains("\"rule\": \"function-name\""));
+    assert_eq!(
+        fs::read_to_string(&buffer).unwrap(),
+        "func Bad():\n\tpass\n"
+    );
+}
+
+#[test]
+fn dependents_prints_the_files_a_change_reaches() {
+    let fixture = Fixture::new();
+    fixture.seed_project();
+    for (path, text) in [
+        (
+            "actor.gd",
+            "class_name Actor
+extends Node
+",
+        ),
+        (
+            "player.gd",
+            "class_name Player
+extends Actor
+",
+        ),
+        (
+            "lonely.gd",
+            "extends Node
+",
+        ),
+        (
+            "addons/tool/tool.gd",
+            "extends Actor
+",
+        ),
+    ] {
+        let full = fixture.root.join(path);
+        fs::create_dir_all(full.parent().unwrap()).unwrap();
+        fs::write(full, text).unwrap();
+    }
+
+    let output = fixture
+        .cmd()
+        .args(["dependents", "actor.gd"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(
+        json["files"],
+        serde_json::json!([
+            "res://actor.gd",
+            "res://addons/tool/tool.gd",
+            "res://player.gd"
+        ])
+    );
+    assert!(json["project_files"].as_u64().unwrap() >= 3, "{json}");
 }
 
 #[test]

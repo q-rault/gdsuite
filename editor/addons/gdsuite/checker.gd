@@ -8,6 +8,9 @@ extends Node
 signal checking_changed
 ## The compile check reported.
 signal compiled
+## The addon wrote these files ("res://" paths) itself, fixing them: not a
+## change from outside the editor.
+signal files_written(paths: PackedStringArray)
 
 const Runner = preload("runner.gd")
 const Settings = preload("settings.gd")
@@ -15,10 +18,26 @@ const Problem = preload("problem.gd")
 const ProblemsDock = preload("problems_dock.gd")
 const ScriptEdits = preload("script_edits.gd")
 
-## Seconds after a save before the whole project is compiled.
+## Seconds after a save before what it affects is compiled.
 const COMPILE_DELAY := 1.5
+## Seconds without a save before the whole project is compiled again, after
+## compiling only what saves affect: it finds what the links between files
+## don't tell, as a class_name removed that other scripts still use.
+const FULL_COMPILE_DELAY := 30.0
 ## The scripts given to one command: Windows limits a command's length.
 const FILES_PER_COMMAND := 100
+## After a save, the whole project is compiled instead of what the save
+## affects when that is more than this share of the project. Compiling part
+## of it is only for quicker answers: the whole project is compiled anyway
+## once saves stop. Past half, the answer comes less than twice as fast,
+## and that work is done twice.
+const WHOLE_PROJECT_SHARE := 0.5
+## The most files compiled by name after a save, for the command's length.
+const MOST_COMPILED_BY_NAME := 400
+## Seconds without typing before the script being edited is linted.
+const LINT_DELAY := 0.3
+## What the compile check reads.
+const COMPILED_EXTENSIONS := ["gd", "tscn", "tres", "scn", "res"]
 
 var runner: Runner
 var dock: ProblemsDock
@@ -28,10 +47,28 @@ var saving := false
 var checking := false
 
 var _compile_timer: Timer
+var _full_compile_timer: Timer
 var _compile_running := false
+## Compile again once the compile check going ends: what was saved since, or
+## the whole project when `_compile_whole_again`.
 var _compile_again := false
+var _compile_whole_again := false
+## The files saved since the compile check last started: it compiles them
+## and the scripts that use them, as gdtest tells.
+var _to_compile := {}
 var _health_running := false
 var _health_again := false
+## When the compile check and code health running started, for what they
+## report: a file changed after is still out of date.
+var _compile_started := -1
+var _health_started := -1
+## Lint as you type: the script being edited, waiting for the typing to
+## stop, and whether a lint of it is going, or is to start again once it ends.
+var _live_timer: Timer
+var _live_edit: CodeEdit
+var _live_path := ""
+var _live_running := false
+var _live_again := false
 ## The sources a check waits for before it fixes, and whether it fixes.
 var _waiting_for := {}
 var _fixes := false
@@ -41,8 +78,18 @@ func _init() -> void:
 	_compile_timer = Timer.new()
 	_compile_timer.one_shot = true
 	_compile_timer.wait_time = COMPILE_DELAY
-	_compile_timer.timeout.connect(_compile_and_measure)
+	_compile_timer.timeout.connect(_on_saves_settled)
 	add_child(_compile_timer)
+	_full_compile_timer = Timer.new()
+	_full_compile_timer.one_shot = true
+	_full_compile_timer.wait_time = FULL_COMPILE_DELAY
+	_full_compile_timer.timeout.connect(_on_idle)
+	add_child(_full_compile_timer)
+	_live_timer = Timer.new()
+	_live_timer.one_shot = true
+	_live_timer.wait_time = LINT_DELAY
+	_live_timer.timeout.connect(_lint_live)
+	add_child(_live_timer)
 
 
 # --- Checking ----------------------------------------------------------------
@@ -89,7 +136,63 @@ func script_saved(script: GDScript) -> void:
 	if Settings.value(Settings.AUTOFIX):
 		_fix_saved(script)
 	_check_files(PackedStringArray([path]))
+	_saved(path)
+
+
+## A scene or resource was saved: the compile check and code health read
+## them too, and run again after it, as after a script's save.
+func resource_saved(path: String) -> void:
+	if Settings.value(Settings.CHECK_ON_SAVE):
+		_saved(path)
+
+
+func _saved(path: String) -> void:
+	_to_compile[path] = true
 	_compile_timer.start()
+	_full_compile_timer.stop()
+
+
+## The script at `path` was edited in `code_edit`: once the typing stops,
+## lints the text as it is, saved or not.
+func text_edited(path: String, code_edit: CodeEdit) -> void:
+	if not Settings.value(Settings.LINT_AS_YOU_TYPE) or path.get_extension() != "gd":
+		return
+	if not Problem.is_checked(Problem.SOURCE_LINT):
+		return
+	_live_path = path
+	_live_edit = code_edit
+	_live_timer.start()
+
+
+func _lint_live() -> void:
+	if runner.program == "" or not is_instance_valid(_live_edit):
+		return
+	if _live_running:
+		_live_again = true
+		return
+	var path := _live_path
+	var input := OS.get_temp_dir().path_join("gdsuite-lint-%d.gd" % OS.get_process_id())
+	var file := FileAccess.open(input, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(_live_edit.text)
+	file.close()
+	_live_running = true
+	var args := PackedStringArray(["lint", "--report", "json", "--input", input, "--as", path])
+	runner.run(args, _on_live_linted.bind(path))
+
+
+func _on_live_linted(result: Dictionary, path: String) -> void:
+	_live_running = false
+	var report: Variant = result.json
+	# Text that doesn't parse, as often while typing, keeps what was found:
+	# its syntax error is Godot's to show. A gdsuite older than
+	# `lint --input` answers no report.
+	if report is Dictionary and report.has("findings") and report.get("skipped", []).is_empty():
+		dock.set_live_problems(path, Problem.from_report(report))
+	if _live_again:
+		_live_again = false
+		_lint_live()
 
 
 ## Whether the script at `path` compiles, for the tests to run on save:
@@ -141,6 +244,22 @@ func _compile_and_measure() -> void:
 		compile()
 	if Problem.is_checked(Problem.SOURCE_HEALTH):
 		health()
+
+
+## No save for COMPILE_DELAY: compiles what the saves affect, and measures the
+## project again.
+func _on_saves_settled() -> void:
+	if Problem.is_checked(Problem.SOURCE_TYPES):
+		_compile_saved()
+	if Problem.is_checked(Problem.SOURCE_HEALTH):
+		health()
+
+
+## No save for FULL_COMPILE_DELAY since the compile check of what saves
+## affect: compiles the whole project, for what that one could not see.
+func _on_idle() -> void:
+	if Settings.value(Settings.CHECK_ON_SAVE) and Problem.is_checked(Problem.SOURCE_TYPES):
+		compile()
 
 
 ## A check ends once the compile check and code health reported too.
@@ -196,31 +315,114 @@ func _on_lint_done(result: Dictionary, paths: PackedStringArray) -> void:
 		_source_reported(Problem.SOURCE_LINT)
 
 
+## Compiles the whole project.
 func compile() -> void:
 	if runner.program == "":
 		return
 	if _compile_running:
 		_compile_again = true
+		_compile_whole_again = true
 		return
+	_begin_compile()
+	_run_compile(PackedStringArray())
+
+
+## Compiles the files saved since the compile check last started, and the
+## files that use them, as `gdsuite dependents` tells: those a save can
+## break. The whole project when the project's settings changed, when that is
+## most of the project, or when gdsuite can't tell.
+func _compile_saved() -> void:
+	if runner.program == "":
+		return
+	if _compile_running:
+		_compile_again = true
+		return
+	var saved := PackedStringArray(_to_compile.keys())
+	_begin_compile()
+	if saved.is_empty() or "res://project.godot" in saved:
+		_run_compile(PackedStringArray())
+		return
+	var lines := PackedStringArray()
+	var args := PackedStringArray(["--project-root", Runner.project_root(), "dependents"])
+	args.append_array(saved)
+	var on_line := func(line: String) -> void: lines.append(line)
+	if runner.stream(runner.program, args, on_line, _on_dependents.bind(lines)) < 0:
+		_run_compile(PackedStringArray())
+
+
+## gdsuite printed the files the saves affect: compiles them.
+func _on_dependents(code: int, lines: PackedStringArray) -> void:
+	var json: Variant = JSON.parse_string("".join(lines)) if code == 0 else null
+	if not json is Dictionary or not json.get("files") is Array:
+		_run_compile(PackedStringArray())
+		return
+	var targets := PackedStringArray()
+	for path: String in json.files:
+		# The compile check leaves addons out of the project, as Godot's own
+		# warnings do; a deleted file can't be compiled.
+		if path.begins_with("res://addons/") or not FileAccess.file_exists(path):
+			continue
+		if path.get_extension() in COMPILED_EXTENSIONS:
+			targets.append(path)
+	var project_files: float = json.get("project_files", 0)
+	if (
+		targets.size() > MOST_COMPILED_BY_NAME
+		or targets.size() > project_files * WHOLE_PROJECT_SHARE
+	):
+		targets = PackedStringArray()
+	elif targets.is_empty():
+		# Nothing it could break: an addon's file, or one deleted.
+		_finish_compile()
+		return
+	_run_compile(targets)
+
+
+func _begin_compile() -> void:
 	_compile_running = true
+	_compile_started = Time.get_ticks_usec()
+	_to_compile.clear()
 	dock.set_running(Problem.SOURCE_TYPES, true)
-	runner.run(PackedStringArray(["typecheck", "--report", "json"]), _on_compile_done)
 
 
-func _on_compile_done(result: Dictionary) -> void:
-	_compile_running = false
-	dock.set_running(Problem.SOURCE_TYPES, false)
+## Compiles `targets` ("res://" paths), or the whole project when empty.
+func _run_compile(targets: PackedStringArray) -> void:
+	var args := PackedStringArray(["typecheck", "--report", "json"])
+	if not targets.is_empty():
+		args.append("--")
+		args.append_array(_targets(targets))
+	runner.run(args, _on_compile_done.bind(targets))
+
+
+func _on_compile_done(result: Dictionary, targets: PackedStringArray) -> void:
 	if result.json is Dictionary:
 		var problems := Problem.from_report(result.json)
 		# Godot reports lines only: a column would be made up.
 		for problem: Dictionary in problems:
 			problem.column = 0
-		dock.set_problems(Problem.SOURCE_TYPES, PackedStringArray(), problems)
+		# Compiling a script compiles what it uses too, whose problems it may
+		# report: only those of the targets replace what was known of them.
+		if not targets.is_empty():
+			problems = problems.filter(func(p: Dictionary) -> bool: return p.file in targets)
+		dock.set_problems(Problem.SOURCE_TYPES, targets, problems, _compile_started)
+		if not targets.is_empty() and Settings.value(Settings.CHECK_ON_SAVE):
+			_full_compile_timer.start()
+		elif targets.is_empty():
+			_full_compile_timer.stop()
 	else:
 		dock.set_status("The compile check could not run: " + str(result.output).strip_edges())
+	_finish_compile()
+
+
+func _finish_compile() -> void:
+	_compile_running = false
+	dock.set_running(Problem.SOURCE_TYPES, false)
 	if _compile_again:
 		_compile_again = false
-		compile()
+		if _compile_whole_again:
+			_compile_whole_again = false
+			compile()
+		else:
+			_compile_saved()
 	compiled.emit()
 	_end_check()
 
@@ -232,6 +434,7 @@ func health() -> void:
 		_health_again = true
 		return
 	_health_running = true
+	_health_started = Time.get_ticks_usec()
 	dock.set_running(Problem.SOURCE_HEALTH, true)
 	runner.run(PackedStringArray(["health", "--quick", "--report", "json"]), _on_health_done)
 
@@ -242,7 +445,7 @@ func _on_health_done(result: Dictionary) -> void:
 	if result.json is Dictionary:
 		dock.set_graph(result.json.get("graph", {}))
 		var problems := Problem.from_health_report(result.json)
-		dock.set_problems(Problem.SOURCE_HEALTH, PackedStringArray(), problems)
+		dock.set_problems(Problem.SOURCE_HEALTH, PackedStringArray(), problems, _health_started)
 	else:
 		dock.set_status("Code health could not run: " + str(result.output).strip_edges())
 	if _health_again:
@@ -296,6 +499,7 @@ func _on_fixed(files: Dictionary, done: Callable) -> void:
 		if FileAccess.get_md5(path) != files[path]:
 			changed.append(path)
 			ScriptEdits.reload_file(path)
+	files_written.emit(changed)
 	if not changed.is_empty():
 		for group in _groups(changed):
 			_check_files(group)
@@ -330,6 +534,7 @@ func _fix_saved(script: GDScript) -> void:
 	script.source_code = text
 	saving = true
 	ResourceSaver.save(script)
+	files_written.emit(PackedStringArray([path]))
 	var code_edit := ScriptEdits.code_edit_for(path)
 	if code_edit != null:
 		ScriptEdits.replace_text(code_edit, text, true)

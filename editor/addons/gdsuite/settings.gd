@@ -13,6 +13,8 @@ const CHECK_COMPILE := "gdsuite/check/compile"
 const CHECK_HEALTH := "gdsuite/check/health"
 ## What saving a file does.
 const CHECK_ON_SAVE := "gdsuite/on_save/check"
+## Whether the script being edited is linted as it is typed, before a save.
+const LINT_AS_YOU_TYPE := "gdsuite/check/lint_as_you_type"
 const TEST_ON_SAVE := "gdsuite/on_save/test"
 const SHOW_IN_GUTTER := "gdsuite/problems/show_in_gutter"
 ## The quick buttons of the editor's top bar.
@@ -27,6 +29,7 @@ const DEFAULTS := {
 	CHECK_COMPILE: true,
 	CHECK_HEALTH: true,
 	CHECK_ON_SAVE: true,
+	LINT_AS_YOU_TYPE: true,
 	TEST_ON_SAVE: false,
 	SHOW_IN_GUTTER: true,
 	TOP_BAR_CHECK: true,
@@ -52,6 +55,7 @@ const LABELS := {
 	CHECK_COMPILE: "Compile",
 	CHECK_HEALTH: "Health",
 	CHECK_ON_SAVE: "On save",
+	LINT_AS_YOU_TYPE: "Lint as you type",
 	TEST_ON_SAVE: "On save",
 	SHOW_IN_GUTTER: "Problems in the script editor",
 	TOP_BAR_CHECK: "Check in the top bar",
@@ -71,6 +75,7 @@ const TOOLTIPS := {
 		"Saving a script checks it again, fixing it first with Autofix on, and the project a"
 		+ " moment later"
 	),
+	LINT_AS_YOU_TYPE: "The script being edited is linted as you type, before it is saved",
 	TEST_ON_SAVE: "Saving a script, a scene or a resource runs the tests it can affect",
 	SHOW_IN_GUTTER: "Marks the lines with a problem in the script editor",
 	TOP_BAR_CHECK: "The Check icon in the editor's top bar, which shows where the project stands",

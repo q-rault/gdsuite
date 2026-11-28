@@ -50,6 +50,13 @@ pub enum Commands {
     Health(HealthArgs),
     #[command(about = "Run the default fast local validation pipeline")]
     Check(CheckArgs),
+    #[command(
+        about = "Print, as JSON, the files a change to FILES can change the meaning of",
+        long_about = "Print, as JSON, the files a change to FILES can change the meaning of: FILES, and the scripts, scenes and resources that use one of them, directly or through others (extends, preload and load of a known path, class_name, autoloads, scenes' ext_resources). A computed load() adds nothing.
+
+Editors use it to type check again only what a save can break."
+    )]
+    Dependents(DependentsArgs),
     #[command(about = "Print a saved suite JSON report artifact")]
     Report(ReportArgs),
     #[command(
@@ -126,8 +133,24 @@ pub enum OutputModeArg {
 pub struct LintArgs {
     #[arg(long, value_parser = ["json", "text"])]
     pub report: Option<String>,
+    /// Lint this file's text instead of the project's files. Editors use it
+    /// to lint unsaved text with the project's settings; `--as` says which
+    /// script the text is.
+    #[arg(long, value_name = "FILE", requires = "as_path")]
+    pub input: Option<PathBuf>,
+    /// With `--input`: the script the text is, as a path in the project. Its
+    /// settings apply, and its problems are reported under it.
+    #[arg(long = "as", value_name = "PATH", requires = "input")]
+    pub as_path: Option<String>,
     #[arg(last = true, action = ArgAction::Append)]
     pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DependentsArgs {
+    /// The changed files: `res://` paths, or paths from the project's root.
+    #[arg(required = true, value_name = "FILES")]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Args)]

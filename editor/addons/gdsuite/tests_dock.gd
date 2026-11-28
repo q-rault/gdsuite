@@ -32,12 +32,7 @@ const DetailsPane = preload("details_pane.gd")
 const Folding = preload("folding.gd")
 const Settings = preload("settings.gd")
 const SettingsMenu = preload("settings_menu.gd")
-
-## What the toolbar shows for the tests, from `state()`.
-const STATE_NOT_RUN := "not_run"
-const STATE_RUNNING := "running"
-const STATE_FAIL := "fail"
-const STATE_PASS := "pass"
+const Status = preload("status.gd")
 
 const MENU_RUN := 0
 const MENU_OPEN := 1
@@ -271,9 +266,11 @@ func run(targets: PackedStringArray, reason := "") -> void:
 	_started_msec = Time.get_ticks_msec()
 	_finished_msec = 0
 	_start_run(targets)
-	_set_running(true)
 	var args := gdtest_args(PackedStringArray(), targets)
+	# Its events reach the dock after this function returns: the run is said
+	# to have started once it has a process, so that `is_running` agrees.
 	_pid = runner.stream(gdtest, args, _on_event, _on_run_done)
+	_set_running(true)
 	if _pid < 0:
 		_set_running(false)
 		Ui.set_status(_status, "gdtest could not start")
@@ -366,39 +363,53 @@ func tests_of(file: String) -> Array:
 	return tests
 
 
-## How many tests failed, or could not run, the last time they ran.
-func failed_count() -> int:
-	var failed := 0
-	for key: String in _results:
-		if _results[key].status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
-			failed += 1
-	return failed
-
-
-## The state of the whole suite, for the toolbar: STATE_FAIL when a test
-## fails, else STATE_NOT_RUN when one has not run since it changed, else
-## STATE_PASS. STATE_RUNNING while tests run.
-func state() -> String:
-	if is_running():
-		return STATE_RUNNING
-	var not_run := false
-	var total := 0
+## What the tests found when they last ran, for the top bar and the dock's
+## tab: Status.RESULT_ERROR when a test fails, RESULT_OK when tests ran and
+## none fails, RESULT_NONE when none ran yet.
+func result() -> String:
+	var ran := false
 	for file: String in _tests:
 		for test_name: String in _tests[file]:
-			total += 1
 			var result: Dictionary = _results.get(Result.key(file, test_name), {})
 			var status: String = result.get("status", Result.STATUS_IDLE)
-			if status in [Result.STATUS_FAIL, Result.STATUS_ERROR]:
-				return STATE_FAIL
-			if status == Result.STATUS_IDLE or result.get("stale", false):
-				not_run = true
-	return STATE_NOT_RUN if not_run or total == 0 else STATE_PASS
+			# While it runs, a test shows what it found the last time.
+			if status in [Result.STATUS_QUEUED, Result.STATUS_RUNNING]:
+				status = result.get("before", Result.STATUS_IDLE)
+			match status:
+				Result.STATUS_FAIL, Result.STATUS_ERROR:
+					return Status.RESULT_ERROR
+				Result.STATUS_PASS, Result.STATUS_SKIP:
+					ran = true
+	return Status.RESULT_OK if ran else Status.RESULT_NONE
 
 
-## Whether every test passed with the code as it is now: none failed, none
-## is to run, and no save is waiting to be looked at.
-func all_pass() -> bool:
-	return state() == STATE_PASS and watch.is_idle()
+## Whether that result holds for the code as it is now: Status.RUNNING while
+## tests run, STALE when a test has not run since its scripts changed, has
+## not run at all, or a save waits to be looked at, else FRESH.
+func freshness() -> String:
+	if is_running():
+		return Status.RUNNING
+	if not watch.is_idle() or stale_count() > 0:
+		return Status.STALE
+	return Status.FRESH
+
+
+## The Test all button, which the plugin paints as the top bar's Tests icon.
+func action_button() -> Button:
+	return _run_button
+
+
+## The tests not run with the code as it is now: changed since, or never run.
+func stale_count() -> int:
+	var count := 0
+	for file: String in _tests:
+		for test_name: String in _tests[file]:
+			var result: Dictionary = _results.get(Result.key(file, test_name), {})
+			if result.get("status", Result.STATUS_IDLE) == Result.STATUS_IDLE:
+				count += 1
+			elif result.get("stale", false):
+				count += 1
+	return count
 
 
 ## One line on the suite, for the toolbar's tooltip.
@@ -906,7 +917,6 @@ func update_status() -> void:
 
 func _set_running(running: bool) -> void:
 	_run_button.text = "Stop" if running else "Test all"
-	_run_button.icon = Ui.icon("Stop") if running else Ui.svg_icon(Ui.TESTS_ICON)
 	_run_button.tooltip_text = "Stop the tests" if running else "Run every test"
 	_rerun_failed.disabled = running or _last_failed.is_empty()
 	_progress.visible = running

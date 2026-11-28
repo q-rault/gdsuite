@@ -7,13 +7,18 @@ extends Node
 ## It doesn't run tests for nothing: it waits for the saves to stop, holds
 ## the tests of a script that doesn't compile, runs nothing for a script saved
 ## back to what its tests ran with, and a save during a run restarts it rather
-## than queue another.
+## than queue another. A file changed outside the editor (a branch checked
+## out, a pull) makes its tests out of date too, but runs nothing: that can be
+## hundreds of files, and the run is for the user to ask.
 
 const Runner = preload("runner.gd")
 const Result = preload("test_result.gd")
 
 ## Seconds without a save before it asks gdtest what the saves affect.
 const SAVE_DELAY := 0.4
+## Past this many files changed at once, every test is out of date: asking
+## gdtest would make too long a command, and most tests would be anyway.
+const MAX_ASKED := 50
 
 ## Whether saving a file runs the tests it affects again.
 var enabled := false
@@ -24,8 +29,10 @@ var compile_state: Callable
 
 ## The Tests dock.
 var _dock: Node
-## The files saved in the last moments: it waits for the saves to stop
-## (`_debounce`), so that several saves in a row make one run.
+## The files saved or changed in the last moments, with whether their tests
+## may run again (saved) or are only out of date (changed outside the
+## editor): it waits for the saves to stop (`_debounce`), so that several
+## saves in a row make one run.
 var _saves := {}
 var _debounce: Timer
 ## Saved files whose tests run once they compile: path -> found, as
@@ -53,6 +60,16 @@ func _init(dock: Node) -> void:
 ## A file of the project was saved: once the saves stop, finds the tests it
 ## affects.
 func file_saved(path: String) -> void:
+	_file_changed(path, true)
+
+
+## A file of the project changed outside the editor: once the changes stop,
+## marks the tests it affects out of date.
+func file_changed_outside(path: String) -> void:
+	_file_changed(path, false)
+
+
+func _file_changed(path: String, may_run: bool) -> void:
 	if Runner.gdtest_program() == "":
 		return
 	# Back to what the tests last ran with, as after renaming something and
@@ -63,7 +80,7 @@ func file_saved(path: String) -> void:
 		_waiting.erase(path)
 		_unstale(path)
 		return
-	_saves[path] = true
+	_saves[path] = _saves.get(path, false) or may_run
 	_debounce.start()
 	_dock.results_changed.emit()
 
@@ -138,40 +155,55 @@ func run_ended(interrupted: bool) -> void:
 	_run_covers = {}
 
 
-## No save for SAVE_DELAY: asks gdtest which tests the saved files affect.
+## No save for SAVE_DELAY: asks gdtest which tests the saved files affect,
+## all at once.
 func _on_saves_settled() -> void:
 	var gdtest := Runner.gdtest_program()
-	var saved := _saves.keys()
+	var saved := _saves.duplicate()
 	_saves.clear()
+	var found := {}
+	if saved.size() > MAX_ASKED:
+		_on_affected(1, saved, found)
+		return
+	var options := PackedStringArray(["--list"])
 	for path: String in saved:
-		var found := {}
-		var options := PackedStringArray(["--list", "--affected-by", path])
-		var args: PackedStringArray = _dock.gdtest_args(
-			options, PackedStringArray([_dock.test_folder])
-		)
-		var on_line := func(line: String) -> void: _dock.add_listed(line, found)
-		if gdtest == "" or _dock.runner.stream(
-			gdtest, args, on_line, _on_affected.bind(path, found)
-		) < 0:
-			_on_affected(1, path, found)
+		options.append_array(["--affected-by", path])
+	var args: PackedStringArray = _dock.gdtest_args(
+		options, PackedStringArray([_dock.test_folder])
+	)
+	var on_line := func(line: String) -> void: _dock.add_listed(line, found)
+	if gdtest == "" or _dock.runner.stream(
+		gdtest, args, on_line, _on_affected.bind(saved, found)
+	) < 0:
+		_on_affected(1, saved, found)
 
 
-## gdtest listed the tests `path` affects in `found`: file -> [test name].
-func _on_affected(code: int, path: String, found: Dictionary) -> void:
+## gdtest listed the tests the `saved` files affect in `found`: file -> [test
+## name]. `saved`: path -> whether its tests may run again.
+func _on_affected(code: int, saved: Dictionary, found: Dictionary) -> void:
 	if code != 0 and found.is_empty():
-		# A gdtest older than --affected-by: a test script affects its own
-		# tests, any other file every test.
+		# Too many files, or a gdtest older than --affected-by: a test script
+		# affects its own tests, any other file every test.
 		var tests: Dictionary = _dock.test_files()
+		var any_other := saved.size() > MAX_ASKED or saved.keys().any(
+			func(path: String) -> bool: return not tests.has(path)
+		)
 		for file: String in tests:
-			if file == path or not tests.has(path):
+			if any_other or saved.has(file):
 				found[file] = tests[file]
 	if found.is_empty():
-		return
-	_stale_by[path] = _dock.mark_stale(found)
-	if not enabled:
+		# No test to run again: the tests are up to date, as before the save.
 		_dock.results_changed.emit()
 		return
-	_waiting[path] = found
+	var stale: Array = _dock.mark_stale(found)
+	for path: String in saved:
+		_stale_by[path] = stale
+	var to_run := saved.keys().filter(func(path: String) -> bool: return saved[path])
+	if not enabled or to_run.is_empty():
+		_dock.results_changed.emit()
+		return
+	for path: String in to_run:
+		_waiting[path] = found
 	run_waiting()
 
 
